@@ -758,6 +758,23 @@ Ingestion, search, the dashboards and the report all continue exactly as normal.
 permanently offline server does not log an error every three hours — the staleness warning
 in the panel is the signal.
 
+An update and a sweep are **mutually exclusive**, and the exclusion runs in both
+directions. Installing a database means deleting the old file, and a sweep holds that file
+open through the grype process it spawns. On Windows the unlink then fails — and it fails
+*after* grype has removed `import.json`, so a working installation is left
+present-but-invalid by an update that never landed. POSIX unlink-while-open hides the
+symptom, but a sweep matching against a file being swapped underneath it would attribute
+its findings to the wrong database build, so both orderings are refused everywhere:
+`outcome: "busy"`, nothing written to the history table, and the scheduler retries on its
+next tick. See `packages/api/test/unit/vuln-db-exclusion.test.ts`.
+
+Installing by hand, for a host with no route to the listing at all: fetch
+`latest.json`, take its **`path`** field — a filename, not a link — prepend the base URL,
+and upload the `.tar.zst` under **Admin → Vulnerability scanning**. The upload ceiling is
+`GRYPE_DB_MAX_UPLOAD_BYTES` (1 GiB), deliberately separate from `INGEST_MAX_SBOM_BYTES`:
+they differ by more than an order of magnitude, and sharing one limit meant tightening the
+ingest limit silently broke the only install path an air-gapped deployment has.
+
 Anchore rebuilds roughly daily, so a 3-hour check is a small listing request that usually
 transfers nothing, not eight 141 MB downloads a day.
 

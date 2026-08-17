@@ -155,6 +155,22 @@ const envSchema = z
     /** Reachability probe timeout. Short: this only answers "is there a route at all". */
     GRYPE_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(500).default(8_000),
 
+    /**
+     * Upload ceiling for a hand-uploaded database archive.
+     *
+     * Deliberately separate from INGEST_MAX_SBOM_BYTES. These differ by more than an
+     * order of magnitude — an SBOM is a JSON document, this is a compressed database
+     * currently around 145 MB and growing with every year of published advisories — and
+     * sharing one limit means the air-gapped install path breaks the moment someone
+     * tightens the ingest limit, in the one deployment that has no other way to get a
+     * database. 1 GiB leaves years of upstream growth.
+     */
+    GRYPE_DB_MAX_UPLOAD_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1024 * 1024)
+      .default(1024 * 1024 * 1024),
+
     /** Comma-separated extra origins allowed to send credentialed requests. */
     CORS_ORIGINS: z
       .string()

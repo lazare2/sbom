@@ -73,14 +73,63 @@ export interface UpdateAttemptResult {
 }
 
 export class VulnDbService {
+  /**
+   * True while grype is replacing the database on disk.
+   *
+   * Read by the sweep, which must not start a match run into a database that is about
+   * to be deleted from under it. The `claim` row below already prevents two concurrent
+   * updates; this is the other half of the exclusion, against scans.
+   */
+  private replacing = false;
+
   constructor(
     private readonly deps: {
       db: Database;
       config: Config;
       scanner: VulnerabilityScanner;
       settings: SettingsService;
+      /**
+       * Whether a scan is currently holding the database open.
+       *
+       * Installing a database means deleting the old file, and on Windows a file with an
+       * open handle cannot be unlinked — grype's purge fails with "being used by another
+       * process", and it fails *after* removing import.json, which leaves a database
+       * that is present but unreadable. That is worse than not updating at all: a
+       * previously working installation becomes invalid because an update was attempted
+       * at an unlucky moment.
+       *
+       * POSIX unlink-while-open would let this succeed, so the Linux container never
+       * showed it — but even there a sweep would go on matching against a file being
+       * swapped underneath it and attribute the results to the wrong database build.
+       * Worth excluding on every platform, not just the one that reports it.
+       */
+      scanBusy: () => boolean;
     },
   ) {}
+
+  /** @see replacing */
+  get replacingDatabase(): boolean {
+    return this.replacing;
+  }
+
+  /**
+   * Refuses a replacement while a scan holds the database open.
+   *
+   * Reported as `busy` and deliberately not written to the history table: nothing was
+   * attempted, so recording a failure would put a red row in the admin panel for a
+   * transient collision that resolves itself. Scheduled updates retry on the next tick.
+   */
+  private scanBusyResult(action: string): UpdateAttemptResult | null {
+    if (!this.deps.scanBusy()) return null;
+    return {
+      outcome: "busy",
+      message:
+        `A vulnerability sweep is in progress, so the database cannot be ${action} yet. ` +
+        "It holds the database open; retry once the sweep finishes.",
+      attempt: null,
+      databaseChanged: false,
+    };
+  }
 
   // -------------------------------------------------------------------------
   // Status
@@ -347,6 +396,9 @@ export class VulnDbService {
       };
     }
 
+    const busy = this.scanBusyResult("updated");
+    if (busy) return busy;
+
     const id = await this.claim(trigger, actor);
     if (id === null) {
       return {
@@ -357,6 +409,7 @@ export class VulnDbService {
       };
     }
 
+    this.replacing = true;
     try {
       const result = await this.deps.scanner.updateDb();
       const attempt = await this.finish(id, result);
@@ -380,6 +433,8 @@ export class VulnDbService {
         sourceUrl: null,
       });
       return { outcome: "failed", message, attempt, databaseChanged: false };
+    } finally {
+      this.replacing = false;
     }
   }
 
@@ -395,6 +450,9 @@ export class VulnDbService {
       };
     }
 
+    const busy = this.scanBusyResult("imported");
+    if (busy) return busy;
+
     const id = await this.claim("import", actor);
     if (id === null) {
       return {
@@ -405,6 +463,7 @@ export class VulnDbService {
       };
     }
 
+    this.replacing = true;
     try {
       const result = await this.deps.scanner.importDb(archivePath);
       const attempt = await this.finish(id, result);
@@ -425,6 +484,8 @@ export class VulnDbService {
         sourceUrl: archivePath,
       });
       return { outcome: "failed", message, attempt, databaseChanged: false };
+    } finally {
+      this.replacing = false;
     }
   }
 }

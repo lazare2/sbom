@@ -179,9 +179,21 @@ and upload that file through the admin panel — no host paths or container shel
 
 ```sh
 curl -s https://grype.anchore.io/databases/v6/latest.json
-# then download the "url" it reports, e.g.
-curl -LO https://grype.anchore.io/databases/v6/vulnerability-db_v6_<date>_<build>.tar.zst
+# {"status":"active","schemaVersion":"v6.1.9","built":"...",
+#  "path":"vulnerability-db_v6.1.9_2026-08-17T00-15-33Z_1786947573.tar.zst","checksum":"sha256:..."}
 ```
+
+The field is **`path`**, and it is a filename rather than a link — prepend the base URL
+yourself:
+
+```sh
+curl -LO "https://grype.anchore.io/databases/v6/$(curl -s https://grype.anchore.io/databases/v6/latest.json | jq -r .path)"
+```
+
+Upload the `.tar.zst` exactly as downloaded — do not decompress it, and do not worry if
+the browser rewrites the colons in the filename, which Windows requires. The archive is
+~145 MB; `GRYPE_DB_MAX_UPLOAD_BYTES` caps the upload at 1 GiB by default, which is
+separate from the SBOM ingest limit so tightening one cannot break the other.
 
 Then tick **Enable vulnerability scanning**. Every package already in the platform is
 matched in the background — historical builds included — and the dashboards gain the

@@ -133,8 +133,29 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   // fake and never spawn grype.
   const scanner = overrides.scanner ?? createScanner(config);
   const vulnerabilities = new VulnerabilityService({ db });
-  const vulnDb = new VulnDbService({ db, config, scanner, settings });
-  const sweep = new SweepService({ db, config, scanner, settings, logger });
+  /*
+    These two guard each other: a database may not be replaced while a sweep holds it
+    open, and a sweep may not start while it is being replaced. The references are
+    mutual, so they are passed as thunks rather than as the objects — each body runs long
+    after both constructors have returned, which is what keeps the cycle harmless.
+  */
+  const vulnDb = new VulnDbService({
+    db,
+    config,
+    scanner,
+    settings,
+    // Annotated: without an explicit return type TypeScript tries to infer it through
+    // the mutual reference and gives up with TS7022.
+    scanBusy: (): boolean => sweep.isRunning,
+  });
+  const sweep = new SweepService({
+    db,
+    config,
+    scanner,
+    settings,
+    logger,
+    dbReplacing: (): boolean => vulnDb.replacingDatabase,
+  });
   const vulnWorker = new VulnWorker({ settings, vulnDb, sweep, logger });
 
   // Write side.

@@ -1,6 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
@@ -153,32 +155,64 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const actor = actorOf(request);
-      let archive: Buffer | undefined;
-      let filename: string | undefined;
+      const dir = await mkdtemp(path.join(tmpdir(), "sbom-grype-db-"));
 
-      for await (const part of request.parts()) {
-        if (part.type === "file") {
-          if (part.fieldname === "database" && archive === undefined) {
-            archive = await part.toBuffer();
+      try {
+        let archivePath: string | undefined;
+        let filename: string | undefined;
+        let bytes = 0;
+
+        /*
+          The per-request limit overrides the global multipart one, which is sized for
+          SBOMs (INGEST_MAX_SBOM_BYTES, 64 MiB by default) and rejects a ~145 MB database
+          archive outright. Without this the air-gapped install path cannot accept the
+          only file it exists to accept.
+        */
+        for await (const part of request.parts({
+          limits: { fileSize: config.GRYPE_DB_MAX_UPLOAD_BYTES },
+        })) {
+          if (part.type !== "file") continue;
+
+          if (part.fieldname === "database" && archivePath === undefined) {
             filename = part.filename;
+            /*
+              Streamed to disk rather than buffered. `toBuffer()` would hold the whole
+              archive in memory — 145 MB today, and up to GRYPE_DB_MAX_UPLOAD_BYTES if
+              someone uploads the wrong file — on a container whose normal working set is
+              a few tens of MB. `pipeline` also propagates the multipart plugin's
+              file-size error instead of silently truncating.
+            */
+            archivePath = path.join(
+              dir,
+              part.filename?.replace(/[^A-Za-z0-9._-]+/g, "_") || "vulnerability-db.tar.zst",
+            );
+            await pipeline(part.file, createWriteStream(archivePath));
+
+            /*
+              `truncated` is how @fastify/multipart reports hitting the limit: the stream
+              ends normally and the flag is set afterwards. Not checking it would import a
+              half-written archive and report grype's confusing decompression error rather
+              than the size problem that caused it.
+            */
+            if (part.file.truncated) {
+              throw new BadRequestError(
+                `The uploaded archive exceeds the ${Math.floor(config.GRYPE_DB_MAX_UPLOAD_BYTES / (1024 * 1024))} MB limit ` +
+                  "(GRYPE_DB_MAX_UPLOAD_BYTES). Check you uploaded the .tar.zst database archive and not something larger.",
+              );
+            }
+            bytes = (await stat(archivePath)).size;
           } else {
             // Every file stream must be drained or the request never completes.
             await part.toBuffer();
           }
         }
-      }
 
-      if (archive === undefined || archive.length === 0) {
-        throw new BadRequestError(
-          "Missing `database` file part. Download the archive from the URL shown above and upload it here.",
-        );
-      }
+        if (archivePath === undefined || bytes === 0) {
+          throw new BadRequestError(
+            "Missing `database` file part. Download the archive from the URL shown above and upload it here.",
+          );
+        }
 
-      const dir = await mkdtemp(path.join(tmpdir(), "sbom-grype-db-"));
-      const archivePath = path.join(dir, filename?.replace(/[^A-Za-z0-9._-]+/g, "_") ?? "vulnerability-db.tar.zst");
-
-      try {
-        await writeFile(archivePath, archive);
         const result = await vulnDb.importArchive(archivePath, actor);
 
         await audit.record({
@@ -186,7 +220,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
           action: "vuln.db_import",
           targetType: "setting",
           targetId: "vuln",
-          metadata: { outcome: result.outcome, message: result.message, filename: filename ?? null, bytes: archive.length },
+          metadata: { outcome: result.outcome, message: result.message, filename: filename ?? null, bytes },
         });
 
         if (result.databaseChanged) vulnWorker.requestSweepAfterDbChange();

@@ -73,6 +73,15 @@ export class SweepService {
       scanner: VulnerabilityScanner;
       settings: SettingsService;
       logger: Logger;
+      /**
+       * Whether a database replacement is in flight.
+       *
+       * The mirror of VulnDbService's `scanBusy`: that stops an update starting while a
+       * sweep holds the database open, this stops a sweep starting while the file is
+       * being swapped. Both directions are needed — without this one the collision just
+       * moves to the other ordering.
+       */
+      dbReplacing: () => boolean;
     },
   ) {}
 
@@ -97,6 +106,24 @@ export class SweepService {
 
     if (this.running) {
       return { ...empty, status: "already-running", message: "A sweep is already running.", remaining: 0 };
+    }
+
+    /*
+      Reuses the `already-running` status rather than adding a case every consumer would
+      have to learn: to every caller this is the same situation — come back later, nothing
+      is wrong. The message carries the distinction for anyone reading it.
+
+      Deliberately after the re-entrancy check and before the enabled check, so the
+      cheapest guards stay first and no work is done on behalf of a sweep that will not
+      run.
+    */
+    if (this.deps.dbReplacing()) {
+      return {
+        ...empty,
+        status: "already-running",
+        message: "The vulnerability database is being replaced. The sweep will run once it is installed.",
+        remaining: 0,
+      };
     }
 
     if (!(await this.deps.settings.vulnScanningEnabled())) {
