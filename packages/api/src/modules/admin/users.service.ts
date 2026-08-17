@@ -7,16 +7,50 @@ import type {
   UpdateUserRequest,
   UserCredentialResponse,
   UserSummary,
+  SortDirection,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { user } from "../../db/schema.js";
 import { generatePassword } from "../../lib/crypto.js";
 import { BadRequestError, ConflictError, isPgError, NotFoundError, PG_UNIQUE_VIOLATION } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
+import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
 import { hashPassword } from "../auth/password.js";
 import type { SessionService } from "../auth/session.service.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 import type { Actor, AuditService } from "./audit.service.js";
+
+/**
+ * Sort clause for the admin users table.
+ *
+ * `u.id` is the unique tail. Email is unique in the database, but only case-insensitively
+ * via an index — `lower(u.email)` is not itself declared unique, so it is not safe to rely
+ * on as a total order.
+ */
+function userOrderBy(sortBy: ListUsersQuery["sortBy"], dir: SortDirection): SQL {
+  const dir_ = direction(dir);
+  const byEmail = sql`lower(u.email) ASC`;
+
+  switch (sortBy) {
+    case "createdAt":
+      return orderBy([sql`u.created_at ${dir_}`, byEmail], sql`u.id`);
+    case "lastLoginAt":
+      // NULLS LAST both ways: never-logged-in is the absence of a login, not the oldest one.
+      return orderBy([sql`u.last_login_at ${directionNullsLast(dir)}`, byEmail], sql`u.id`);
+    case "role":
+      return orderBy([sql`u.role ${dir_}`, byEmail], sql`u.id`);
+    case "isActive":
+      return orderBy([sql`u.is_active ${dir_}`, byEmail], sql`u.id`);
+    case "activeSessions":
+      return orderBy(
+        [sql`(SELECT count(*) FROM session s WHERE s.user_id = u.id AND s.expires_at > now()) ${dir_}`, byEmail],
+        sql`u.id`,
+      );
+    case "email":
+    default:
+      return orderBy([sql`lower(u.email) ${dir_}`], sql`u.id`);
+  }
+}
 
 /**
  * Admin user management.
@@ -47,18 +81,6 @@ export class AdminUsersService {
     if (query.role) conditions.push(sql`u.role = ${query.role}`);
     if (query.isActive !== undefined) conditions.push(sql`u.is_active = ${query.isActive}`);
 
-    const direction = query.sortDir === "desc" ? sql.raw("DESC") : sql.raw("ASC");
-    const orderBy =
-      query.sortBy === "createdAt"
-        ? sql`ORDER BY u.created_at ${direction}, lower(u.email) ASC`
-        : query.sortBy === "lastLoginAt"
-          ? // NULLS LAST both ways: never-logged-in is the absence of a login,
-            // not the oldest one.
-            sql`ORDER BY u.last_login_at ${direction} NULLS LAST, lower(u.email) ASC`
-          : query.sortBy === "role"
-            ? sql`ORDER BY u.role ${direction}, lower(u.email) ASC`
-            : sql`ORDER BY lower(u.email) ${direction}`;
-
     const rows = await this.deps.db.execute<Row<UserQueryRow>>(sql`
       SELECT
         u.id, u.email, u.role, u.auth_provider, u.is_active,
@@ -70,7 +92,7 @@ export class AdminUsersService {
         count(*) OVER () AS total
       FROM "user" u
       WHERE ${sql.join(conditions, sql` AND `)}
-      ${orderBy}
+      ${userOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
 

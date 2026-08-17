@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
+import type { SortDirection } from "@sbom/shared";
+import { componentListSort, removedComponentSort, scanHistorySort } from "@sbom/shared";
+import { useServerSort } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import {
   useApplication,
@@ -23,6 +26,7 @@ import {
   FindingsCard,
   FindingsTable,
   findingsParams,
+  useFindingsSort,
   type FindingsFilters,
 } from "../components/Findings.tsx";
 import { ScanningDisabledNotice } from "../components/Severity.tsx";
@@ -53,15 +57,21 @@ import {
 } from "../components/ui.tsx";
 
 const TABS = ["components", "history", "removed", "changes", "vulnerabilities"] as const;
-const COMPONENT_SORTS = ["name", "version", "ecosystem"] as const;
+const COMPONENT_SORTS = componentListSort.fields;
 const DIRECTIONS = ["asc", "desc"] as const;
 
 const DEFAULTS = {
   tab: "components" as (typeof TABS)[number],
   q: "",
   ecosystem: "",
-  sortBy: "name" as (typeof COMPONENT_SORTS)[number],
-  sortDir: "asc" as "asc" | "desc",
+  sortBy: componentListSort.defaultField,
+  sortDir: componentListSort.defaultDirection,
+  /** Removed-components table: its own sort, so switching tabs does not carry one onto the other. */
+  removedSortBy: removedComponentSort.defaultField,
+  removedSortDir: removedComponentSort.defaultDirection,
+  /** Scan history table. */
+  scanSortBy: scanHistorySort.defaultField,
+  scanSortDir: scanHistorySort.defaultDirection,
   page: 1,
   historyPage: 1,
   removedPage: 1,
@@ -74,8 +84,12 @@ const urlSpec = {
     tab: readEnum(params, "tab", TABS, "components"),
     q: readString(params, "q"),
     ecosystem: readString(params, "ecosystem"),
-    sortBy: readEnum(params, "sortBy", COMPONENT_SORTS, "name"),
-    sortDir: readEnum(params, "sortDir", DIRECTIONS, "asc"),
+    sortBy: readEnum(params, "sortBy", COMPONENT_SORTS, componentListSort.defaultField),
+    sortDir: readEnum(params, "sortDir", DIRECTIONS, componentListSort.defaultDirection),
+    removedSortBy: readEnum(params, "removedSortBy", removedComponentSort.fields, removedComponentSort.defaultField),
+    removedSortDir: readEnum(params, "removedSortDir", DIRECTIONS, removedComponentSort.defaultDirection),
+    scanSortBy: readEnum(params, "scanSortBy", scanHistorySort.fields, scanHistorySort.defaultField),
+    scanSortDir: readEnum(params, "scanSortDir", DIRECTIONS, scanHistorySort.defaultDirection),
     page: readNumber(params, "page", 1),
     historyPage: readNumber(params, "historyPage", 1),
     removedPage: readNumber(params, "removedPage", 1),
@@ -265,6 +279,8 @@ export function ApplicationDetailPage() {
           applicationId={app.id}
           applicationName={app.name}
           page={state.historyPage}
+          sortBy={state.scanSortBy}
+          sortDir={state.scanSortDir}
           setState={setState}
         />
       )}
@@ -331,12 +347,7 @@ function ComponentsTab({
   const { data, isLoading, isFetching, error, refetch } = useApplicationComponents(applicationId, params);
   const { data: ecosystems } = useApplicationEcosystems(applicationId);
 
-  function sortBy(field: (typeof COMPONENT_SORTS)[number]) {
-    if (state.sortBy === field) setState({ sortDir: state.sortDir === "asc" ? "desc" : "asc" });
-    else setState({ sortBy: field, sortDir: "asc" });
-  }
-  const sorted = (field: (typeof COMPONENT_SORTS)[number]) =>
-    state.sortBy === field ? state.sortDir : false;
+  const sort = useServerSort(componentListSort, state, setState);
 
   if (!hasScan) {
     return (
@@ -392,16 +403,18 @@ function ComponentsTab({
               <Table>
                 <thead>
                   <tr>
-                    <Th onSort={() => sortBy("name")} sorted={sorted("name")}>
+                    <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
                       Package
                     </Th>
-                    <Th onSort={() => sortBy("version")} sorted={sorted("version")} width="180px">
+                    <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")} width="180px">
                       Version
                     </Th>
-                    <Th onSort={() => sortBy("ecosystem")} sorted={sorted("ecosystem")} width="120px">
+                    <Th onSort={() => sort.toggle("ecosystem")} sorted={sort.stateOf("ecosystem")} width="120px">
                       Ecosystem
                     </Th>
-                    <Th>Package URL</Th>
+                    <Th onSort={() => sort.toggle("purl")} sorted={sort.stateOf("purl")}>
+                      Package URL
+                    </Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -501,13 +514,29 @@ function RemovedTab({
     () => ({
       search: debounced || undefined,
       ignoreVersion: state.ignoreVersion ? "true" : undefined,
+      sortBy: state.removedSortBy,
+      sortDir: state.removedSortDir,
       page: state.removedPage,
       pageSize: 50,
     }),
-    [debounced, state.ignoreVersion, state.removedPage],
+    [debounced, state.ignoreVersion, state.removedSortBy, state.removedSortDir, state.removedPage],
   );
 
   const { data, isLoading, isFetching, error, refetch } = useRemovedComponents(applicationId, params);
+  /*
+    Its own sort keys in the URL (`removedSortBy`), not shared with the current-components
+    table. The two tables are on sibling tabs with different columns, and one shared key
+    would mean opening this tab silently re-sorted the other.
+  */
+  const sort = useServerSort(
+    removedComponentSort,
+    { sortBy: state.removedSortBy, sortDir: state.removedSortDir },
+    (patch) =>
+      setState({
+        ...(patch.sortBy ? { removedSortBy: patch.sortBy } : {}),
+        ...(patch.sortDir ? { removedSortDir: patch.sortDir } : {}),
+      }),
+  );
 
   return (
     <>
@@ -562,11 +591,21 @@ function RemovedTab({
               <Table>
                 <thead>
                   <tr>
-                    <Th>Package</Th>
-                    <Th width="180px">Version</Th>
-                    <Th width="120px">Ecosystem</Th>
-                    <Th width="220px">Last seen in</Th>
-                    <Th>Package URL</Th>
+                    <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                      Package
+                    </Th>
+                    <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")} width="180px">
+                      Version
+                    </Th>
+                    <Th onSort={() => sort.toggle("ecosystem")} sorted={sort.stateOf("ecosystem")} width="120px">
+                      Ecosystem
+                    </Th>
+                    <Th onSort={() => sort.toggle("lastSeenAt")} sorted={sort.stateOf("lastSeenAt")} width="220px">
+                      Last seen in
+                    </Th>
+                    <Th onSort={() => sort.toggle("purl")} sorted={sort.stateOf("purl")}>
+                      Package URL
+                    </Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -627,6 +666,7 @@ function VulnerabilitiesTab({
 }) {
   const [filters, setFilters] = useState<FindingsFilters>(DEFAULT_FINDINGS_FILTERS);
   const params = useMemo(() => findingsParams(filters), [filters]);
+  const findingsSort = useFindingsSort(filters, (patch) => setFilters((f) => ({ ...f, ...patch })));
   const { data, isLoading, isFetching, error, refetch } = useApplicationVulnerabilities(
     applicationId,
     params,
@@ -646,6 +686,7 @@ function VulnerabilitiesTab({
       >
         {data ? <BreakdownTiles breakdown={data.breakdown} /> : null}
         <FindingsTable
+          sort={findingsSort}
           data={data}
           isLoading={isLoading}
           isFetching={isFetching}
@@ -661,16 +702,29 @@ function HistoryTab({
   applicationId,
   applicationName,
   page,
+  sortBy,
+  sortDir,
   setState,
 }: {
   applicationId: string;
   applicationName: string;
   page: number;
+  sortBy: (typeof scanHistorySort)["fields"][number];
+  sortDir: SortDirection;
   setState: (patch: Partial<DetailState>) => void;
 }) {
-  const params = useMemo(() => ({ page, pageSize: 50, sortDir: "desc" as const }), [page]);
+  const params = useMemo(() => ({ page, pageSize: 50, sortBy, sortDir }), [page, sortBy, sortDir]);
   const { data, isLoading, isFetching, error, refetch } = useApplicationScans(applicationId, params);
   const [uploading, setUploading] = useState(false);
+  const sort = useServerSort(
+    scanHistorySort,
+    { sortBy, sortDir },
+    (patch) =>
+      setState({
+        ...(patch.sortBy ? { scanSortBy: patch.sortBy } : {}),
+        ...(patch.sortDir ? { scanSortDir: patch.sortDir } : {}),
+      }),
+  );
 
   return (
     <>
@@ -698,14 +752,30 @@ function HistoryTab({
               <Table>
                 <thead>
                   <tr>
-                    <Th width="170px">Scanned</Th>
-                    <Th width="110px">Build</Th>
-                    <Th width="130px">Commit</Th>
-                    <Th width="160px">Branch</Th>
-                    <Th align="right" width="110px">
+                    <Th onSort={() => sort.toggle("scannedAt")} sorted={sort.stateOf("scannedAt")} width="170px">
+                      Scanned
+                    </Th>
+                    <Th onSort={() => sort.toggle("buildNumber")} sorted={sort.stateOf("buildNumber")} width="110px">
+                      Build
+                    </Th>
+                    <Th onSort={() => sort.toggle("commitSha")} sorted={sort.stateOf("commitSha")} width="130px">
+                      Commit
+                    </Th>
+                    <Th onSort={() => sort.toggle("branch")} sorted={sort.stateOf("branch")} width="160px">
+                      Branch
+                    </Th>
+                    <Th
+                      onSort={() => sort.toggle("componentCount")}
+                      sorted={sort.stateOf("componentCount")}
+                      align="right"
+                      width="110px"
+                    >
                       Components
                     </Th>
-                    <Th>Image</Th>
+                    <Th onSort={() => sort.toggle("imageRef")} sorted={sort.stateOf("imageRef")}>
+                      Image
+                    </Th>
+                    {/* Tool name and version as one cell; not a single orderable value. */}
                     <Th width="120px">Syft</Th>
                     <Th align="right" width="90px">
                       SBOM

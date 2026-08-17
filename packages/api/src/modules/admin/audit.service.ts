@@ -1,9 +1,36 @@
 import { sql, type SQL } from "drizzle-orm";
-import type { AuditLogEntry, ListAuditLogQuery, Paginated } from "@sbom/shared";
+import type { AuditLogEntry, ListAuditLogQuery, Paginated, SortDirection } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { auditLog } from "../../db/schema.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
+import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
+
+/**
+ * Sort clause for the audit trail.
+ *
+ * Every branch keeps `al.created_at DESC` as its secondary key so that within one actor or
+ * one action the entries still read newest-first, which is the only order an audit trail
+ * is useful in. `al.id` is the unique tail — bulk operations write many rows inside one
+ * transaction and they share a timestamp exactly.
+ */
+function auditOrderBy(sortBy: ListAuditLogQuery["sortBy"], dir: SortDirection): SQL {
+  const dir_ = direction(dir);
+  const byNewest = sql`al.created_at DESC`;
+
+  switch (sortBy) {
+    case "actorEmail":
+      // NULLS LAST: a null actor is the system acting, not an empty name.
+      return orderBy([sql`al.actor_email ${directionNullsLast(dir)}`, byNewest], sql`al.id`);
+    case "action":
+      return orderBy([sql`al.action ${dir_}`, byNewest], sql`al.id`);
+    case "targetType":
+      return orderBy([sql`al.target_type ${dir_}`, byNewest], sql`al.id`);
+    case "createdAt":
+    default:
+      return orderBy([sql`al.created_at ${dir_}`], sql`al.id`);
+  }
+}
 
 /** The actor behind a write. Denormalised into the row so the trail survives account deletion. */
 export interface Actor {
@@ -64,7 +91,7 @@ export class AuditService {
         count(*) OVER () AS total
       FROM audit_log al
       WHERE ${sql.join(conditions, sql` AND `)}
-      ORDER BY al.created_at DESC, al.id DESC
+      ${auditOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
 

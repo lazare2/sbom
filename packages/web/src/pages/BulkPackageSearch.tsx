@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { BULK_SEARCH_MAX_ENTRIES, type BulkRollupRow } from "@sbom/shared";
+import {
+  BULK_MATCH_CAP_PER_ENTRY,
+  BULK_SEARCH_MAX_ENTRIES,
+  componentSearchSort,
+  sortDirections,
+  type BulkRollupRow,
+  type NameMatchMode,
+} from "@sbom/shared";
+import { useClientSort, useServerSort } from "../lib/useSort.ts";
 import { ComponentHitsTable } from "../components/ComponentHitsTable.tsx";
 import { formatNumber, formatRelative } from "../lib/format.ts";
 import { useSubmitPackageList } from "../lib/mutations.ts";
@@ -60,12 +68,28 @@ const PLACEHOLDER = `logaas
 cnapp-ui
 keyv@6.0.0`;
 
+const MATCHES = ["exact", "contains"] as const;
+const SORT_FIELDS = componentSearchSort.fields;
+
 const urlSpec = {
-  defaults: { scope: "current" as const, view: "rollup" as const, includeInactive: false, page: 1 },
+  defaults: {
+    scope: "current" as const,
+    view: "rollup" as const,
+    includeInactive: false,
+    // Exact by default, the opposite of the single search. A pasted list is an audit:
+    // 200 names in, 200 verdicts out. See bulkOptionsSchema for the full reasoning.
+    match: "exact" as (typeof MATCHES)[number],
+    sortBy: componentSearchSort.defaultField,
+    sortDir: componentSearchSort.defaultDirection,
+    page: 1,
+  },
   parse: (params: URLSearchParams) => ({
     scope: readEnum(params, "scope", SCOPES, "current"),
     view: readEnum(params, "view", VIEWS, "rollup"),
     includeInactive: readBool(params, "includeInactive"),
+    match: readEnum(params, "match", MATCHES, "exact"),
+    sortBy: readEnum(params, "sortBy", SORT_FIELDS, componentSearchSort.defaultField),
+    sortDir: readEnum(params, "sortDir", sortDirections, componentSearchSort.defaultDirection),
     page: readNumber(params, "page", 1),
   }),
 };
@@ -79,6 +103,8 @@ export function BulkPackageSearch() {
   const [text, setText] = useState("");
   const submit = useSubmitPackageList();
   const query = useBulkSearch(id, options);
+  // Server-side: the matches view is paginated at 100 rows.
+  const sort = useServerSort(componentSearchSort, state, setState);
   const recent = useRecentPackageLists();
 
   // Repopulate the box from a shared link, including the lines that failed to
@@ -163,6 +189,11 @@ export function BulkPackageSearch() {
             |
           </span>
           <Checkbox
+            checked={state.match === "exact"}
+            onChange={(v) => setState({ match: v ? "exact" : "contains" })}
+            label="Exact name match"
+          />
+          <Checkbox
             checked={state.includeInactive}
             onChange={(v) => setState({ includeInactive: v })}
             label="Include inactive applications"
@@ -177,7 +208,10 @@ export function BulkPackageSearch() {
         <p className="border-t border-border-base px-3 py-2 text-[11px] text-text-faint">
           Usage narrows which applications are listed. Whether a package exists at all is always
           reported against the full retained history, so “not found” means never seen — not merely
-          absent today.
+          absent today.{" "}
+          {state.match === "exact"
+            ? "Each line matches one package, by exact name."
+            : `Each line matches every package whose name contains it, up to ${BULK_MATCH_CAP_PER_ENTRY} per line.`}
         </p>
       </Card>
 
@@ -276,7 +310,7 @@ export function BulkPackageSearch() {
             />
 
             {state.view === "rollup" ? (
-              <RollupTable rows={result.rollup} />
+              <RollupTable rows={result.rollup} match={state.match} />
             ) : !result.matches || result.matches.items.length === 0 ? (
               <EmptyState
                 title="No matches"
@@ -288,7 +322,7 @@ export function BulkPackageSearch() {
               />
             ) : (
               <>
-                <ComponentHitsTable hits={result.matches.items} />
+                <ComponentHitsTable hits={result.matches.items} sort={sort} />
                 <Pagination
                   page={result.matches.page}
                   pageSize={result.matches.pageSize}
@@ -311,6 +345,9 @@ function urlParams(options: BulkSearchOptions): Record<string, string> {
   if (options.scope !== "current") params.scope = options.scope;
   if (options.view !== "rollup") params.view = options.view;
   if (options.includeInactive) params.includeInactive = "true";
+  if (options.match !== "exact") params.match = options.match;
+  if (options.sortBy !== componentSearchSort.defaultField) params.sortBy = options.sortBy;
+  if (options.sortDir !== componentSearchSort.defaultDirection) params.sortDir = options.sortDir;
   return params;
 }
 
@@ -411,7 +448,51 @@ type BulkRollupResultParse = {
  * found": for an advisory audit, *we have this package but not the version named*
  * is a different and far more interesting answer than *we do not have it*.
  */
-function RollupTable({ rows }: { rows: readonly BulkRollupRow[] }) {
+/*
+  Defaults to `line` ascending — the order the list was pasted in. That is the whole point
+  of the rollup: someone checking their own 200-line list against the results should be able
+  to read down both in step. Any other default would break that on first load, so the other
+  orders are available but never assumed.
+*/
+const ROLLUP_COLUMNS = {
+  line: "number",
+  package: "text",
+  versionAsked: "text",
+  result: "text",
+  currentApplications: "number",
+  historicalApplications: "number",
+} as const;
+
+function RollupTable({ rows, match }: { rows: readonly BulkRollupRow[]; match: NameMatchMode }) {
+  const sort = useClientSort(
+    rows,
+    ROLLUP_COLUMNS,
+    { sortBy: "line", sortDir: "asc" },
+    (row, field) => {
+      switch (field) {
+        case "package":
+          return row.name;
+        case "versionAsked":
+          return row.version;
+        /*
+          Ranked so the interesting verdicts come first in the natural direction: a package
+          present at a different version is the answer an advisory audit is looking for, and
+          alphabetising "found" / "not found" / "other version" would scatter them.
+        */
+        case "result":
+          return row.found ? 3 : row.nameFound ? 2 : 1;
+        case "currentApplications":
+          return row.currentApplications;
+        case "historicalApplications":
+          return row.historicalApplications;
+        case "line":
+        default:
+          return row.line;
+      }
+    },
+    (row) => row.line,
+  );
+
   if (rows.length === 0) {
     return <EmptyState title="Nothing to search" hint="No line in the list parsed as a package." />;
   }
@@ -421,31 +502,52 @@ function RollupTable({ rows }: { rows: readonly BulkRollupRow[] }) {
       <Table>
         <thead>
           <tr>
-            <Th width="50px" align="right">
+            <Th onSort={() => sort.toggle("line")} sorted={sort.stateOf("line")} width="50px" align="right">
               #
             </Th>
-            <Th>Package</Th>
-            <Th width="150px">Version asked</Th>
-            <Th width="130px">Result</Th>
+            <Th onSort={() => sort.toggle("package")} sorted={sort.stateOf("package")}>
+              Package
+            </Th>
+            <Th onSort={() => sort.toggle("versionAsked")} sorted={sort.stateOf("versionAsked")} width="150px">
+              Version asked
+            </Th>
+            <Th onSort={() => sort.toggle("result")} sorted={sort.stateOf("result")} width="130px">
+              Result
+            </Th>
+            {/* A list of versions, not one orderable value. */}
             <Th>Versions present</Th>
             {/* Application counts, deliberately not reusing the verdict words. */}
-            <Th width="90px" align="right">
+            <Th
+              onSort={() => sort.toggle("currentApplications")}
+              sorted={sort.stateOf("currentApplications")}
+              width="90px"
+              align="right"
+            >
               Apps now
             </Th>
-            <Th width="110px" align="right">
+            <Th
+              onSort={() => sort.toggle("historicalApplications")}
+              sorted={sort.stateOf("historicalApplications")}
+              width="110px"
+              align="right"
+            >
               Apps dropped
             </Th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {sort.rows.map((row) => (
             <Tr key={row.line}>
               <Td align="right" className="nums text-xs text-text-faint">
                 {row.line}
               </Td>
               <Td>
+                {/*
+                  The link searches the term the way this row matched it, so following it
+                  cannot show a different set of packages than the row just claimed.
+                */}
                 <Link
-                  to={`/search?name=${encodeURIComponent(row.name)}&match=exact&scope=all`}
+                  to={`/search?name=${encodeURIComponent(row.name)}&match=${match}&scope=all`}
                   className="font-medium text-accent hover:underline"
                 >
                   {row.name}
@@ -455,6 +557,7 @@ function RollupTable({ rows }: { rows: readonly BulkRollupRow[] }) {
                     <EcosystemBadge ecosystem={eco} />
                   </span>
                 ))}
+                <MatchedNames row={row} />
               </Td>
               <Td>
                 {row.version === null ? (
@@ -503,6 +606,49 @@ function RollupTable({ rows }: { rows: readonly BulkRollupRow[] }) {
         </tbody>
       </Table>
     </TableWrap>
+  );
+}
+
+/**
+ * The packages one input line matched, when it matched more than one.
+ *
+ * Renders nothing in the ordinary case. `exact` mode matches a single name, and showing
+ * "1 package" next to that name on every row would be noise; the disclosure only earns its
+ * place when the count is the actual answer.
+ *
+ * A `<details>` rather than component state: the row is inside a table that can hold a
+ * thousand rows, and native disclosure keeps each one at zero React state while still being
+ * keyboard-operable and searchable by the browser's own find.
+ */
+function MatchedNames({ row }: { row: BulkRollupRow }) {
+  if (row.matchedNameCount <= 1) return null;
+
+  return (
+    <details className="mt-1">
+      <summary className="cursor-pointer text-[11px] text-text-muted hover:text-accent">
+        {formatNumber(row.matchedNameCount)}
+        {row.matchedNamesTruncated ? "+" : ""} packages matched
+        {row.matchedNamesTruncated ? (
+          <span
+            className="ml-1 text-warn"
+            title={`Stopped at ${BULK_MATCH_CAP_PER_ENTRY} packages for this line. Narrow the term, or search it on its own for the full list.`}
+          >
+            (partial)
+          </span>
+        ) : null}
+      </summary>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {row.matchedNames.map((name) => (
+          <Link
+            key={name}
+            to={`/search?name=${encodeURIComponent(name)}&match=exact&scope=all`}
+            className="rounded border border-border-base px-1.5 py-0.5 font-mono text-[11px] text-text-muted hover:border-accent hover:text-accent"
+          >
+            {name}
+          </Link>
+        ))}
+      </div>
+    </details>
   );
 }
 

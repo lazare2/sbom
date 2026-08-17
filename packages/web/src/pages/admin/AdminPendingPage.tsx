@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
-import type { ApplicationSummary, Attributes } from "@sbom/shared";
+import type { ApplicationSummary, Attributes, SortDirection } from "@sbom/shared";
+import { applicationSort } from "@sbom/shared";
+import { useServerSort } from "../../lib/useSort.ts";
 import { AttributeFields } from "../../components/AttributeFields.tsx";
 import { formatNumber, formatRelative } from "../../lib/format.ts";
 import {
@@ -46,11 +48,23 @@ export function AdminPendingPage() {
 
   const deleteApp = useDeleteApplication();
 
+  /*
+    Local sort state rather than the URL: this queue is a working screen reached from the
+    admin nav, not something anyone links to in a particular order.
+  */
+  const [sortBy, setSortBy] = useState<(typeof applicationSort)["fields"][number]>("lastScanAt");
+  const [sortDir, setSortDir] = useState<SortDirection>("desc");
+
   const pending = useApplications({
     status: ["pending_confirmation"],
-    sortBy: "lastScanAt",
-    sortDir: "desc",
+    sortBy,
+    sortDir,
     pageSize: 100,
+  });
+
+  const sort = useServerSort(applicationSort, { sortBy, sortDir }, (patch) => {
+    if (patch.sortBy) setSortBy(patch.sortBy);
+    if (patch.sortDir) setSortDir(patch.sortDir);
   });
 
   return (
@@ -83,11 +97,25 @@ export function AdminPendingPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>Name reported by CI</Th>
-                  <Th align="right">Scans</Th>
-                  <Th align="right">Packages</Th>
-                  <Th>First seen</Th>
-                  <Th>Last scan</Th>
+                  <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                    Name reported by CI
+                  </Th>
+                  <Th onSort={() => sort.toggle("scanCount")} sorted={sort.stateOf("scanCount")} align="right">
+                    Scans
+                  </Th>
+                  <Th
+                    onSort={() => sort.toggle("componentCount")}
+                    sorted={sort.stateOf("componentCount")}
+                    align="right"
+                  >
+                    Packages
+                  </Th>
+                  <Th onSort={() => sort.toggle("createdAt")} sorted={sort.stateOf("createdAt")}>
+                    First seen
+                  </Th>
+                  <Th onSort={() => sort.toggle("lastScanAt")} sorted={sort.stateOf("lastScanAt")}>
+                    Last scan
+                  </Th>
                   <Th />
                 </tr>
               </thead>

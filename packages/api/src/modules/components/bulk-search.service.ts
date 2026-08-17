@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type {
   BulkEntry,
   BulkRollupRow,
@@ -7,13 +7,50 @@ import type {
   BulkSearchSummary,
   ComponentSearchHit,
   SavedPackageList,
+  SortDirection,
 } from "@sbom/shared";
+import { BULK_MATCH_CAP_PER_ENTRY } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { sha256Hex } from "../../lib/crypto.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
+import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 import { matchKeyOf, parseBulkInput } from "./bulk-parse.js";
 import { NotFoundError } from "../../lib/errors.js";
+
+/**
+ * Sort clause for the flat matches table.
+ *
+ * The same columns as the single search, over the same row shape, but the aliases differ
+ * (`m`/`a` here against a `matched` CTE rather than the search's), so the clause is written
+ * out rather than shared. `(m.id, a.id)` is the unique tail — the DISTINCT ON key of
+ * `usage`, one row per output row.
+ */
+function bulkMatchesOrderBy(sortBy: BulkSearchQuery["sortBy"], dir: SortDirection): SQL {
+  const dir_ = direction(dir);
+  const nulls = directionNullsLast(dir);
+  const byPackage = sql`lower(m.name) ASC, m.version ASC NULLS LAST`;
+  const byApp = sql`lower(a.name) ASC`;
+  const unique = sql`m.id, a.id`;
+
+  switch (sortBy) {
+    case "applicationStatus":
+      return orderBy([sql`a.status ${dir_}`, byApp, byPackage], unique);
+    case "componentName":
+      return orderBy([sql`lower(m.name) ${dir_}`, sql`m.version ASC NULLS LAST`, byApp], unique);
+    case "componentVersion":
+      return orderBy([sql`m.version ${nulls}`, byPackage, byApp], unique);
+    case "ecosystem":
+      return orderBy([sql`m.ecosystem ${dir_}`, byPackage, byApp], unique);
+    case "usage":
+      return orderBy([sql`(u.last_seen_scan_id = a.latest_scan_id) ${dir_}`, byApp, byPackage], unique);
+    case "lastSeenAt":
+      return orderBy([sql`u.last_seen_at ${nulls}`, byApp, byPackage], unique);
+    case "applicationName":
+    default:
+      return orderBy([sql`lower(a.name) ${dir_}`, byPackage], unique);
+  }
+}
 
 /**
  * How many distinct versions of one package the rollup names before summarising.
@@ -23,6 +60,21 @@ import { NotFoundError } from "../../lib/errors.js";
  * there are more.
  */
 const VERSIONS_PER_ROW = 8;
+
+/**
+ * Escapes a term for use inside an `ILIKE '%' || … || '%'` pattern.
+ *
+ * Without this, a pasted name containing `%` or `_` becomes a wildcard: an entry of
+ * `foo_bar` would match `fooXbar`, and a stray `%` would match the entire component table
+ * while looking like an ordinary line in the input. Postgres treats backslash as the
+ * default LIKE escape, so the backslash itself has to be doubled first.
+ *
+ * Done in JS rather than SQL so the pattern is a plain bound parameter and the arrays stay
+ * as they are — the whole query is still four parameters.
+ */
+export function escapeLikeTerm(term: string): string {
+  return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
 
 /**
  * Bulk package search.
@@ -38,12 +90,53 @@ const VERSIONS_PER_ROW = 8;
  *     the point of the feature: if three of forty packages are present, the answer
  *     is mostly about the other thirty-seven.
  *
- * Name matching is exact and case-insensitive, which means this needs no
- * equivalent of the single search's `MATCH_CAP` — an exact match cannot blow up
- * the way a two-character substring can. The bound moved to the input line count.
+ * Name matching defaults to exact and case-insensitive, which is what let the original
+ * query stay bounded by the input line count alone — an exact match cannot blow up the way
+ * a two-character substring can, so no equivalent of the single search's `MATCH_CAP` was
+ * needed. `match=contains` removes that guarantee, and pays for it with
+ * BULK_MATCH_CAP_PER_ENTRY: a `dense_rank()` window per input line, so one broad entry
+ * degrades its own row and reports that it did, rather than consuming a shared budget and
+ * making every other line look absent.
  */
 export class BulkSearchService {
   constructor(private readonly deps: { db: Database }) {}
+
+  /**
+   * The name-match predicate, and the per-line cap that has to accompany it.
+   *
+   * Returned together because they are one decision: substring matching without the cap is
+   * the unbounded query this service was originally written to avoid, and the cap without
+   * substring matching would silently truncate version lists that exact mode is supposed
+   * to return whole.
+   */
+  private nameMatch(query: BulkSearchQuery): { condition: (nameKey: SQL) => SQL; cap: number | null } {
+    if (query.match === "contains") {
+      return {
+        condition: (nameKey) => sql`c.name ILIKE '%' || ${nameKey} || '%'`,
+        cap: BULK_MATCH_CAP_PER_ENTRY,
+      };
+    }
+    return {
+      // Served by component_name_lower_idx: one index probe per entry rather than a scan.
+      condition: (nameKey) => sql`lower(c.name) = ${nameKey}`,
+      // No cap: exact mode must keep returning every version of a name, which is what
+      // `versionsFound` reports and what makes a version miss explainable.
+      cap: null,
+    };
+  }
+
+  /**
+   * The name keys to bind, prepared for whichever comparison is in play.
+   *
+   * Lowercased for the exact path because it compares against `lower(c.name)`; escaped for
+   * the contains path because it becomes a LIKE pattern. Keeping both in one place is what
+   * stops an unescaped term reaching a pattern.
+   */
+  private nameKeys(entries: readonly BulkEntry[], query: BulkSearchQuery): string[] {
+    return entries.map((e) =>
+      query.match === "contains" ? escapeLikeTerm(e.name.toLowerCase()) : e.name.toLowerCase(),
+    );
+  }
 
   /**
    * Parse, persist, and run a list.
@@ -214,12 +307,36 @@ export class BulkSearchService {
     query: BulkSearchQuery,
   ): Promise<{ rows: BulkRollupRow[]; applicationsAffected: number }> {
     const lines = entries.map((e) => e.line);
-    const names = entries.map((e) => e.name.toLowerCase());
+    const names = this.nameKeys(entries, query);
     // Only an `exact` entry constrains the version. A dropped specifier matches
     // every version, which is what makes the over-reporting visible rather than
     // silently wrong.
     const versions = entries.map((e) => (e.versionKind === "exact" ? e.version : null));
     const ecosystems = entries.map((e) => e.ecosystem);
+    const { condition: nameCondition, cap } = this.nameMatch(query);
+
+    /*
+      `dense_rank`, not `row_number`, and the distinction matters.
+
+      The cap counts distinct package *names*, because that is what the row reports —
+      "12 packages matched". Ranking rows instead would count (name, version) pairs, and a
+      single deb package with sixty revisions of libc6 in the estate would consume the whole
+      budget on its own. The row would then read "1 package matched (partial)", which is
+      both useless and alarming, while genuinely different matches went unreported.
+
+      dense_rank gives every version of the first name rank 1, every version of the second
+      name rank 2, and so on, so `rn <= cap` keeps the first `cap` names *whole*.
+
+      `matched` keeps one rank beyond the cap so overflow is detectable; `capped` is what
+      everything downstream reads. With no cap the two are the same relation and Postgres
+      flattens the extra CTE away.
+    */
+    const rankColumn = cap
+      ? sql`, dense_rank() OVER (PARTITION BY q.line ORDER BY lower(c.name) ASC) AS rn`
+      : sql`, 1::bigint AS rn`;
+    const rankFilter = cap ? sql`WHERE rn <= ${cap + 1}` : sql``;
+    const capFilter = cap ? sql`WHERE rn <= ${cap}` : sql``;
+    const overflowExpr = cap ? sql`bool_or(m.rn > ${cap})` : sql`FALSE`;
 
     const statusCondition = query.includeInactive ? sql`` : sql`AND a.status <> 'inactive'`;
 
@@ -271,17 +388,25 @@ export class BulkSearchService {
        * advisory audit the difference is the answer, so the name is matched first
        * and the version is evaluated per row.
        */
-      matched AS (
+      ranked AS (
         SELECT
           q.line, q.name_key,
-          c.id AS component_id, c.version, c.ecosystem,
+          c.id AS component_id, c.name AS component_name, c.version, c.ecosystem,
           (q.want_version IS NULL OR c.version = q.want_version) AS version_matches
+          ${rankColumn}
         FROM q
         LEFT JOIN component c
-          ON lower(c.name) = q.name_key
+          ON ${nameCondition(sql`q.name_key`)}
          AND (q.want_ecosystem IS NULL OR c.ecosystem = q.want_ecosystem)
          AND c.kind = 'library'
       ),
+      /*
+       * One row past the cap, so matched_names_truncated can be told apart from a line
+       * that happened to match exactly the cap. A partial list that reads as complete is
+       * the failure mode worth spending a row to avoid.
+       */
+      matched AS (SELECT * FROM ranked ${rankFilter}),
+      capped AS (SELECT * FROM matched ${capFilter}),
       /*
        * Most recent occurrence of each component in each application. Mirrors the
        * single search's shape so both agree about what "currently used" means, and
@@ -291,21 +416,28 @@ export class BulkSearchService {
         SELECT DISTINCT ON (sc.component_id, sc.application_id)
                sc.component_id, sc.application_id, sc.scan_id AS last_seen_scan_id
         FROM scan_component sc
-        WHERE sc.component_id IN (SELECT component_id FROM matched WHERE component_id IS NOT NULL)
+        WHERE sc.component_id IN (SELECT component_id FROM capped WHERE component_id IS NOT NULL)
         ORDER BY sc.component_id, sc.application_id, sc.created_at DESC, sc.scan_id DESC
       ),
       hits AS (
         SELECT
           m.line,
           m.component_id,
+          m.component_name,
           m.version,
           m.ecosystem,
           m.version_matches,
           u.application_id,
           (u.last_seen_scan_id = a.latest_scan_id) AS in_latest
-        FROM matched m
+        FROM capped m
         LEFT JOIN usage u      ON u.component_id = m.component_id
         LEFT JOIN application a ON a.id = u.application_id ${statusCondition}
+      ),
+      /* Overflow is a property of the match, so it is read off matched, before the cap. */
+      overflow AS (
+        SELECT m.line, ${overflowExpr} AS truncated
+        FROM matched m
+        GROUP BY m.line
       ),
       /*
        * Distinct applications across the whole list. Cannot be summed from the
@@ -319,21 +451,24 @@ export class BulkSearchService {
         WHERE application_id IS NOT NULL AND version_matches ${affectedScope}
       )
       SELECT
-        line,
+        h.line,
         (SELECT applications_affected FROM affected) AS applications_affected,
         -- The name exists in the inventory, at any version.
-        bool_or(component_id IS NOT NULL) AS name_found,
+        bool_or(h.component_id IS NOT NULL) AS name_found,
         -- The query as asked matched, pinned version included.
-        bool_or(component_id IS NOT NULL AND version_matches) AS found,
-        array_remove(array_agg(DISTINCT ecosystem), NULL) AS ecosystems,
+        bool_or(h.component_id IS NOT NULL AND h.version_matches) AS found,
+        array_remove(array_agg(DISTINCT h.ecosystem), NULL) AS ecosystems,
         -- Every version of the name, so a miss can report what IS deployed.
-        array_remove(array_agg(DISTINCT version), NULL) AS versions,
-        count(DISTINCT application_id)
-          FILTER (WHERE in_latest IS TRUE AND version_matches)::int AS current_applications,
-        count(DISTINCT application_id)
-          FILTER (WHERE in_latest IS FALSE AND version_matches)::int AS historical_applications
-      FROM hits
-      GROUP BY line
+        array_remove(array_agg(DISTINCT h.version), NULL) AS versions,
+        -- Distinct packages the line matched. Always one name in exact mode.
+        array_remove(array_agg(DISTINCT h.component_name), NULL) AS matched_names,
+        (SELECT o.truncated FROM overflow o WHERE o.line = h.line) AS matched_names_truncated,
+        count(DISTINCT h.application_id)
+          FILTER (WHERE h.in_latest IS TRUE AND h.version_matches)::int AS current_applications,
+        count(DISTINCT h.application_id)
+          FILTER (WHERE h.in_latest IS FALSE AND h.version_matches)::int AS historical_applications
+      FROM hits h
+      GROUP BY h.line
     `);
 
     const resultRows = rowsOf(rows);
@@ -350,6 +485,7 @@ export class BulkSearchService {
     const mapped = entries.map((entry) => {
       const row = byLine.get(entry.line);
       const versions = toStringArray(row?.versions).sort();
+      const matchedNames = toStringArray(row?.matched_names).sort();
       return {
         line: entry.line,
         raw: entry.raw,
@@ -363,6 +499,9 @@ export class BulkSearchService {
         versionsTruncated: versions.length > VERSIONS_PER_ROW,
         currentApplications: Number(row?.current_applications ?? 0),
         historicalApplications: Number(row?.historical_applications ?? 0),
+        matchedNames,
+        matchedNameCount: matchedNames.length,
+        matchedNamesTruncated: row?.matched_names_truncated === true,
       };
     });
 
@@ -380,9 +519,26 @@ export class BulkSearchService {
     entries: readonly BulkEntry[],
     query: BulkSearchQuery,
   ): Promise<NonNullable<BulkSearchResult["matches"]>> {
-    const names = entries.map((e) => e.name.toLowerCase());
+    const names = this.nameKeys(entries, query);
     const versions = entries.map((e) => (e.versionKind === "exact" ? e.version : null));
     const ecosystems = entries.map((e) => e.ecosystem);
+    const { condition: nameCondition, cap } = this.nameMatch(query);
+
+    /*
+      Capped per input line here too, and it has to be: without it a 200-line paste in
+      contains mode joins an unbounded component set against scan_component, which is the
+      table this service was written to avoid scanning. The partition is the name key
+      rather than the line because this query does not carry line numbers — two entries
+      resolving to the same term should share one budget, not two.
+
+      `dense_rank` over the name for the same reason as the rollup: the cap counts packages,
+      so every version of a kept package is kept. A flat table that showed 40 of a package's
+      50 versions would be a partial answer that looks complete.
+    */
+    const rankColumn = cap
+      ? sql`, dense_rank() OVER (PARTITION BY q.name_key ORDER BY lower(c.name) ASC) AS rn`
+      : sql`, 1::bigint AS rn`;
+    const capFilter = cap ? sql`WHERE rn <= ${cap}` : sql``;
 
     const scopeCondition =
       query.scope === "current"
@@ -402,16 +558,21 @@ export class BulkSearchService {
           ${sql.param(ecosystems)}::text[]
         ) AS t(name_key, want_version, want_ecosystem)
       ),
-      matched AS (
-        -- DISTINCT: two entries can legitimately resolve to the same component
-        -- (a bare name and a purl for it), and without this the row appears twice.
-        SELECT DISTINCT c.id, c.name, c.version, c.ecosystem, c.purl
+      ranked AS (
+        SELECT q.name_key, c.id, c.name, c.version, c.ecosystem, c.purl
+          ${rankColumn}
         FROM q
         JOIN component c
-          ON lower(c.name) = q.name_key
+          ON ${nameCondition(sql`q.name_key`)}
          AND (q.want_version IS NULL OR c.version = q.want_version)
          AND (q.want_ecosystem IS NULL OR c.ecosystem = q.want_ecosystem)
          AND c.kind = 'library'
+      ),
+      matched AS (
+        -- DISTINCT: two entries can legitimately resolve to the same component
+        -- (a bare name and a purl for it), and without this the row appears twice.
+        SELECT DISTINCT id, name, version, ecosystem, purl
+        FROM ranked ${capFilter}
       ),
       usage AS (
         SELECT DISTINCT ON (sc.component_id, sc.application_id)
@@ -434,7 +595,7 @@ export class BulkSearchService {
       JOIN application a  ON a.id = u.application_id
       JOIN scan s         ON s.id = u.last_seen_scan_id
       WHERE true ${scopeCondition} ${statusCondition}
-      ORDER BY lower(m.name) ASC, m.version ASC NULLS LAST, lower(a.name) ASC
+      ${bulkMatchesOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
 
@@ -494,6 +655,8 @@ interface RollupRow {
   name_found: boolean | null;
   ecosystems: unknown;
   versions: unknown;
+  matched_names: unknown;
+  matched_names_truncated: boolean | null;
   current_applications: number | string;
   historical_applications: number | string;
 }

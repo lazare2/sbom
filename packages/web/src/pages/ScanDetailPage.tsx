@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
+import { componentListSort } from "@sbom/shared";
+import { useServerSort } from "../lib/useSort.ts";
 import { useScan, useScanComponents } from "../lib/queries.ts";
 import { formatBytes, formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
@@ -11,6 +13,7 @@ import {
   FindingsCard,
   FindingsTable,
   findingsParams,
+  useFindingsSort,
   type FindingsFilters,
 } from "../components/Findings.tsx";
 import { useScanVulnerabilities, useVulnStatus } from "../lib/queries.ts";
@@ -36,12 +39,12 @@ import {
   Tr,
 } from "../components/ui.tsx";
 
-const SORTS = ["name", "version", "ecosystem"] as const;
+const SORTS = componentListSort.fields;
 const DIRECTIONS = ["asc", "desc"] as const;
 
 const DEFAULTS = {
   q: "",
-  sortBy: "name" as (typeof SORTS)[number],
+  sortBy: componentListSort.defaultField,
   sortDir: "asc" as "asc" | "desc",
   page: 1,
 };
@@ -50,7 +53,7 @@ const urlSpec = {
   defaults: DEFAULTS,
   parse: (params: URLSearchParams) => ({
     q: readString(params, "q"),
-    sortBy: readEnum(params, "sortBy", SORTS, "name"),
+    sortBy: readEnum(params, "sortBy", SORTS, componentListSort.defaultField),
     sortDir: readEnum(params, "sortDir", DIRECTIONS, "asc"),
     page: readNumber(params, "page", 1),
   }),
@@ -92,16 +95,17 @@ export function ScanDetailPage() {
   const components = useScanComponents(id, params);
   const { data: vulnStatus } = useVulnStatus();
   const vulnEnabled = vulnStatus?.enabled === true;
+  /*
+    Above the guards below, and it has to be. The plain `function sortBy` this replaced was
+    hoisted, so its position after an early return was harmless; a hook in the same place
+    is skipped on the loading render and called on the loaded one, which is a hooks-order
+    violation React reports as a hook-count mismatch rather than as a missing sort.
+  */
+  const sort = useServerSort(componentListSort, state, setState);
 
   if (isLoading) return <LoadingBlock label="Loading scan" />;
   if (error) return <ErrorBanner error={error} onRetry={() => void refetch()} />;
   if (!scan) return null;
-
-  function sortBy(field: (typeof SORTS)[number]) {
-    if (state.sortBy === field) setState({ sortDir: state.sortDir === "asc" ? "desc" : "asc" });
-    else setState({ sortBy: field, sortDir: "asc" });
-  }
-  const sorted = (field: (typeof SORTS)[number]) => (state.sortBy === field ? state.sortDir : false);
 
   return (
     <>
@@ -268,16 +272,18 @@ export function ScanDetailPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th onSort={() => sortBy("name")} sorted={sorted("name")}>
+                    <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
                       Package
                     </Th>
-                    <Th onSort={() => sortBy("version")} sorted={sorted("version")} width="180px">
+                    <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")} width="180px">
                       Version
                     </Th>
-                    <Th onSort={() => sortBy("ecosystem")} sorted={sorted("ecosystem")} width="120px">
+                    <Th onSort={() => sort.toggle("ecosystem")} sorted={sort.stateOf("ecosystem")} width="120px">
                       Ecosystem
                     </Th>
-                    <Th>Package URL</Th>
+                    <Th onSort={() => sort.toggle("purl")} sorted={sort.stateOf("purl")}>
+                      Package URL
+                    </Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -333,6 +339,7 @@ function ScanFindings({ scanId }: { scanId: string }) {
   const { isAdmin } = useAuth();
   const [filters, setFilters] = useState<FindingsFilters>(DEFAULT_FINDINGS_FILTERS);
   const paramsForFindings = useMemo(() => findingsParams(filters, 25), [filters]);
+  const findingsSort = useFindingsSort(filters, (patch) => setFilters((f) => ({ ...f, ...patch })));
   const { data, isLoading, isFetching } = useScanVulnerabilities(scanId, paramsForFindings);
 
   return (
@@ -344,6 +351,7 @@ function ScanFindings({ scanId }: { scanId: string }) {
     >
       {data ? <BreakdownTiles breakdown={data.breakdown} /> : null}
       <FindingsTable
+        sort={findingsSort}
         data={data}
         isLoading={isLoading}
         isFetching={isFetching}

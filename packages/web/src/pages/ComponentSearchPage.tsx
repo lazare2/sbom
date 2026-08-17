@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
+import { componentSearchSort, sortDirections } from "@sbom/shared";
+import { useClientSort, useServerSort } from "../lib/useSort.ts";
 import {
   useComponentEcosystems,
   useComponentSearch,
@@ -34,6 +36,13 @@ import {
 const SCOPES = ["current", "historical", "all"] as const;
 const MATCHES = ["contains", "exact"] as const;
 
+/**
+ * Sort defaults come from the shared declaration rather than being restated, so the URL
+ * omits them exactly when the server would have chosen them anyway.
+ */
+const SORT_FIELDS = componentSearchSort.fields;
+const SORT_DIRECTIONS = sortDirections;
+
 const DEFAULTS = {
   name: "",
   version: "",
@@ -41,6 +50,8 @@ const DEFAULTS = {
   scope: "current" as (typeof SCOPES)[number],
   match: "contains" as (typeof MATCHES)[number],
   includeInactive: false,
+  sortBy: componentSearchSort.defaultField,
+  sortDir: componentSearchSort.defaultDirection,
   page: 1,
 };
 
@@ -53,6 +64,8 @@ const urlSpec = {
     scope: readEnum(params, "scope", SCOPES, "current"),
     match: readEnum(params, "match", MATCHES, "contains"),
     includeInactive: readBool(params, "includeInactive"),
+    sortBy: readEnum(params, "sortBy", SORT_FIELDS, componentSearchSort.defaultField),
+    sortDir: readEnum(params, "sortDir", SORT_DIRECTIONS, componentSearchSort.defaultDirection),
     page: readNumber(params, "page", 1),
   }),
 };
@@ -156,6 +169,8 @@ function SinglePackageSearch() {
       scope: state.scope,
       match: state.match,
       includeInactive: state.includeInactive || undefined,
+      sortBy: state.sortBy,
+      sortDir: state.sortDir,
       page: state.page,
       pageSize: 50,
     }),
@@ -163,10 +178,27 @@ function SinglePackageSearch() {
   );
 
   const { data, isLoading, isFetching, error, refetch } = useComponentSearch(params, { enabled: hasQuery });
+  // Server-side: the result set is paginated, so the ordering has to be decided by the query.
+  const sort = useServerSort(componentSearchSort, state, setState);
   const { data: ecosystems } = useComponentEcosystems();
   const { data: suggestions } = useComponentSuggestions(nameInput === state.name ? "" : nameInput);
   const { data: versions } = useComponentVersions(
     state.match === "exact" && hasQuery ? state.name : undefined,
+  );
+  /* Client-side: the endpoint returns every version of the one named package at once. */
+  const versionSort = useClientSort(
+    versions,
+    { version: "text", ecosystem: "text", currentApplications: "number", totalApplications: "number" } as const,
+    { sortBy: "currentApplications" },
+    (v, f) =>
+      f === "version"
+        ? v.version
+        : f === "ecosystem"
+          ? v.ecosystem
+          : f === "currentApplications"
+            ? v.currentApplications
+            : v.totalApplications,
+    (v) => v.componentId,
   );
 
   return (
@@ -219,21 +251,6 @@ function SinglePackageSearch() {
           </div>
 
           <div>
-            <label htmlFor="pkg-match" className="mb-1 block text-[11px] font-medium text-text-muted">
-              Name match
-            </label>
-            <Select
-              id="pkg-match"
-              value={state.match}
-              onChange={(v) => setState({ match: v })}
-              options={[
-                { value: "contains", label: "Contains" },
-                { value: "exact", label: "Exact" },
-              ]}
-            />
-          </div>
-
-          <div>
             <label htmlFor="pkg-eco" className="mb-1 block text-[11px] font-medium text-text-muted">
               Ecosystem
             </label>
@@ -279,6 +296,18 @@ function SinglePackageSearch() {
           <span aria-hidden="true" className="text-border-strong">
             |
           </span>
+          {/*
+            A checkbox rather than the Contains/Exact dropdown this replaced. Both modes
+            existed and worked, but as a two-value select in a row of other selects it read
+            as one more filter and went unnoticed — people searched "react", got
+            reactive-element and reactor, and concluded the search was fuzzy with no way to
+            narrow it. A checkbox states the mode instead of hiding it behind a click.
+          */}
+          <Checkbox
+            checked={state.match === "exact"}
+            onChange={(v) => setState({ match: v ? "exact" : "contains" })}
+            label="Exact name match"
+          />
           <Checkbox
             checked={state.includeInactive}
             onChange={(v) => setState({ includeInactive: v })}
@@ -287,7 +316,10 @@ function SinglePackageSearch() {
         </div>
 
         <p className="border-t border-border-base px-3 py-2 text-[11px] text-text-faint">
-          {SCOPE_HINTS[state.scope]}
+          {SCOPE_HINTS[state.scope]}{" "}
+          {state.match === "exact"
+            ? `Only packages named exactly "${state.name || "…"}" (case-insensitive).`
+            : "Any package whose name contains what you typed."}
         </p>
       </Card>
 
@@ -302,19 +334,41 @@ function SinglePackageSearch() {
             <Table>
               <thead>
                 <tr>
-                  <Th width="220px">Version</Th>
-                  <Th width="120px">Ecosystem</Th>
-                  <Th align="right" width="140px">
+                  <Th
+                    onSort={() => versionSort.toggle("version")}
+                    sorted={versionSort.stateOf("version")}
+                    width="220px"
+                  >
+                    Version
+                  </Th>
+                  <Th
+                    onSort={() => versionSort.toggle("ecosystem")}
+                    sorted={versionSort.stateOf("ecosystem")}
+                    width="120px"
+                  >
+                    Ecosystem
+                  </Th>
+                  <Th
+                    onSort={() => versionSort.toggle("currentApplications")}
+                    sorted={versionSort.stateOf("currentApplications")}
+                    align="right"
+                    width="140px"
+                  >
                     Current apps
                   </Th>
-                  <Th align="right" width="150px">
+                  <Th
+                    onSort={() => versionSort.toggle("totalApplications")}
+                    sorted={versionSort.stateOf("totalApplications")}
+                    align="right"
+                    width="150px"
+                  >
                     Ever used by
                   </Th>
                   <Th />
                 </tr>
               </thead>
               <tbody>
-                {versions.map((v) => (
+                {versionSort.rows.map((v) => (
                   <Tr key={v.componentId}>
                     <Td className="nums font-mono text-xs">{v.version ?? "unknown"}</Td>
                     <Td>
@@ -393,7 +447,7 @@ function SinglePackageSearch() {
             />
           ) : (
             <>
-              <ComponentHitsTable hits={data.items} />
+              <ComponentHitsTable hits={data.items} sort={sort} />
               <Pagination
                 page={data.page}
                 pageSize={data.pageSize}

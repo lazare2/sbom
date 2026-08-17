@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { applicationStatusSchema, attributeTypeSchema } from "../enums.js";
 import { paginationQuerySchema, uuidSchema } from "./common.js";
+import { defineSortTable } from "./sort.js";
 import type { ScanPlatform } from "./scan.js";
 
 /**
@@ -44,6 +45,39 @@ export const updateApplicationRequestSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: "no fields to update" });
 export type UpdateApplicationRequest = z.infer<typeof updateApplicationRequestSchema>;
 
+/**
+ * Sortable columns of the applications table.
+ *
+ * `platform` sorts on the OS of the current build — the "who is still on Debian 11"
+ * column — and is text, so it reads A→Z. The two counts are numbers and open on the
+ * largest, which is the question they are usually asked in.
+ */
+export const applicationSort = defineSortTable(
+  {
+    name: "text",
+    status: "text",
+    platform: "text",
+    componentCount: "number",
+    scanCount: "number",
+    lastScanAt: "date",
+    createdAt: "date",
+    /**
+     * Sorts on a custom attribute, named by `sortAttribute`.
+     *
+     * One field rather than one per attribute because the set is administrator-defined and
+     * changes at runtime — squad, owner, criticality today, something else next quarter —
+     * so a fixed enum could never cover it.
+     *
+     * This is the one sort whose target is not known at compile time, and it is safe for a
+     * specific reason: a jsonb key is a *value* (`attributes->>$1`), not an identifier, so
+     * it binds as an ordinary parameter. Nothing from the client is ever concatenated into
+     * the ORDER BY.
+     */
+    attribute: "text",
+  } as const,
+  "name",
+);
+
 export const listApplicationsQuerySchema = paginationQuerySchema.extend({
   search: z.string().trim().max(255).optional(),
   /**
@@ -70,9 +104,9 @@ export const listApplicationsQuerySchema = paginationQuerySchema.extend({
   runtimeVersion: z.string().trim().max(64).optional(),
   /** Only applications whose latest scan is older than the stale threshold. */
   staleOnly: z.coerce.boolean().optional(),
-  sortBy: z.enum(["name", "createdAt", "lastScanAt", "status"]).default("name"),
-  sortDir: z.enum(["asc", "desc"]).default("asc"),
-});
+  /** Which attribute `sortBy=attribute` means. Ignored for every other sort field. */
+  sortAttribute: z.string().trim().max(64).optional(),
+}).merge(applicationSort.querySchema);
 export type ListApplicationsQuery = z.infer<typeof listApplicationsQuerySchema>;
 
 export interface ApplicationSummary {

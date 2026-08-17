@@ -6,6 +6,8 @@ import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { SEVERITY_ORDER, SeverityBadge, ScanningDisabledNotice } from "../components/Severity.tsx";
+import { advisorySort, sortDirections } from "@sbom/shared";
+import { useServerSort } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import {
   Badge,
@@ -31,7 +33,7 @@ import {
 } from "../components/ui.tsx";
 
 const SCOPES = ["app", "os", "all"] as const;
-const SORTS = ["severity", "applications", "packages", "vulnerability"] as const;
+
 
 const DEFAULTS = {
   q: "",
@@ -40,7 +42,8 @@ const DEFAULTS = {
   fixable: false,
   knownExploited: false,
   currentOnly: true,
-  sortBy: "severity" as (typeof SORTS)[number],
+  sortBy: advisorySort.defaultField,
+  sortDir: advisorySort.defaultDirection,
   page: 1,
 };
 
@@ -54,7 +57,8 @@ const urlSpec = {
     knownExploited: readBool(params, "knownExploited"),
     // Defaults true, so the URL carries `currentOnly=false` when it is turned off.
     currentOnly: params.get("currentOnly") !== "false",
-    sortBy: readEnum(params, "sortBy", SORTS, "severity"),
+    sortBy: readEnum(params, "sortBy", advisorySort.fields, advisorySort.defaultField),
+    sortDir: readEnum(params, "sortDir", sortDirections, advisorySort.defaultDirection),
     page: readNumber(params, "page", 1),
   }),
 };
@@ -69,6 +73,7 @@ const urlSpec = {
  */
 export function VulnerabilitiesPage() {
   const { state, setState } = useUrlState(urlSpec);
+  const sort = useServerSort(advisorySort, state, setState);
   const { isAdmin } = useAuth();
   const { data: status, isLoading: statusLoading } = useVulnStatus();
 
@@ -91,6 +96,7 @@ export function VulnerabilitiesPage() {
       knownExploited: state.knownExploited ? "true" : undefined,
       currentOnly: state.currentOnly ? undefined : "false",
       sortBy: state.sortBy,
+      sortDir: state.sortDir,
       page: state.page,
       pageSize: 50,
     }),
@@ -209,19 +215,40 @@ export function VulnerabilitiesPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th width="105px">Severity</Th>
-                    <Th width="200px">Advisory</Th>
+                    <Th onSort={() => sort.toggle("severity")} sorted={sort.stateOf("severity")} width="105px">
+                      Severity
+                    </Th>
+                    <Th
+                      onSort={() => sort.toggle("vulnerability")}
+                      sorted={sort.stateOf("vulnerability")}
+                      width="200px"
+                    >
+                      Advisory
+                    </Th>
+                    {/* Free prose. There is no ordering of it a reader would find useful. */}
                     <Th>Description</Th>
-                    <Th align="right" width="100px">
+                    <Th onSort={() => sort.toggle("packages")} sorted={sort.stateOf("packages")} align="right" width="100px">
                       Packages
                     </Th>
-                    <Th align="right" width="100px">
+                    <Th
+                      onSort={() => sort.toggle("applications")}
+                      sorted={sort.stateOf("applications")}
+                      align="right"
+                      width="100px"
+                    >
                       Apps now
                     </Th>
-                    <Th align="right" width="110px">
+                    <Th
+                      onSort={() => sort.toggle("historicalApplications")}
+                      sorted={sort.stateOf("historicalApplications")}
+                      align="right"
+                      width="110px"
+                    >
                       Apps dropped
                     </Th>
-                    <Th width="90px">Fix</Th>
+                    <Th onSort={() => sort.toggle("fixAvailable")} sorted={sort.stateOf("fixAvailable")} width="90px">
+                      Fix
+                    </Th>
                   </tr>
                 </thead>
                 <tbody>

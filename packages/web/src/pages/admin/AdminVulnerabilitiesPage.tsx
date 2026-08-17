@@ -35,7 +35,8 @@ import {
   Th,
   Tr,
 } from "../../components/ui.tsx";
-import { SeverityBadge } from "../../components/Severity.tsx";
+import { SeverityBadge, SEVERITY_ORDER } from "../../components/Severity.tsx";
+import { useClientSort } from "../../lib/useSort.ts";
 
 /**
  * Admin control panel for vulnerability scanning.
@@ -424,8 +425,37 @@ function CoverageCard({ status }: { status: VulnScanStatus }) {
 // History
 // ---------------------------------------------------------------------------
 
+/** Client-side: the endpoint returns the last 20 attempts in one response. */
+const HISTORY_COLUMNS = {
+  startedAt: "date",
+  trigger: "text",
+  outcome: "text",
+  actor: "text",
+} as const;
+
 function HistoryCard() {
   const { data: attempts, isLoading } = useVulnHistory(20);
+
+  const sort = useClientSort(
+    attempts,
+    HISTORY_COLUMNS,
+    { sortBy: "startedAt" },
+    (attempt, field) => {
+      switch (field) {
+        case "trigger":
+          return attempt.trigger;
+        case "outcome":
+          return attempt.outcome;
+        // Null for the scheduler, which is the system rather than a person.
+        case "actor":
+          return attempt.actorEmail;
+        case "startedAt":
+        default:
+          return attempt.startedAt;
+      }
+    },
+    (attempt) => attempt.id,
+  );
 
   return (
     <Card>
@@ -442,15 +472,24 @@ function HistoryCard() {
           <Table>
             <thead>
               <tr>
-                <Th width="170px">Started</Th>
-                <Th width="110px">Trigger</Th>
-                <Th width="130px">Outcome</Th>
+                <Th onSort={() => sort.toggle("startedAt")} sorted={sort.stateOf("startedAt")} width="170px">
+                  Started
+                </Th>
+                <Th onSort={() => sort.toggle("trigger")} sorted={sort.stateOf("trigger")} width="110px">
+                  Trigger
+                </Th>
+                <Th onSort={() => sort.toggle("outcome")} sorted={sort.stateOf("outcome")} width="130px">
+                  Outcome
+                </Th>
+                {/* Free-text detail, often a multi-line grype error. Not orderable usefully. */}
                 <Th>Detail</Th>
-                <Th width="150px">Actor</Th>
+                <Th onSort={() => sort.toggle("actor")} sorted={sort.stateOf("actor")} width="150px">
+                  Actor
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {attempts.map((attempt) => (
+              {sort.rows.map((attempt) => (
                 <Tr key={attempt.id}>
                   <Td title={formatDateTime(attempt.startedAt)}>{formatDateTime(attempt.startedAt)}</Td>
                   <Td className="text-text-muted">{attempt.trigger}</Td>
@@ -491,9 +530,46 @@ function OutcomeBadge({ attempt }: { attempt: VulnDbUpdateAttempt }) {
 // Suppressions
 // ---------------------------------------------------------------------------
 
+/** Client-side: accepted risks are a short, deliberately curated list. */
+const SUPPRESSION_COLUMNS = {
+  vulnerability: "text",
+  severity: "number",
+  scope: "text",
+  acceptedBy: "text",
+  expiresAt: "date",
+} as const;
+
 function SuppressionsCard() {
   const { data: suppressions, isLoading } = useVulnSuppressions();
   const remove = useDeleteSuppression();
+
+  const sort = useClientSort(
+    suppressions,
+    SUPPRESSION_COLUMNS,
+    { sortBy: "severity" },
+    (row, field) => {
+      switch (field) {
+        // Ranked, not alphabetical: `critical` must not sort below `low`.
+        case "severity":
+          return row.severity ? SEVERITY_ORDER.length - SEVERITY_ORDER.indexOf(row.severity) : 0;
+        case "scope":
+          /*
+            Sorted so the broadest suppressions surface first in the natural direction.
+            Estate-wide is the biggest decision on this screen and the one most worth
+            reviewing, so it should not be scattered among per-application rows.
+          */
+          return `${row.applicationName ?? ""} ${row.componentName ?? ""}`.trim();
+        case "acceptedBy":
+          return row.createdByEmail;
+        case "expiresAt":
+          return row.expiresAt;
+        case "vulnerability":
+        default:
+          return row.vulnerabilityId;
+      }
+    },
+    (row) => row.id,
+  );
 
   return (
     <Card>
@@ -513,17 +589,28 @@ function SuppressionsCard() {
           <Table>
             <thead>
               <tr>
-                <Th width="190px">Advisory</Th>
-                <Th width="90px">Severity</Th>
-                <Th width="200px">Scope</Th>
+                <Th onSort={() => sort.toggle("vulnerability")} sorted={sort.stateOf("vulnerability")} width="190px">
+                  Advisory
+                </Th>
+                <Th onSort={() => sort.toggle("severity")} sorted={sort.stateOf("severity")} width="90px">
+                  Severity
+                </Th>
+                <Th onSort={() => sort.toggle("scope")} sorted={sort.stateOf("scope")} width="200px">
+                  Scope
+                </Th>
+                {/* Free text written by whoever accepted the risk. */}
                 <Th>Reason</Th>
-                <Th width="150px">Accepted by</Th>
-                <Th width="120px">Expires</Th>
+                <Th onSort={() => sort.toggle("acceptedBy")} sorted={sort.stateOf("acceptedBy")} width="150px">
+                  Accepted by
+                </Th>
+                <Th onSort={() => sort.toggle("expiresAt")} sorted={sort.stateOf("expiresAt")} width="120px">
+                  Expires
+                </Th>
                 <Th width="80px" />
               </tr>
             </thead>
             <tbody>
-              {suppressions.map((s) => (
+              {sort.rows.map((s) => (
                 <Tr key={s.id}>
                   <Td>
                     <Link to={`/vulnerabilities/${encodeURIComponent(s.vulnerabilityId)}`} className="text-accent hover:underline">

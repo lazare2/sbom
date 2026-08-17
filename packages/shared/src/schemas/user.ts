@@ -2,6 +2,7 @@ import { z } from "zod";
 import { userRoleSchema } from "../enums.js";
 import { emailSchema, passwordSchema } from "./auth.js";
 import { paginationQuerySchema } from "./common.js";
+import { defineSortTable } from "./sort.js";
 
 /**
  * Admin-driven account creation.
@@ -44,6 +45,24 @@ export const resetUserPasswordRequestSchema = z.object({
 });
 export type ResetUserPasswordRequest = z.infer<typeof resetUserPasswordRequestSchema>;
 
+/**
+ * Sortable columns of the admin users table.
+ *
+ * `isActive` is text rather than a boolean kind: it renders as a status word, and sorting
+ * it A→Z groups the two states, which is what a reader clicking a "Status" header wants.
+ */
+export const userSort = defineSortTable(
+  {
+    email: "text",
+    role: "text",
+    isActive: "text",
+    lastLoginAt: "date",
+    activeSessions: "number",
+    createdAt: "date",
+  } as const,
+  "email",
+);
+
 export const listUsersQuerySchema = paginationQuerySchema.extend({
   search: z.string().trim().max(320).optional(),
   role: userRoleSchema.optional(),
@@ -51,9 +70,7 @@ export const listUsersQuerySchema = paginationQuerySchema.extend({
     .enum(["true", "false"])
     .transform((v) => v === "true")
     .optional(),
-  sortBy: z.enum(["email", "createdAt", "lastLoginAt", "role"]).default("email"),
-  sortDir: z.enum(["asc", "desc"]).default("asc"),
-});
+}).merge(userSort.querySchema);
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 
 export interface UserSummary {

@@ -199,6 +199,19 @@ export function Th({
   return (
     <th
       style={width ? { width } : undefined}
+      /*
+        `aria-sort` belongs on the header cell, not on the button inside it. It is only
+        defined for `columnheader`/`rowheader`, so on a `<button>` it is invalid ARIA that
+        assistive technology ignores outright — the caret was communicating the state to
+        sighted users and to nobody else. Set here it is announced with the column name, and
+        it is also the one attribute a test can read to assert the rows and the arrow agree.
+
+        Omitted entirely on a non-sortable column: `aria-sort="none"` means "sortable but not
+        currently sorted", which would advertise a control that is not there.
+      */
+      aria-sort={
+        onSort ? (sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none") : undefined
+      }
       className={`sticky top-0 z-10 border-b border-border-base bg-bg-subtle px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted ${alignClass}`}
     >
       {onSort ? (
@@ -206,8 +219,9 @@ export function Th({
           type="button"
           onClick={onSort}
           className="inline-flex items-center gap-1 hover:text-text-base"
-          // Communicates sort state to screen readers, not just via the caret.
-          aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none"}
+          // Names the action rather than leaving the button labelled by the column text
+          // alone, which reads as "Application" with no hint that it does anything.
+          title={`Sort by ${typeof children === "string" ? children : "this column"}`}
         >
           {children}
           <span aria-hidden="true" className={sorted ? "text-accent" : "text-text-faint"}>

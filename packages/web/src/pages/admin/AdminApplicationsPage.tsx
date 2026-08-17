@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import type { ApplicationSummary } from "@sbom/shared";
+import { applicationSort, sortDirections } from "@sbom/shared";
+import { useServerSort } from "../../lib/useSort.ts";
 import { formatNumber, formatRelative, humanizeKey } from "../../lib/format.ts";
 import { useDeleteApplication } from "../../lib/mutations.ts";
 import { useApplications, useAttributeDefinitions } from "../../lib/queries.ts";
@@ -30,10 +32,20 @@ import { ApplicationFormModal } from "./ApplicationFormModal.tsx";
 const STATUSES = ["", "active", "inactive", "pending_confirmation"] as const;
 
 const spec = {
-  defaults: { search: "", status: "" as (typeof STATUSES)[number], page: 1 },
+  defaults: {
+    search: "",
+    status: "" as (typeof STATUSES)[number],
+    sortBy: applicationSort.defaultField,
+    sortDir: applicationSort.defaultDirection,
+    sortAttribute: "",
+    page: 1,
+  },
   parse: (p: URLSearchParams) => ({
     search: readString(p, "search"),
     status: readEnum(p, "status", STATUSES, ""),
+    sortBy: readEnum(p, "sortBy", applicationSort.fields, applicationSort.defaultField),
+    sortDir: readEnum(p, "sortDir", sortDirections, applicationSort.defaultDirection),
+    sortAttribute: readString(p, "sortAttribute"),
     page: readNumber(p, "page", 1),
   }),
 };
@@ -58,8 +70,20 @@ export function AdminApplicationsPage() {
     status: state.status ? [state.status] : ["active", "inactive", "pending_confirmation"],
     page: state.page,
     pageSize: 25,
-    sortBy: "name",
+    sortBy: state.sortBy,
+    sortDir: state.sortDir,
+    sortAttribute: state.sortAttribute || undefined,
   });
+  const sort = useServerSort(applicationSort, state, setState);
+
+  /* Attribute columns share one sort field — see the applications list for why. */
+  function sortByAttribute(key: string) {
+    const active = state.sortBy === "attribute" && state.sortAttribute === key;
+    if (active) setState({ sortDir: state.sortDir === "asc" ? "desc" : "asc" });
+    else setState({ sortBy: "attribute", sortAttribute: key, sortDir: "asc" });
+  }
+  const attributeSortState = (key: string) =>
+    state.sortBy === "attribute" && state.sortAttribute === key ? state.sortDir : false;
 
   const attributeColumns = (definitions.data ?? []).filter((d) => d.isActive).slice(0, 2);
 
@@ -121,13 +145,27 @@ export function AdminApplicationsPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th>Name</Th>
-                    <Th>Status</Th>
+                    <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                      Name
+                    </Th>
+                    <Th onSort={() => sort.toggle("status")} sorted={sort.stateOf("status")}>
+                      Status
+                    </Th>
                     {attributeColumns.map((d) => (
-                      <Th key={d.key}>{d.label || humanizeKey(d.key)}</Th>
+                      <Th
+                        key={d.key}
+                        onSort={() => sortByAttribute(d.key)}
+                        sorted={attributeSortState(d.key)}
+                      >
+                        {d.label || humanizeKey(d.key)}
+                      </Th>
                     ))}
-                    <Th align="right">Scans</Th>
-                    <Th>Last scan</Th>
+                    <Th onSort={() => sort.toggle("scanCount")} sorted={sort.stateOf("scanCount")} align="right">
+                      Scans
+                    </Th>
+                    <Th onSort={() => sort.toggle("lastScanAt")} sorted={sort.stateOf("lastScanAt")}>
+                      Last scan
+                    </Th>
                     <Th />
                   </tr>
                 </thead>

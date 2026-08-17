@@ -1,5 +1,7 @@
 import { Link } from "react-router";
 import type { AuditLogEntry } from "@sbom/shared";
+import { auditSort, sortDirections } from "@sbom/shared";
+import { useServerSort } from "../../lib/useSort.ts";
 import { formatDateTime, formatRelative } from "../../lib/format.ts";
 import { useAuditLog } from "../../lib/queries.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../../lib/useUrlState.ts";
@@ -44,10 +46,18 @@ const ACTIONS: Record<string, { label: string; tone: "neutral" | "ok" | "warn" |
 };
 
 const spec = {
-  defaults: { targetType: "" as (typeof TARGET_TYPES)[number], action: "", page: 1 },
+  defaults: {
+    targetType: "" as (typeof TARGET_TYPES)[number],
+    action: "",
+    sortBy: auditSort.defaultField,
+    sortDir: auditSort.defaultDirection,
+    page: 1,
+  },
   parse: (p: URLSearchParams) => ({
     targetType: readEnum(p, "targetType", TARGET_TYPES, ""),
     action: readString(p, "action"),
+    sortBy: readEnum(p, "sortBy", auditSort.fields, auditSort.defaultField),
+    sortDir: readEnum(p, "sortDir", sortDirections, auditSort.defaultDirection),
     page: readNumber(p, "page", 1),
   }),
 };
@@ -66,9 +76,12 @@ export function AdminAuditPage() {
   const entries = useAuditLog({
     targetType: state.targetType || undefined,
     action: state.action || undefined,
+    sortBy: state.sortBy,
+    sortDir: state.sortDir,
     page: state.page,
     pageSize: 50,
   });
+  const sort = useServerSort(auditSort, state, setState);
 
   return (
     <Card>
@@ -117,10 +130,19 @@ export function AdminAuditPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>When</Th>
-                  <Th>Who</Th>
-                  <Th>Action</Th>
-                  <Th>Target</Th>
+                  <Th onSort={() => sort.toggle("createdAt")} sorted={sort.stateOf("createdAt")}>
+                    When
+                  </Th>
+                  <Th onSort={() => sort.toggle("actorEmail")} sorted={sort.stateOf("actorEmail")}>
+                    Who
+                  </Th>
+                  <Th onSort={() => sort.toggle("action")} sorted={sort.stateOf("action")}>
+                    Action
+                  </Th>
+                  <Th onSort={() => sort.toggle("targetType")} sorted={sort.stateOf("targetType")}>
+                    Target
+                  </Th>
+                  {/* Per-action jsonb. No ordering of it would mean anything across actions. */}
                   <Th>Detail</Th>
                 </tr>
               </thead>

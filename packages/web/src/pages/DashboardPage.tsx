@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
+import { useClientSort } from "../lib/useSort.ts";
 import {
   TopVulnerableApplicationsCard,
   TopVulnerablePackagesCard,
@@ -130,7 +131,15 @@ function PlatformCard({
   /** Applications whose current build revealed neither an OS nor a runtime. */
   unknown?: number;
 }) {
-  const max = rows[0]?.applications ?? 0;
+  // Reduced over every row so the bars stay correct under any sort order.
+  const max = rows.reduce((m, r) => Math.max(m, r.applications), 0);
+  const sort = useClientSort(
+    rows,
+    { name: "text", version: "text", applications: "number" } as const,
+    { sortBy: "applications" },
+    (r, f) => (f === "name" ? r.label : f === "version" ? r.version : r.applications),
+    (r) => r.key,
+  );
 
   return (
     <Card>
@@ -147,16 +156,25 @@ function PlatformCard({
           <Table>
             <thead>
               <tr>
-                <Th>Name</Th>
-                <Th width="140px">Version</Th>
-                <Th align="right" width="80px">
+                <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                  Name
+                </Th>
+                <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")} width="140px">
+                  Version
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("applications")}
+                  sorted={sort.stateOf("applications")}
+                  align="right"
+                  width="80px"
+                >
                   Apps
                 </Th>
                 <Th width="140px">Share</Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {sort.rows.map((row) => (
                 <Tr key={row.key}>
                   <Td>
                     <Link to={row.href} className="font-medium text-accent hover:underline">
@@ -207,6 +225,41 @@ export function DashboardPage() {
   const platforms = usePlatformBreakdown();
   const top = useTopComponents({ limit: 10 });
   const recent = useRecentScans(8);
+
+  /*
+    Client-side on all three: these endpoints return a fixed top-N or the last few scans in
+    one response, so there is no second page for a server sort to reach.
+  */
+  const topSort = useClientSort(
+    top.data,
+    { package: "text", version: "text", applications: "number" } as const,
+    { sortBy: "applications" },
+    (c, f) => (f === "package" ? c.name : f === "version" ? c.version : c.applications),
+    (c) => `${c.componentId}:${c.version ?? ""}`,
+  );
+  const ecoSort = useClientSort(
+    ecosystems.data?.slice(0, 12),
+    { ecosystem: "text", components: "number", applications: "number" } as const,
+    { sortBy: "components" },
+    (e, f) => (f === "ecosystem" ? e.ecosystem : f === "components" ? e.components : e.applications),
+    (e) => e.ecosystem,
+  );
+  const recentSort = useClientSort(
+    recent.data,
+    { application: "text", build: "text", branch: "text", packages: "number", received: "date" } as const,
+    { sortBy: "received" },
+    (scan, f) =>
+      f === "application"
+        ? (scan.applicationName ?? "")
+        : f === "build"
+          ? scan.buildNumber
+          : f === "branch"
+            ? scan.branch
+            : f === "packages"
+              ? scan.componentCount
+              : scan.createdAt,
+    (scan) => scan.id,
+  );
   const vulnStatus = useVulnStatus();
   const vulnEnabled = vulnStatus.data?.enabled === true;
   const vulnFilter = toVulnFilter(state);
@@ -320,13 +373,23 @@ export function DashboardPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th>Package</Th>
-                    <Th>Version</Th>
-                    <Th align="right">Apps</Th>
+                    <Th onSort={() => topSort.toggle("package")} sorted={topSort.stateOf("package")}>
+                      Package
+                    </Th>
+                    <Th onSort={() => topSort.toggle("version")} sorted={topSort.stateOf("version")}>
+                      Version
+                    </Th>
+                    <Th
+                      onSort={() => topSort.toggle("applications")}
+                      sorted={topSort.stateOf("applications")}
+                      align="right"
+                    >
+                      Apps
+                    </Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {top.data.map((c) => (
+                  {topSort.rows.map((c) => (
                     <Tr key={`${c.componentId}-${c.version ?? ""}`}>
                       <Td>
                         <Link
@@ -366,14 +429,28 @@ export function DashboardPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th>Ecosystem</Th>
-                    <Th align="right">Packages</Th>
-                    <Th align="right">Apps</Th>
+                    <Th onSort={() => ecoSort.toggle("ecosystem")} sorted={ecoSort.stateOf("ecosystem")}>
+                      Ecosystem
+                    </Th>
+                    <Th
+                      onSort={() => ecoSort.toggle("components")}
+                      sorted={ecoSort.stateOf("components")}
+                      align="right"
+                    >
+                      Packages
+                    </Th>
+                    <Th
+                      onSort={() => ecoSort.toggle("applications")}
+                      sorted={ecoSort.stateOf("applications")}
+                      align="right"
+                    >
+                      Apps
+                    </Th>
                     <Th>Share</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ecosystems.data.slice(0, 12).map((e) => (
+                  {ecoSort.rows.map((e) => (
                     <Tr key={e.ecosystem}>
                       <Td>
                         <EcosystemBadge ecosystem={e.ecosystem} />
@@ -445,15 +522,29 @@ export function DashboardPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>Application</Th>
-                  <Th>Build</Th>
-                  <Th>Branch</Th>
-                  <Th align="right">Packages</Th>
-                  <Th>Received</Th>
+                  <Th onSort={() => recentSort.toggle("application")} sorted={recentSort.stateOf("application")}>
+                    Application
+                  </Th>
+                  <Th onSort={() => recentSort.toggle("build")} sorted={recentSort.stateOf("build")}>
+                    Build
+                  </Th>
+                  <Th onSort={() => recentSort.toggle("branch")} sorted={recentSort.stateOf("branch")}>
+                    Branch
+                  </Th>
+                  <Th
+                    onSort={() => recentSort.toggle("packages")}
+                    sorted={recentSort.stateOf("packages")}
+                    align="right"
+                  >
+                    Packages
+                  </Th>
+                  <Th onSort={() => recentSort.toggle("received")} sorted={recentSort.stateOf("received")}>
+                    Received
+                  </Th>
                 </tr>
               </thead>
               <tbody>
-                {recent.data.map((scan) => (
+                {recentSort.rows.map((scan) => (
                   <Tr key={scan.id}>
                     <Td>
                       <Link

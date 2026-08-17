@@ -1,11 +1,32 @@
 import { z } from "zod";
 import type { ScanSource } from "../enums.js";
 import { paginationQuerySchema, uuidSchema } from "./common.js";
+import { defineSortTable } from "./sort.js";
 
-export const listScansQuerySchema = paginationQuerySchema.extend({
-  branch: z.string().trim().max(255).optional(),
-  sortDir: z.enum(["asc", "desc"]).default("desc"),
-});
+/**
+ * Sortable columns of an application's scan history.
+ *
+ * Defaults to newest first — a build list is read from the top, and "what shipped most
+ * recently" is the question the page exists to answer.
+ */
+export const scanHistorySort = defineSortTable(
+  {
+    scannedAt: "date",
+    buildNumber: "text",
+    commitSha: "text",
+    branch: "text",
+    componentCount: "number",
+    imageRef: "text",
+    source: "text",
+  } as const,
+  "scannedAt",
+);
+
+export const listScansQuerySchema = paginationQuerySchema
+  .extend({
+    branch: z.string().trim().max(255).optional(),
+  })
+  .merge(scanHistorySort.querySchema);
 export type ListScansQuery = z.infer<typeof listScansQuerySchema>;
 
 /** A language runtime or application server observed in the image. */
@@ -63,12 +84,18 @@ export interface ScanSummary {
   uploadedByEmail: string | null;
 }
 
-export const listScanComponentsQuerySchema = paginationQuerySchema.extend({
-  search: z.string().trim().max(255).optional(),
-  ecosystem: z.string().trim().max(64).optional(),
-  sortBy: z.enum(["name", "version", "ecosystem"]).default("name"),
-  sortDir: z.enum(["asc", "desc"]).default("asc"),
-});
+/** Sortable columns of a component list — a scan's inventory, or an application's. */
+export const componentListSort = defineSortTable(
+  { name: "text", version: "text", ecosystem: "text", purl: "text" } as const,
+  "name",
+);
+
+export const listScanComponentsQuerySchema = paginationQuerySchema
+  .extend({
+    search: z.string().trim().max(255).optional(),
+    ecosystem: z.string().trim().max(64).optional(),
+  })
+  .merge(componentListSort.querySchema);
 export type ListScanComponentsQuery = z.infer<typeof listScanComponentsQuerySchema>;
 
 export interface ComponentRef {
@@ -128,20 +155,26 @@ export interface ScanDiff {
  * it was last seen in. This is the "package X was used before but is not in the
  * current build" view, and it is the reason scan history is kept indefinitely.
  */
-export const listRemovedComponentsQuerySchema = paginationQuerySchema.extend({
-  search: z.string().trim().max(255).optional(),
-  ecosystem: z.string().trim().max(64).optional(),
-  /**
-   * When true, a package counts as removed only if no version of it remains.
-   * When false (the default), an upgraded package reports its old version as
-   * removed — which is usually what someone auditing a specific vulnerable
-   * version wants to see.
-   */
-  ignoreVersion: z
-    .enum(["true", "false"])
-    .transform((v) => v === "true")
-    .default("false"),
-  sortBy: z.enum(["lastSeenAt", "name"]).default("lastSeenAt"),
-  sortDir: z.enum(["asc", "desc"]).default("desc"),
-});
+/** Sortable columns of the removed-components table. Defaults to most recently dropped. */
+export const removedComponentSort = defineSortTable(
+  { name: "text", version: "text", ecosystem: "text", lastSeenAt: "date", purl: "text" } as const,
+  "lastSeenAt",
+);
+
+export const listRemovedComponentsQuerySchema = paginationQuerySchema
+  .extend({
+    search: z.string().trim().max(255).optional(),
+    ecosystem: z.string().trim().max(64).optional(),
+    /**
+     * When true, a package counts as removed only if no version of it remains.
+     * When false (the default), an upgraded package reports its old version as
+     * removed — which is usually what someone auditing a specific vulnerable
+     * version wants to see.
+     */
+    ignoreVersion: z
+      .enum(["true", "false"])
+      .transform((v) => v === "true")
+      .default("false"),
+  })
+  .merge(removedComponentSort.querySchema);
 export type ListRemovedComponentsQuery = z.infer<typeof listRemovedComponentsQuerySchema>;

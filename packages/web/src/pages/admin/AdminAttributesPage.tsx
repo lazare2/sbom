@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useClientSort } from "../../lib/useSort.ts";
 import type { AttributeDefinition, AttributeType } from "@sbom/shared";
 import {
   useCreateAttributeDefinition,
@@ -37,6 +38,18 @@ const TYPE_LABELS: Record<AttributeType, string> = {
 };
 
 /**
+ * Sortable columns of the attribute-definition table. Client-side: the endpoint returns
+ * every definition at once, since there are only ever a handful.
+ */
+const ATTRIBUTE_COLUMNS = {
+  label: "text",
+  key: "text",
+  type: "text",
+  sortOrder: "number",
+  status: "text",
+} as const;
+
+/**
  * Manage the attribute definitions that drive per-application metadata.
  *
  * These are rows rather than columns so that adding "tier" or "cost centre" is
@@ -52,6 +65,33 @@ export function AdminAttributesPage() {
   const [editing, setEditing] = useState<AttributeDefinition | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AttributeDefinition | null>(null);
+
+  /*
+    Defaults to `sortOrder`, which is the order the fields are presented in on every
+    application form. Opening this screen and seeing a different order than the forms use
+    would make the Order column look like it does nothing.
+  */
+  const sort = useClientSort(
+    definitions.data,
+    ATTRIBUTE_COLUMNS,
+    { sortBy: "sortOrder", sortDir: "asc" },
+    (def, field) => {
+      switch (field) {
+        case "key":
+          return def.key;
+        case "type":
+          return def.type;
+        case "sortOrder":
+          return def.sortOrder;
+        case "status":
+          return def.isActive ? "active" : "inactive";
+        case "label":
+        default:
+          return def.label;
+      }
+    },
+    (def) => def.key,
+  );
   const [actionError, setActionError] = useState<unknown>(null);
 
   async function toggleActive(def: AttributeDefinition) {
@@ -98,17 +138,28 @@ export function AdminAttributesPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>Label</Th>
-                  <Th>Key</Th>
-                  <Th>Type</Th>
+                  <Th onSort={() => sort.toggle("label")} sorted={sort.stateOf("label")}>
+                    Label
+                  </Th>
+                  <Th onSort={() => sort.toggle("key")} sorted={sort.stateOf("key")}>
+                    Key
+                  </Th>
+                  <Th onSort={() => sort.toggle("type")} sorted={sort.stateOf("type")}>
+                    Type
+                  </Th>
+                  {/* A list of choices; there is no single value to order it by. */}
                   <Th>Options</Th>
-                  <Th align="right">Order</Th>
-                  <Th>Status</Th>
+                  <Th onSort={() => sort.toggle("sortOrder")} sorted={sort.stateOf("sortOrder")} align="right">
+                    Order
+                  </Th>
+                  <Th onSort={() => sort.toggle("status")} sorted={sort.stateOf("status")}>
+                    Status
+                  </Th>
                   <Th />
                 </tr>
               </thead>
               <tbody>
-                {definitions.data.map((def) => (
+                {sort.rows.map((def) => (
                   <Tr key={def.id}>
                     <Td className="font-medium text-text-base">{def.label}</Td>
                     <Td>

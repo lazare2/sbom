@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { paginationQuerySchema } from "./common.js";
-import type { ComponentSearchHit } from "./component.js";
+import { componentSearchSort, nameMatchSchema, type ComponentSearchHit } from "./component.js";
 
 /**
  * Bulk package search: take a pasted list, report which of those packages exist
@@ -23,6 +23,27 @@ import type { ComponentSearchHit } from "./component.js";
  * response size and the browser rendering it.
  */
 export const BULK_SEARCH_MAX_ENTRIES = 1000;
+
+/**
+ * Ceiling on distinct packages one input line may match.
+ *
+ * Only reachable in `contains` mode. Exact matching needs no cap — one name resolves to
+ * one package per ecosystem, and that is what let the original query pass a list of any
+ * length as four array parameters and stay bounded. Substring matching removes that
+ * guarantee entirely: a one-character entry can match a large slice of the component
+ * table, and 200 such lines multiply it.
+ *
+ * Capped **per line** rather than across the query on purpose. A single global budget lets
+ * the first broad entry consume all of it and starve the remaining 199 lines of results
+ * they did match — which reads as "those packages aren't here", the exact wrong answer for
+ * an audit. Per-line, one bad entry degrades only its own row, and says so.
+ *
+ * Counts distinct package **names**, not (name, version) rows. That is what the row reports,
+ * and it is the only reading that survives the estate's real shape: `libc6` alone carries
+ * five versions here, so a row-based cap would let one deb package exhaust an entry's whole
+ * budget and report "1 package matched (partial)".
+ */
+export const BULK_MATCH_CAP_PER_ENTRY = 50;
 
 /** How a version on an input line was interpreted. */
 export type BulkEntryVersionKind =
@@ -121,6 +142,22 @@ export interface BulkRollupRow {
   currentApplications: number;
   /** Applications that shipped it once but no longer do. */
   historicalApplications: number;
+  /**
+   * Distinct package names this line matched.
+   *
+   * Length is always 0 or 1 in `exact` mode, where the line names one package. In
+   * `contains` mode a line can match many, and then the count is the answer the row
+   * leads with — `react` matching twelve packages is neither a yes nor a no, and
+   * collapsing it to "found" would overstate the exposure while "not found" would hide it.
+   *
+   * Capped for display at BULK_MATCH_CAP_PER_ENTRY, and `matchedNamesTruncated` says when
+   * the cap was reached rather than letting a partial list read as complete.
+   */
+  matchedNames: string[];
+  /** How many distinct names matched, up to the cap. */
+  matchedNameCount: number;
+  /** True when this line hit BULK_MATCH_CAP_PER_ENTRY, so its results are partial. */
+  matchedNamesTruncated: boolean;
 }
 
 export interface BulkSearchSummary {
@@ -143,16 +180,37 @@ const bulkOptionsSchema = z.object({
    * paginated.
    */
   view: z.enum(["rollup", "matches"]).default("rollup"),
+  /**
+   * Name comparison, defaulting to `exact` — the opposite of the single search.
+   *
+   * That asymmetry is deliberate rather than an oversight. A pasted list is an audit: 200
+   * names in, 200 verdicts out, and substring matching would turn a precise question into
+   * a fuzzy one without being asked. `exact` also keeps the query bounded by construction.
+   * The default preserves the behaviour every existing saved list was run under, so
+   * re-opening one cannot silently change its answer.
+   */
+  match: nameMatchSchema.default("exact"),
 });
 
-export const bulkSearchBodySchema = bulkOptionsSchema.merge(paginationQuerySchema).extend({
-  /** The pasted text. Parsed server-side so the rules are one testable contract. */
-  input: z.string().min(1, "paste at least one package").max(200_000),
-});
+/**
+ * The `matches` view is the single search's table, so it takes the same sort columns —
+ * one declaration means the two views cannot sort the same header differently.
+ */
+const bulkSortSchema = componentSearchSort.querySchema;
+
+export const bulkSearchBodySchema = bulkOptionsSchema
+  .merge(paginationQuerySchema)
+  .merge(bulkSortSchema)
+  .extend({
+    /** The pasted text. Parsed server-side so the rules are one testable contract. */
+    input: z.string().min(1, "paste at least one package").max(200_000),
+  });
 export type BulkSearchBody = z.infer<typeof bulkSearchBodySchema>;
 
 /** Re-running a saved list: the input comes from the stored row, the options from the URL. */
-export const bulkSearchQuerySchema = bulkOptionsSchema.merge(paginationQuerySchema);
+export const bulkSearchQuerySchema = bulkOptionsSchema
+  .merge(paginationQuerySchema)
+  .merge(bulkSortSchema);
 export type BulkSearchQuery = z.infer<typeof bulkSearchQuerySchema>;
 
 export interface BulkSearchResult {

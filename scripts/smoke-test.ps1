@@ -2300,6 +2300,208 @@ try {
 
     # ======================================================================
     Write-Host ""
+    Write-Host "Table sorting" -ForegroundColor Cyan
+
+    <#
+      The property worth testing here is not "does sorting work" — a wrong order is
+      visible. It is that offset pagination over a sorted list neither duplicates nor
+      loses rows.
+
+      Sorting on a column with duplicate values leaves the order of tied rows to the
+      query plan, so the same row can land on page 1 and page 2 while another appears on
+      neither. It needs ties *and* a page boundary inside them to reproduce, it looks like
+      a data bug rather than a sorting one, and it is exactly what the unique tiebreaker in
+      lib/sorting.ts exists to prevent. Tiny page sizes below put a boundary inside almost
+      every tie group.
+    #>
+    function Test-PagedSort {
+        param([string]$Url, [string]$SortBy, [string]$Dir, [int]$PageSize, [string]$IdPath)
+
+        $first = Invoke-Api @("$Url&sortBy=$SortBy&sortDir=$Dir&page=1&pageSize=$PageSize", "-b", $readJar)
+        if ($first.Status -ne 200) { throw "page 1 returned $($first.Status): $($first.Body)" }
+
+        $total = [int]$first.Json.total
+        $pages = [int]$first.Json.totalPages
+        $ids = New-Object System.Collections.Generic.List[string]
+
+        for ($p = 1; $p -le $pages; $p++) {
+            $r = Invoke-Api @("$Url&sortBy=$SortBy&sortDir=$Dir&page=$p&pageSize=$PageSize", "-b", $readJar)
+            if ($r.Status -ne 200) { throw "page $p returned $($r.Status)" }
+            foreach ($item in $r.Json.items) {
+                # Composite for tables whose row identity is a pair, e.g. (advisory, package).
+                $key = ($IdPath -split ',' | ForEach-Object { $item.$_ }) -join '|'
+                $ids.Add($key)
+            }
+        }
+
+        $distinct = ($ids | Select-Object -Unique).Count
+        if ($ids.Count -ne $total) { throw "collected $($ids.Count) rows across $pages pages but total says $total" }
+        if ($distinct -ne $total) { throw "$($ids.Count - $distinct) duplicate row(s) across page boundaries" }
+        return $true
+    }
+
+    Assert-That "sorts applications on every declared column, both directions" {
+        $fields = @("name", "status", "platform", "componentCount", "scanCount", "lastScanAt", "createdAt")
+        foreach ($f in $fields) {
+            $asc = Invoke-Api @("$BaseUrl/api/v1/applications?pageSize=100&sortDir=asc&sortBy=$f", "-b", $readJar)
+            $desc = Invoke-Api @("$BaseUrl/api/v1/applications?pageSize=100&sortDir=desc&sortBy=$f", "-b", $readJar)
+            if ($asc.Status -ne 200 -or $desc.Status -ne 200) { throw "sortBy=$f rejected" }
+            # Same rows either way: a sort must reorder, never filter. A direction that
+            # dropped rows would be a WHERE clause wearing an ORDER BY's name.
+            $a = ($asc.Json.items | ForEach-Object { $_.id } | Sort-Object) -join ','
+            $d = ($desc.Json.items | ForEach-Object { $_.id } | Sort-Object) -join ','
+            if ($a -ne $d) { throw "sortBy=$f returned a different set of rows in each direction" }
+        }
+        $true
+    }
+
+    Assert-That "rejects a sort column it does not declare" {
+        # The whitelist is what keeps a client-supplied column out of the ORDER BY.
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications?sortBy=id;DROP+TABLE+application", "-b", $readJar)
+        $r.Status -eq 400
+    }
+
+    Assert-That "sorts applications by a custom attribute" {
+        # The one sort whose target comes from the request. Safe because a jsonb key binds
+        # as a value, not an identifier.
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications?sortBy=attribute&sortAttribute=squad&sortDir=asc&pageSize=100", "-b", $readJar)
+        $squads = @($r.Json.items | ForEach-Object { $_.attributes.squad } | Where-Object { $_ })
+        $sorted = @($squads | Sort-Object)
+        $r.Status -eq 200 -and ($squads -join ',') -eq ($sorted -join ',')
+    }
+
+    Assert-That "paginates a sorted application list without losing or repeating rows" {
+        # `?x=1` is a placeholder so Test-PagedSort can append with `&`. It must not carry a
+        # pageSize of its own: a repeated parameter arrives as an array and fails validation.
+        Test-PagedSort "$BaseUrl/api/v1/applications?x=1" "status" "desc" 3 "id"
+    }
+
+    Assert-That "paginates the audit trail sorted on a heavily tied column" {
+        # Hundreds of rows over a handful of distinct target types: many ties, many
+        # boundaries. The strongest available test of tiebreaker stability.
+        Test-PagedSort "$adminUrl/audit-log?x=1" "targetType" "asc" 20 "id"
+    }
+
+    if ($script:vulnReady) {
+        Assert-That "paginates advisories sorted by severity without losing rows" {
+            Test-PagedSort "$BaseUrl/api/v1/vulnerabilities?scope=all&currentOnly=false" "severity" "desc" 25 "vulnerabilityId"
+        }
+
+        Assert-That "paginates findings sorted by severity without losing rows" {
+            # Findings tie hardest: a base image contributes thousands sharing one severity,
+            # and most carry no CVSS, so the secondary key ties too.
+            $url = "$BaseUrl/api/v1/applications/$($script:appId)/vulnerabilities?scope=all&includeSuppressed=true"
+            Test-PagedSort $url "severity" "desc" 3 "vulnerabilityId,componentId"
+        }
+    }
+    else {
+        Write-Host "        skipped 2 sorted-pagination checks: vulnerability scanning is off" -ForegroundColor DarkGray
+    }
+
+    # ======================================================================
+    Write-Host ""
+    Write-Host "Exact vs substring name matching" -ForegroundColor Cyan
+
+    Assert-That "exact match returns only the package named, substring returns more" {
+        <#
+          The reported confusion: searching "react" returned reactive-element and reactor
+          but not react. Both modes existed; only the substring one was discoverable.
+          Asserted as a relationship rather than against fixed names, so it holds on any
+          estate: the exact result must be a subset of the substring result.
+        #>
+        $term = "log4j"
+        $contains = Invoke-Api @("$BaseUrl/api/v1/components/search?name=$term&match=contains&scope=all&pageSize=200", "-b", $readJar)
+        $exact = Invoke-Api @("$BaseUrl/api/v1/components/search?name=$term&match=exact&scope=all&pageSize=200", "-b", $readJar)
+        if ($contains.Status -ne 200 -or $exact.Status -ne 200) { throw "search rejected" }
+
+        $containsNames = @($contains.Json.items | ForEach-Object { $_.componentName } | Select-Object -Unique)
+        $exactNames = @($exact.Json.items | ForEach-Object { $_.componentName } | Select-Object -Unique)
+
+        # Every exact hit is named exactly the term, case aside.
+        foreach ($n in $exactNames) { if ($n.ToLower() -ne $term.ToLower()) { throw "exact returned '$n'" } }
+        # And every exact hit also appears under substring matching.
+        foreach ($n in $exactNames) { if ($containsNames -notcontains $n) { throw "'$n' missing from contains" } }
+        $containsNames.Count -ge $exactNames.Count
+    }
+
+    Assert-That "substring matching finds packages an exact search cannot" {
+        # `core` matches log4j-core and spring-core while matching nothing exactly, which is
+        # the whole reason the mode exists.
+        $contains = Invoke-Api @("$BaseUrl/api/v1/components/search?name=core&match=contains&scope=all&pageSize=200", "-b", $readJar)
+        $exact = Invoke-Api @("$BaseUrl/api/v1/components/search?name=core&match=exact&scope=all&pageSize=200", "-b", $readJar)
+        $containsNames = @($contains.Json.items | ForEach-Object { $_.componentName } | Select-Object -Unique)
+        $containsNames.Count -ge 1 -and [int]$exact.Json.total -eq 0
+    }
+
+    Assert-That "list search defaults to exact, so a saved list keeps its old answer" {
+        # The default is deliberately the opposite of the single search's. Changing it would
+        # silently change the result of every list anyone has already saved and shared.
+        $body = New-JsonFile -Name "bulk-default.json" -Data @{
+            input = "core`nexpress"; scope = "all"; view = "rollup"; pageSize = 100
+        }
+        $r = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/components/bulk-search",
+            "-H", "Content-Type: application/json", "--data-binary", "@$body", "-b", $readJar)
+        if ($r.Status -ne 200) { throw "bulk search returned $($r.Status): $($r.Body)" }
+        $core = $r.Json.rollup | Where-Object { $_.name -eq "core" }
+        $express = $r.Json.rollup | Where-Object { $_.name -eq "express" }
+        # `core` is not a package name, so exact mode must miss it.
+        (-not $core.found) -and $express.found -and $express.matchedNameCount -eq 1
+    }
+
+    Assert-That "list search in substring mode reports how many packages each line matched" {
+        $body = New-JsonFile -Name "bulk-contains.json" -Data @{
+            input = "core`nexpress`nnothing-matches-this"; scope = "all"; view = "rollup"
+            match = "contains"; pageSize = 100
+        }
+        $r = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/components/bulk-search",
+            "-H", "Content-Type: application/json", "--data-binary", "@$body", "-b", $readJar)
+        if ($r.Status -ne 200) { throw "bulk search returned $($r.Status): $($r.Body)" }
+
+        $core = $r.Json.rollup | Where-Object { $_.name -eq "core" }
+        $miss = $r.Json.rollup | Where-Object { $_.name -eq "nothing-matches-this" }
+
+        # The count is the answer for a multi-match line, and matchedNames must agree with it.
+        $core.found -and $core.matchedNameCount -ge 2 -and
+        $core.matchedNames.Count -eq $core.matchedNameCount -and
+        (-not $miss.found) -and $miss.matchedNameCount -eq 0 -and
+        # A miss is still reported: dropping it would turn the audit back into a search.
+        $null -ne $miss
+    }
+
+    Assert-That "list search treats LIKE metacharacters as literal text" {
+        <#
+          `%` inside an ILIKE pattern matches everything. Unescaped, an entry of "%" would
+          report the entire estate as a match while looking like an ordinary input line —
+          a wrong answer that presents itself as a very successful one.
+        #>
+        $body = New-JsonFile -Name "bulk-wildcard.json" -Data @{
+            input = "%`n_"; scope = "all"; view = "rollup"; match = "contains"; pageSize = 100
+        }
+        $r = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/components/bulk-search",
+            "-H", "Content-Type: application/json", "--data-binary", "@$body", "-b", $readJar)
+        if ($r.Status -ne 200) { throw "bulk search returned $($r.Status)" }
+        $matched = ($r.Json.rollup | Measure-Object -Property matchedNameCount -Sum).Sum
+        # No package is literally named "%" or "_", so both lines must miss.
+        [int]$matched -eq 0
+    }
+
+    Assert-That "the list search's matches view sorts on the same columns as the single search" {
+        # Both render one table component. Divergent sort vocabularies would let the same
+        # header sort differently on the two screens.
+        $body = New-JsonFile -Name "bulk-sorted.json" -Data @{
+            input = "express"; scope = "all"; view = "matches"; pageSize = 100
+            sortBy = "applicationName"; sortDir = "desc"
+        }
+        $r = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/components/bulk-search",
+            "-H", "Content-Type: application/json", "--data-binary", "@$body", "-b", $readJar)
+        if ($r.Status -ne 200) { throw "bulk search returned $($r.Status): $($r.Body)" }
+        $names = @($r.Json.matches.items | ForEach-Object { $_.applicationName })
+        $expected = @($names | Sort-Object -Descending)
+        ($names -join ',') -eq ($expected -join ',')
+    }
+
+    # ======================================================================
+    Write-Host ""
     Write-Host "Error handling" -ForegroundColor Cyan
 
     Assert-That "unknown route returns the standard error envelope" {

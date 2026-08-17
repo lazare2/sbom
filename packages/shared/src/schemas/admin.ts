@@ -1,13 +1,28 @@
 import { z } from "zod";
 import { paginationQuerySchema } from "./common.js";
+import { defineSortTable } from "./sort.js";
 
 // --- audit trail ------------------------------------------------------------
 
-export const listAuditLogQuerySchema = paginationQuerySchema.extend({
-  targetType: z.enum(["application", "user", "attribute_definition", "ingest_token", "scan"]).optional(),
-  targetId: z.string().trim().max(64).optional(),
-  action: z.string().trim().max(64).optional(),
-});
+/**
+ * Sortable columns of the audit trail. Newest first by default — an audit log is read
+ * from the top, and "what just happened" is the question it is usually opened for.
+ *
+ * `metadata` is deliberately not sortable: it is a jsonb blob whose shape differs per
+ * action, so there is no ordering of it that would mean anything to a reader.
+ */
+export const auditSort = defineSortTable(
+  { createdAt: "date", actorEmail: "text", action: "text", targetType: "text" } as const,
+  "createdAt",
+);
+
+export const listAuditLogQuerySchema = paginationQuerySchema
+  .extend({
+    targetType: z.enum(["application", "user", "attribute_definition", "ingest_token", "scan"]).optional(),
+    targetId: z.string().trim().max(64).optional(),
+    action: z.string().trim().max(64).optional(),
+  })
+  .merge(auditSort.querySchema);
 export type ListAuditLogQuery = z.infer<typeof listAuditLogQuerySchema>;
 
 export interface AuditLogEntry {

@@ -5,11 +5,40 @@ import type {
   Paginated,
   RemovedComponent,
   ScanDiff,
+  SortDirection,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { BadRequestError, NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
+import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
+
+/**
+ * Sort clause for the removed-components table.
+ *
+ * Not shared with `componentOrderBy`: this query's rows are keyed on the component alone
+ * (the `ever` CTE is `DISTINCT ON (component_id)`), and it carries a `last_seen_at` the
+ * plain component lists do not have.
+ */
+function removedOrderBy(sortBy: ListRemovedComponentsQuery["sortBy"], dir: SortDirection): SQL {
+  const dir_ = direction(dir);
+  const nulls = directionNullsLast(dir);
+  const byName = sql`lower(c.name) ASC, c.version ASC NULLS LAST`;
+
+  switch (sortBy) {
+    case "name":
+      return orderBy([sql`lower(c.name) ${dir_}`, sql`c.version ASC NULLS LAST`], sql`c.id`);
+    case "version":
+      return orderBy([sql`c.version ${nulls}`, sql`lower(c.name) ASC`], sql`c.id`);
+    case "ecosystem":
+      return orderBy([sql`c.ecosystem ${dir_}`, byName], sql`c.id`);
+    case "purl":
+      return orderBy([sql`c.purl ${nulls}`, byName], sql`c.id`);
+    case "lastSeenAt":
+    default:
+      return orderBy([sql`e.last_seen_at ${dir_}`, byName], sql`c.id`);
+  }
+}
 
 /**
  * Per-side cap on a scan diff.
@@ -174,12 +203,6 @@ export class DiffService {
               AND cur.component_id = c.id
           )`;
 
-    const direction = query.sortDir === "desc" ? sql.raw("DESC") : sql.raw("ASC");
-    const orderBy =
-      query.sortBy === "name"
-        ? sql`ORDER BY lower(c.name) ${direction}, c.version ASC NULLS LAST`
-        : sql`ORDER BY e.last_seen_at ${direction}, lower(c.name) ASC`;
-
     const rows = await db.execute<Row<RemovedRow>>(sql`
       WITH ever AS (
         SELECT DISTINCT ON (sc.component_id)
@@ -200,7 +223,7 @@ export class DiffService {
       JOIN scan s ON s.id = e.last_seen_scan_id
       WHERE ${sql.join(conditions, sql` AND `)}
         AND NOT ${stillPresent}
-      ${orderBy}
+      ${removedOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
 

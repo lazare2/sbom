@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { UserSummary } from "@sbom/shared";
+import { sortDirections, userSort } from "@sbom/shared";
+import { useServerSort } from "../../lib/useSort.ts";
 import { useAuth } from "../../auth/AuthProvider.tsx";
 import { formatDate, formatRelative } from "../../lib/format.ts";
 import {
@@ -34,14 +36,20 @@ import {
 } from "../../components/ui.tsx";
 
 const ROLES = ["", "admin", "user"] as const;
-const SORTS = ["email", "createdAt", "lastLoginAt", "role"] as const;
 
 const spec = {
-  defaults: { search: "", role: "" as (typeof ROLES)[number], sortBy: "email" as (typeof SORTS)[number], page: 1 },
+  defaults: {
+    search: "",
+    role: "" as (typeof ROLES)[number],
+    sortBy: userSort.defaultField,
+    sortDir: userSort.defaultDirection,
+    page: 1,
+  },
   parse: (p: URLSearchParams) => ({
     search: readString(p, "search"),
     role: readEnum(p, "role", ROLES, ""),
-    sortBy: readEnum(p, "sortBy", SORTS, "email"),
+    sortBy: readEnum(p, "sortBy", userSort.fields, userSort.defaultField),
+    sortDir: readEnum(p, "sortDir", sortDirections, userSort.defaultDirection),
     page: readNumber(p, "page", 1),
   }),
 };
@@ -61,10 +69,12 @@ export function AdminUsersPage() {
     search: state.search || undefined,
     role: state.role || undefined,
     sortBy: state.sortBy,
+    sortDir: state.sortDir,
     page: state.page,
     pageSize: 25,
   };
   const users = useUsers(query);
+  const sort = useServerSort(userSort, state, setState);
 
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
@@ -119,17 +129,6 @@ export function AdminUsersPage() {
               { value: "user", label: "Users" },
             ]}
           />
-          <Select
-            value={state.sortBy}
-            ariaLabel="Sort accounts"
-            onChange={(v) => setState({ sortBy: v })}
-            options={[
-              { value: "email", label: "Sort: identifier" },
-              { value: "role", label: "Sort: role" },
-              { value: "lastLoginAt", label: "Sort: last sign-in" },
-              { value: "createdAt", label: "Sort: created" },
-            ]}
-          />
         </div>
 
         {actionError ? (
@@ -152,12 +151,28 @@ export function AdminUsersPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th>Identifier</Th>
-                    <Th>Role</Th>
-                    <Th>Status</Th>
-                    <Th>Last sign-in</Th>
-                    <Th align="right">Sessions</Th>
-                    <Th>Created</Th>
+                    <Th onSort={() => sort.toggle("email")} sorted={sort.stateOf("email")}>
+                      Identifier
+                    </Th>
+                    <Th onSort={() => sort.toggle("role")} sorted={sort.stateOf("role")}>
+                      Role
+                    </Th>
+                    <Th onSort={() => sort.toggle("isActive")} sorted={sort.stateOf("isActive")}>
+                      Status
+                    </Th>
+                    <Th onSort={() => sort.toggle("lastLoginAt")} sorted={sort.stateOf("lastLoginAt")}>
+                      Last sign-in
+                    </Th>
+                    <Th
+                      onSort={() => sort.toggle("activeSessions")}
+                      sorted={sort.stateOf("activeSessions")}
+                      align="right"
+                    >
+                      Sessions
+                    </Th>
+                    <Th onSort={() => sort.toggle("createdAt")} sorted={sort.stateOf("createdAt")}>
+                      Created
+                    </Th>
                     <Th />
                   </tr>
                 </thead>

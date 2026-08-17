@@ -8,11 +8,13 @@ import type {
   ListApplicationsQuery,
   ListScanComponentsQuery,
   Paginated,
+  SortDirection,
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import { NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
+import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
 import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 
 /**
@@ -111,7 +113,7 @@ export class ApplicationsService {
 
     const where = sql.join([sql`WHERE `, sql.join(conditions, sql` AND `)]);
 
-    const orderBy = this.orderByClause(query.sortBy, query.sortDir);
+    const orderByClause = this.orderByClause(query);
     const limit = query.pageSize;
     const offset = offsetOf(query);
 
@@ -132,7 +134,7 @@ export class ApplicationsService {
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
       ${where}
-      ${orderBy}
+      ${orderByClause}
       LIMIT ${limit} OFFSET ${offset}
     `);
 
@@ -141,29 +143,50 @@ export class ApplicationsService {
   }
 
   /**
-   * Sort clause.
+   * Sort clause for the applications list.
    *
-   * Built from a closed set of literals rather than interpolating the incoming
-   * value — the column name cannot be parameterised, so a whitelist is the only
-   * safe construction. `sortBy` is already constrained by the Zod schema; this is
-   * the second line of defence that survives someone widening that enum later.
+   * A `switch` over literals, not interpolation of the incoming value: see the notes in
+   * lib/sorting.ts for why the column can never come from the client and why every branch
+   * ends in `a.id`.
    */
-  private orderByClause(sortBy: ListApplicationsQuery["sortBy"], dir: "asc" | "desc"): SQL {
-    const direction = dir === "desc" ? sql.raw("DESC") : sql.raw("ASC");
+  private orderByClause(query: ListApplicationsQuery): SQL {
+    const { sortBy, sortDir: dir } = query;
+    const dir_ = direction(dir);
+    const nulls = directionNullsLast(dir);
+    // Case-insensitive, so `Zebra` does not sort before `apple`.
+    const byName = sql`lower(a.name) ASC`;
+
     switch (sortBy) {
+      case "attribute": {
+        /*
+          The only sort whose target comes from the request. Safe because a jsonb key is a
+          value: `sql.param` binds it, so it cannot become SQL. Falls back to name when no
+          attribute was named rather than ordering by a null expression, which would make
+          the whole sort a no-op and look like the header did nothing.
+        */
+        if (!query.sortAttribute) return orderBy([sql`lower(a.name) ${dir_}`], sql`a.id`);
+        return orderBy(
+          [sql`lower(a.attributes->>${sql.param(query.sortAttribute)}) ${nulls}`, byName],
+          sql`a.id`,
+        );
+      }
       case "createdAt":
-        return sql`ORDER BY a.created_at ${direction}, a.name ASC`;
+        return orderBy([sql`a.created_at ${dir_}`], sql`a.id`);
       case "lastScanAt":
-        // NULLS LAST in both directions: a never-scanned application is not
-        // "the oldest scan", it is the absence of one, and burying it at the
-        // bottom is what a reader expects either way.
-        return sql`ORDER BY a.last_scan_at ${direction} NULLS LAST, a.name ASC`;
+        return orderBy([sql`a.last_scan_at ${nulls}`, byName], sql`a.id`);
       case "status":
-        return sql`ORDER BY a.status ${direction}, a.name ASC`;
+        return orderBy([sql`a.status ${dir_}`, byName], sql`a.id`);
+      case "platform":
+        // Sorts on the current build's OS. Applications with no scan have no platform at
+        // all, which is why this is nullable rather than an empty string.
+        return orderBy([sql`s.os_pretty ${nulls}`, byName], sql`a.id`);
+      case "componentCount":
+        return orderBy([sql`s.component_count ${nulls}`, byName], sql`a.id`);
+      case "scanCount":
+        return orderBy([sql`a.scan_count ${dir_}`, byName], sql`a.id`);
       case "name":
       default:
-        // Case-insensitive, so `Zebra` does not sort before `apple`.
-        return sql`ORDER BY lower(a.name) ${direction}`;
+        return orderBy([sql`lower(a.name) ${dir_}`], sql`a.id`);
     }
   }
 
@@ -252,20 +275,13 @@ export class ApplicationsService {
     }
 
     const where = sql.join([sql`WHERE `, sql.join(conditions, sql` AND `)]);
-    const direction = query.sortDir === "desc" ? sql.raw("DESC") : sql.raw("ASC");
-    const orderBy =
-      query.sortBy === "version"
-        ? sql`ORDER BY c.version ${direction} NULLS LAST, lower(c.name) ASC`
-        : query.sortBy === "ecosystem"
-          ? sql`ORDER BY c.ecosystem ${direction}, lower(c.name) ASC`
-          : sql`ORDER BY lower(c.name) ${direction}, c.version ASC NULLS LAST`;
 
     const rows = await db.execute<Row<ComponentQueryRow>>(sql`
       SELECT c.id, c.name, c.version, c.ecosystem, c.purl, count(*) OVER () AS total
       FROM scan_component sc
       JOIN component c ON c.id = sc.component_id
       ${where}
-      ${orderBy}
+      ${componentOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
 
@@ -298,6 +314,32 @@ export class ApplicationsService {
     return rowsOf(rows)
       .map((r) => r.value)
       .filter((v): v is string => v !== null);
+  }
+}
+
+/**
+ * Sort clause for a component list — a scan's inventory, or an application's history.
+ *
+ * Exported and shared by every component table rather than repeated per query: they are
+ * the same columns over the same join, and one function is what stops the same header
+ * sorting differently on two pages. `c.id` is the unique tail, since a package name
+ * repeats across its versions.
+ */
+export function componentOrderBy(sortBy: ListScanComponentsQuery["sortBy"], dir: SortDirection): SQL {
+  const dir_ = direction(dir);
+  const nulls = directionNullsLast(dir);
+  const byName = sql`lower(c.name) ASC, c.version ASC NULLS LAST`;
+
+  switch (sortBy) {
+    case "version":
+      return orderBy([sql`c.version ${nulls}`, sql`lower(c.name) ASC`], sql`c.id`);
+    case "ecosystem":
+      return orderBy([sql`c.ecosystem ${dir_}`, byName], sql`c.id`);
+    case "purl":
+      return orderBy([sql`c.purl ${nulls}`, byName], sql`c.id`);
+    case "name":
+    default:
+      return orderBy([sql`lower(c.name) ${dir_}`, sql`c.version ASC NULLS LAST`], sql`c.id`);
   }
 }
 

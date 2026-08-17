@@ -25,7 +25,13 @@ import path from "node:path";
  */
 const OUT =
   process.argv[2] ?? path.join(path.dirname(new URL(import.meta.url).pathname.slice(1)), "..", "var", "ui-shots");
-const BASE = "http://127.0.0.1:5173";
+/*
+  `localhost`, not `127.0.0.1`. Vite binds to whatever the OS resolves `localhost` to, and
+  on this machine that is `[::1]` alone — a hardcoded IPv4 literal is then refused outright
+  while the dev server is running perfectly well. Overridable so the script can be pointed
+  at a preview build or a container.
+*/
+const BASE = process.env.UI_DRIVE_BASE ?? "http://localhost:5173";
 const EMAIL = "admin@sbom.local";
 const PASSWORD = "jTzq7I-Al4E96PmO";
 
@@ -1026,6 +1032,174 @@ await shot("admin-after-cleanup");
 
 // --- 24. dark mode ---------------------------------------------------------
 log("24. dark colour scheme");
+// --- 23b. sortable column headers -------------------------------------------
+/*
+  Drives the arrows the way a person does, in the real browser, because the parts that
+  break are the parts a request-level test cannot see: whether the header is actually a
+  button, whether the caret reflects the state the rows are in, and whether the round trip
+  reorders anything at all.
+
+  Asserted through `aria-sort` rather than the caret glyph. It is the same state the
+  screen reader gets, so a passing check means the control is announced correctly too — and
+  it does not break the next time the arrows are restyled.
+*/
+async function driveSort(route, headerName, { expectRowsChange = true } = {}) {
+  await page.goto(`${BASE}${route}`, { waitUntil: "networkidle" });
+  await page.locator("tbody tr").first().waitFor({ timeout: 15000 });
+
+  const header = page.getByRole("columnheader", { name: new RegExp(headerName, "i") }).first();
+  const button = header.getByRole("button").first();
+  if ((await button.count()) === 0) {
+    problems.push(`"${headerName}" on ${route} has no sort button`);
+    return;
+  }
+
+  const rowsNow = () => page.locator("tbody tr").evaluateAll((trs) => trs.map((tr) => tr.textContent).join("|"));
+  const sortState = () => header.getAttribute("aria-sort");
+
+  const before = await rowsNow();
+  const initial = await sortState();
+
+  // First click: the column's natural direction.
+  await button.click();
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(350);
+  const firstDir = await sortState();
+  const afterFirst = await rowsNow();
+
+  if (firstDir !== "ascending" && firstDir !== "descending") {
+    problems.push(`"${headerName}" on ${route} did not report a sort direction (aria-sort=${firstDir})`);
+    return;
+  }
+
+  // Second click: the reverse.
+  await button.click();
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(350);
+  const secondDir = await sortState();
+  const afterSecond = await rowsNow();
+
+  if (secondDir === firstDir) {
+    problems.push(`"${headerName}" on ${route} did not reverse on a second click (still ${secondDir})`);
+  }
+  /*
+    Row text must actually change between the two directions. This is the assertion that
+    catches a header wired to a column the API silently ignores — the caret would flip
+    while the rows sat still, which is the failure mode most likely to ship unnoticed.
+    Skipped where the table is too short or too uniform for a reversal to be visible.
+  */
+  if (expectRowsChange && afterFirst === afterSecond && afterFirst.includes("|")) {
+    problems.push(`"${headerName}" on ${route} flipped its caret but did not reorder any rows`);
+  }
+  log(
+    `  OK   ${route} "${headerName}": ${initial ?? "none"} -> ${firstDir} -> ${secondDir}` +
+      `${before === afterFirst ? " (rows unchanged on first click)" : ""}`,
+  );
+}
+
+log("23b. sortable column headers");
+// One server-paginated table per shape, plus two client-sorted ones. Between them these
+// cover both hooks, the attribute-keyed sort, and a ranked (non-alphabetical) column.
+await driveSort("/applications", "Application");
+await driveSort("/applications", "Components");
+await driveSort("/applications", "Squad");
+await driveSort("/admin/users", "Identifier", { expectRowsChange: false });
+await driveSort("/admin/audit", "Action");
+await driveSort("/admin/tokens", "Name", { expectRowsChange: false });
+await driveSort("/analytics", "Ecosystem");
+
+// The neutral state: a column nobody has clicked must announce itself as unsorted, or the
+// caret is decoration rather than state.
+await page.goto(`${BASE}/applications`, { waitUntil: "networkidle" });
+await page.locator("tbody tr").first().waitFor({ timeout: 15000 });
+const untouched = await page
+  .getByRole("columnheader", { name: /Scans/i })
+  .first()
+  .getAttribute("aria-sort");
+if (untouched !== "none") {
+  problems.push(`an unclicked header reports aria-sort="${untouched}" instead of "none"`);
+} else {
+  log("  OK   an unclicked column announces itself as unsorted");
+}
+await shot("sortable-headers");
+
+// --- 23c. exact-match checkbox ----------------------------------------------
+/*
+  The reported bug: searching "react" returned reactive-element and reactor but never react
+  itself, with no visible way to narrow it. Both modes already existed behind a two-value
+  dropdown in a row of other dropdowns, which is why nobody found it. Driven here to prove
+  the checkbox is present, changes the query, and survives a reload — the last part matters
+  because the mode lives in the URL and a shared link has to carry it.
+*/
+log("23c. exact name match");
+await page.goto(`${BASE}/search?name=core&scope=all`, { waitUntil: "networkidle" });
+await page.waitForTimeout(800);
+
+const exactBox = page.getByLabel("Exact name match");
+if ((await exactBox.count()) === 0) {
+  problems.push("the package search has no 'Exact name match' checkbox");
+} else {
+  const containsCount = await page.locator("tbody tr").count();
+  /*
+    `click()`, not `check()`. Toggling re-renders the filter bar and React replaces the input
+    node, so `check()` asserts against a handle that is no longer in the document and reports
+    "clicking the checkbox did not change its state" even though it did. Verified below on a
+    freshly resolved locator instead.
+  */
+  await exactBox.click();
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(800);
+
+  if (!(await page.getByLabel("Exact name match").isChecked())) {
+    problems.push("clicking 'Exact name match' did not check it");
+  }
+
+  if (!page.url().includes("match=exact")) {
+    problems.push(`checking exact match did not reach the URL: ${page.url()}`);
+  }
+  const exactCount = await page.locator("tbody tr").count();
+  // "core" is a substring of log4j-core and spring-core but is no package's whole name, so
+  // exact matching must return strictly fewer rows.
+  if (exactCount >= containsCount && containsCount > 0) {
+    problems.push(`exact match returned ${exactCount} rows, not fewer than contains' ${containsCount}`);
+  } else {
+    log(`  OK   contains ${containsCount} rows -> exact ${exactCount} rows`);
+  }
+
+  // Survives a reload, which is what makes the mode shareable.
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  if (!(await page.getByLabel("Exact name match").isChecked())) {
+    problems.push("the exact-match checkbox did not survive a reload");
+  } else {
+    log("  OK   the mode survives a reload, so a shared link carries it");
+  }
+  await shot("exact-name-match");
+
+  await page.getByLabel("Exact name match").click();
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(500);
+  if (page.url().includes("match=exact")) {
+    problems.push("unchecking exact match left match=exact in the URL");
+  } else {
+    log("  OK   unchecking returns the URL to its default");
+  }
+}
+
+// The list search carries the same control, defaulting the other way.
+await page.goto(`${BASE}/search?mode=list`, { waitUntil: "networkidle" });
+await page.waitForTimeout(500);
+const listExact = page.getByLabel("Exact name match");
+if ((await listExact.count()) === 0) {
+  problems.push("the list search has no 'Exact name match' checkbox");
+} else if (!(await listExact.isChecked())) {
+  // Deliberately the opposite default: a pasted list is an audit, and every saved list was
+  // run under exact matching.
+  problems.push("the list search's exact-match checkbox does not default to checked");
+} else {
+  log("  OK   the list search defaults to exact matching");
+}
+
 await context.close();
 const darkContext = await browser.newContext({
   viewport: { width: 1500, height: 950 },

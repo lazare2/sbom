@@ -1,11 +1,46 @@
 import { sql, type SQL } from "drizzle-orm";
-import type { ListScansQuery, Paginated, ScanSource, ScanSummary } from "@sbom/shared";
+import type { ListScansQuery, Paginated, ScanSource, ScanSummary, SortDirection } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
+import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
 import type { BlobStore } from "../../services/blob-store/index.js";
 import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
+
+/**
+ * Sort clause for an application's scan history.
+ *
+ * `s.id` is the unique tail, and it matters more here than elsewhere: two builds of the
+ * same commit can share a timestamp to the millisecond, and CI running two pipelines
+ * concurrently makes that ordinary rather than rare.
+ *
+ * Build numbers sort with `NULLS LAST` because a manually uploaded SBOM has none — that is
+ * a scan with no build, not build zero.
+ */
+function scanHistoryOrderBy(sortBy: ListScansQuery["sortBy"], dir: SortDirection): SQL {
+  const dir_ = direction(dir);
+  const nulls = directionNullsLast(dir);
+  const byNewest = sql`s.created_at DESC`;
+
+  switch (sortBy) {
+    case "buildNumber":
+      return orderBy([sql`s.build_number ${nulls}`, byNewest], sql`s.id`);
+    case "commitSha":
+      return orderBy([sql`s.commit_sha ${nulls}`, byNewest], sql`s.id`);
+    case "branch":
+      return orderBy([sql`s.branch ${nulls}`, byNewest], sql`s.id`);
+    case "componentCount":
+      return orderBy([sql`s.component_count ${dir_}`, byNewest], sql`s.id`);
+    case "imageRef":
+      return orderBy([sql`s.image_ref ${nulls}`, byNewest], sql`s.id`);
+    case "source":
+      return orderBy([sql`s.source ${dir_}`, byNewest], sql`s.id`);
+    case "scannedAt":
+    default:
+      return orderBy([sql`s.created_at ${dir_}`], sql`s.id`);
+  }
+}
 
 interface ScanQueryRow extends PlatformRow {
   id: string;
@@ -64,7 +99,6 @@ export class ScansService {
       conditions.push(sql`s.branch = ${query.branch}`);
     }
     const where = sql.join([sql`WHERE `, sql.join(conditions, sql` AND `)]);
-    const direction = query.sortDir === "desc" ? sql.raw("DESC") : sql.raw("ASC");
 
     const rows = await db.execute<Row<ScanQueryRow>>(sql`
       SELECT
@@ -78,7 +112,7 @@ export class ScansService {
       FROM scan s
       JOIN application a ON a.id = s.application_id
       ${where}
-      ORDER BY s.created_at ${direction}, s.id ${direction}
+      ${scanHistoryOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
 

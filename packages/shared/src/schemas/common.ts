@@ -15,8 +15,8 @@ export interface Paginated<T> {
   totalPages: number;
 }
 
-export const sortDirectionSchema = z.enum(["asc", "desc"]);
-export type SortDirection = z.infer<typeof sortDirectionSchema>;
+// Sorting lives in ./sort.js, which owns the direction type along with the per-table
+// column declarations that both ends validate and render against.
 
 export const uuidSchema = z.string().uuid();
 

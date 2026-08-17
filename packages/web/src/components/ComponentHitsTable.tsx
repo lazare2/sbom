@@ -1,7 +1,10 @@
 import { Link } from "react-router";
-import type { ComponentSearchHit } from "@sbom/shared";
+import type { ComponentSearchHit, componentSearchSort } from "@sbom/shared";
 import { formatDateTime, formatRelative } from "../lib/format.ts";
+import type { SortControl } from "../lib/useSort.ts";
 import { Badge, EcosystemBadge, StatusBadge, Table, TableWrap, Td, Th, Tr } from "./ui.tsx";
+
+type HitSortField = (typeof componentSearchSort)["fields"][number];
 
 /**
  * The package × application result table.
@@ -11,20 +14,49 @@ import { Badge, EcosystemBadge, StatusBadge, Table, TableWrap, Td, Th, Tr } from
  * two views drifting apart in how they describe a hit — "current" meaning one
  * thing on one screen and something subtly different on the other is the kind of
  * inconsistency that makes people stop trusting a search.
+ *
+ * `sort` is optional so a caller that renders an unpaginated excerpt can omit it and get
+ * plain headers. Where it is passed, both callers page server-side and the sort goes with
+ * the query — sorting a page in the browser would reorder the rows on screen while leaving
+ * the rest of the result set untouched.
  */
-export function ComponentHitsTable({ hits }: { hits: readonly ComponentSearchHit[] }) {
+export function ComponentHitsTable({
+  hits,
+  sort,
+}: {
+  hits: readonly ComponentSearchHit[];
+  sort?: SortControl<HitSortField>;
+}) {
+  /** Undefined when unsorted, so `<Th>` falls back to a plain header. */
+  const on = (field: HitSortField) => (sort ? () => sort.toggle(field) : undefined);
+  const at = (field: HitSortField) => (sort ? sort.stateOf(field) : undefined);
+
   return (
     <TableWrap>
       <Table>
         <thead>
           <tr>
-            <Th>Application</Th>
-            <Th width="120px">Status</Th>
-            <Th>Package</Th>
-            <Th width="170px">Version</Th>
-            <Th width="110px">Ecosystem</Th>
-            <Th width="130px">Usage</Th>
-            <Th width="200px">Last seen in</Th>
+            <Th onSort={on("applicationName")} sorted={at("applicationName")}>
+              Application
+            </Th>
+            <Th onSort={on("applicationStatus")} sorted={at("applicationStatus")} width="120px">
+              Status
+            </Th>
+            <Th onSort={on("componentName")} sorted={at("componentName")}>
+              Package
+            </Th>
+            <Th onSort={on("componentVersion")} sorted={at("componentVersion")} width="170px">
+              Version
+            </Th>
+            <Th onSort={on("ecosystem")} sorted={at("ecosystem")} width="110px">
+              Ecosystem
+            </Th>
+            <Th onSort={on("usage")} sorted={at("usage")} width="130px">
+              Usage
+            </Th>
+            <Th onSort={on("lastSeenAt")} sorted={at("lastSeenAt")} width="200px">
+              Last seen in
+            </Th>
           </tr>
         </thead>
         <tbody>

@@ -5,9 +5,11 @@ import type {
   ComponentSuggestion,
   ComponentSuggestQuery,
   Paginated,
+  SortDirection,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
+import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 
 /**
@@ -123,7 +125,7 @@ export class ComponentsService {
       JOIN application a ON a.id = u.application_id
       JOIN scan s        ON s.id = u.last_seen_scan_id
       WHERE true ${scopeCondition} ${statusCondition}
-      ORDER BY lower(m.name) ASC, m.version ASC NULLS LAST, lower(a.name) ASC
+      ${searchOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
 
@@ -245,6 +247,46 @@ interface SearchRow {
   last_seen_build_number: string | null;
   total?: number | string;
   matched_components: number | string;
+}
+
+/**
+ * Sort clause for the search results.
+ *
+ * The rows are a package × application cross product, so the two obvious readings need
+ * different secondary keys: sorting by package should group an application's versions
+ * together underneath it, and sorting by application should group its packages. Each
+ * branch therefore names the *other* axis as its secondary key.
+ *
+ * The final tiebreaker is the (component, application) pair, which is exactly the
+ * DISTINCT ON key of the `usage` CTE and so is unique per row. Without it, an estate with
+ * many same-named packages would shuffle rows across page boundaries.
+ */
+function searchOrderBy(sortBy: ComponentSearchQuery["sortBy"], dir: SortDirection): SQL {
+  const dir_ = direction(dir);
+  const nulls = directionNullsLast(dir);
+  const byPackage = sql`lower(m.name) ASC, m.version ASC NULLS LAST`;
+  const byApp = sql`lower(a.name) ASC`;
+  const unique = sql`m.id, a.id`;
+
+  switch (sortBy) {
+    case "applicationStatus":
+      return orderBy([sql`a.status ${dir_}`, byApp, byPackage], unique);
+    case "componentName":
+      return orderBy([sql`lower(m.name) ${dir_}`, sql`m.version ASC NULLS LAST`, byApp], unique);
+    case "componentVersion":
+      return orderBy([sql`m.version ${nulls}`, byPackage, byApp], unique);
+    case "ecosystem":
+      return orderBy([sql`m.ecosystem ${dir_}`, byPackage, byApp], unique);
+    case "usage":
+      // `in_latest` is a boolean; sorting it descending puts current usage first, which is
+      // the reading that matches the column's label.
+      return orderBy([sql`(u.last_seen_scan_id = a.latest_scan_id) ${dir_}`, byApp, byPackage], unique);
+    case "lastSeenAt":
+      return orderBy([sql`u.last_seen_at ${nulls}`, byApp, byPackage], unique);
+    case "applicationName":
+    default:
+      return orderBy([sql`lower(a.name) ${dir_}`, byPackage], unique);
+  }
 }
 
 function toSearchHit(row: SearchRow): ComponentSearchHit {

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import type { Paginated, VulnBreakdown, VulnerabilityFinding, VulnSeverity } from "@sbom/shared";
+import type { Paginated, SortDirection, VulnBreakdown, VulnerabilityFinding, VulnSeverity } from "@sbom/shared";
+import { findingSort } from "@sbom/shared";
+import { useServerSort, type SortControl } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useCreateSuppression } from "../lib/mutations.ts";
 import { formatNumber } from "../lib/format.ts";
@@ -42,11 +44,15 @@ export interface FindingsFilters {
   fixable: boolean;
   knownExploited: boolean;
   includeSuppressed: boolean;
+  sortBy: (typeof findingSort)["fields"][number];
+  sortDir: SortDirection;
   page: number;
 }
 
 export const DEFAULT_FINDINGS_FILTERS: FindingsFilters = {
   scope: "app",
+  sortBy: findingSort.defaultField,
+  sortDir: findingSort.defaultDirection,
   severity: "",
   fixable: false,
   knownExploited: false,
@@ -165,6 +171,8 @@ export function findingsParams(filters: FindingsFilters, pageSize = 50): Record<
     fixable: filters.fixable ? "true" : undefined,
     knownExploited: filters.knownExploited ? "true" : undefined,
     includeSuppressed: filters.includeSuppressed ? "true" : undefined,
+    sortBy: filters.sortBy,
+    sortDir: filters.sortDir,
     page: filters.page,
     pageSize,
   };
@@ -176,6 +184,7 @@ export function FindingsTable({
   isFetching,
   applicationId,
   onPageChange,
+  sort,
 }: {
   data: Paginated<VulnerabilityFinding> | undefined;
   isLoading: boolean;
@@ -183,9 +192,13 @@ export function FindingsTable({
   /** Scopes an "accept risk" action to one application when set. */
   applicationId?: string;
   onPageChange: (page: number) => void;
+  /** Omit for a table rendered without sortable headers. */
+  sort?: SortControl<(typeof findingSort)["fields"][number]>;
 }) {
   const { isAdmin } = useAuth();
   const [accepting, setAccepting] = useState<VulnerabilityFinding | null>(null);
+  const on = (field: (typeof findingSort)["fields"][number]) => (sort ? () => sort.toggle(field) : undefined);
+  const at = (field: (typeof findingSort)["fields"][number]) => (sort ? sort.stateOf(field) : undefined);
 
   if (isLoading) return <LoadingBlock label="Matching packages" />;
   if (!data || data.items.length === 0) {
@@ -203,11 +216,22 @@ export function FindingsTable({
         <Table>
           <thead>
             <tr>
-              <Th width="105px">Severity</Th>
-              <Th width="190px">Advisory</Th>
-              <Th>Package</Th>
-              <Th width="150px">Fixed in</Th>
-              <Th width="90px">CVSS</Th>
+              <Th onSort={on("severity")} sorted={at("severity")} width="105px">
+                Severity
+              </Th>
+              <Th onSort={on("vulnerability")} sorted={at("vulnerability")} width="190px">
+                Advisory
+              </Th>
+              <Th onSort={on("package")} sorted={at("package")}>
+                Package
+              </Th>
+              {/* Sorts on whether a fix exists — see findingOrderBy for why not the version. */}
+              <Th onSort={on("fixVersion")} sorted={at("fixVersion")} width="150px">
+                Fixed in
+              </Th>
+              <Th onSort={on("cvss")} sorted={at("cvss")} width="90px">
+                CVSS
+              </Th>
               {isAdmin ? <Th width="110px" /> : null}
             </tr>
           </thead>
@@ -406,6 +430,20 @@ function AcceptRiskModal({
       </div>
     </Modal>
   );
+}
+
+/**
+ * Sort control for a findings table whose state lives in `FindingsFilters`.
+ *
+ * Both callers hold those filters in component state rather than the URL, so the sort rides
+ * along in the same object instead of being threaded separately. Resets to page 1 on every
+ * change, like the other filters — a re-sort makes the current page number meaningless.
+ */
+export function useFindingsSort(
+  filters: FindingsFilters,
+  onChange: (patch: Partial<FindingsFilters>) => void,
+): SortControl<(typeof findingSort)["fields"][number]> {
+  return useServerSort(findingSort, filters, (patch) => onChange({ ...patch, page: 1 }));
 }
 
 /** Wraps a findings list in the standard card, with filters in the header. */

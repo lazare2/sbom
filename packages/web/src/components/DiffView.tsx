@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { ScanDiff } from "@sbom/shared";
 import { formatDateTime, formatNumber, formatRelative, shortSha } from "../lib/format.ts";
+import { useClientSort } from "../lib/useSort.ts";
 import {
   Badge,
   Card,
@@ -23,7 +24,36 @@ import {
  * routine; a new dependency is worth knowing but rarely urgent. Sorting by what
  * matters beats sorting alphabetically across one merged list.
  */
+/*
+  Client-side on all three tables. A diff is returned whole (capped per side, and the
+  response says when it was), so there is no page for a server sort to reorder.
+*/
+const DIFF_COLUMNS = { package: "text", version: "text", ecosystem: "text" } as const;
+const CHANGED_COLUMNS = { package: "text", from: "text", to: "text", ecosystem: "text" } as const;
+
 export function DiffView({ diff }: { diff: ScanDiff }) {
+  const removedSort = useClientSort(
+    diff.removed,
+    DIFF_COLUMNS,
+    { sortBy: "package" },
+    (c, f) => (f === "version" ? c.version : f === "ecosystem" ? c.ecosystem : c.name),
+    (c) => `${c.name}:${c.version ?? ""}`,
+  );
+  const changedSort = useClientSort(
+    diff.changed,
+    CHANGED_COLUMNS,
+    { sortBy: "package" },
+    (c, f) => (f === "from" ? c.fromVersion : f === "to" ? c.toVersion : f === "ecosystem" ? c.ecosystem : c.name),
+    (c) => c.name,
+  );
+  const addedSort = useClientSort(
+    diff.added,
+    DIFF_COLUMNS,
+    { sortBy: "package" },
+    (c, f) => (f === "version" ? c.version : f === "ecosystem" ? c.ecosystem : c.name),
+    (c) => `${c.name}:${c.version ?? ""}`,
+  );
+
   const nothingChanged =
     diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0;
 
@@ -74,14 +104,25 @@ export function DiffView({ diff }: { diff: ScanDiff }) {
             <Table>
               <thead>
                 <tr>
-                  <Th>Package</Th>
-                  <Th width="180px">Version</Th>
-                  <Th width="120px">Ecosystem</Th>
+                  <Th onSort={() => removedSort.toggle("package")} sorted={removedSort.stateOf("package")}>
+                    Package
+                  </Th>
+                  <Th onSort={() => removedSort.toggle("version")} sorted={removedSort.stateOf("version")} width="180px">
+                    Version
+                  </Th>
+                  <Th
+                    onSort={() => removedSort.toggle("ecosystem")}
+                    sorted={removedSort.stateOf("ecosystem")}
+                    width="120px"
+                  >
+                    Ecosystem
+                  </Th>
+                  {/* Every row in this table was last seen in the `from` scan by definition. */}
                   <Th>Last seen in</Th>
                 </tr>
               </thead>
               <tbody>
-                {diff.removed.map((c) => (
+                {removedSort.rows.map((c) => (
                   <Tr key={c.id}>
                     <Td>
                       <PackageLink name={c.name} />
@@ -115,14 +156,26 @@ export function DiffView({ diff }: { diff: ScanDiff }) {
             <Table>
               <thead>
                 <tr>
-                  <Th>Package</Th>
-                  <Th width="180px">From</Th>
-                  <Th width="180px">To</Th>
-                  <Th width="120px">Ecosystem</Th>
+                  <Th onSort={() => changedSort.toggle("package")} sorted={changedSort.stateOf("package")}>
+                    Package
+                  </Th>
+                  <Th onSort={() => changedSort.toggle("from")} sorted={changedSort.stateOf("from")} width="180px">
+                    From
+                  </Th>
+                  <Th onSort={() => changedSort.toggle("to")} sorted={changedSort.stateOf("to")} width="180px">
+                    To
+                  </Th>
+                  <Th
+                    onSort={() => changedSort.toggle("ecosystem")}
+                    sorted={changedSort.stateOf("ecosystem")}
+                    width="120px"
+                  >
+                    Ecosystem
+                  </Th>
                 </tr>
               </thead>
               <tbody>
-                {diff.changed.map((c) => (
+                {changedSort.rows.map((c) => (
                   <Tr key={`${c.ecosystem}-${c.name}`}>
                     <Td>
                       <PackageLink name={c.name} />
@@ -150,14 +203,24 @@ export function DiffView({ diff }: { diff: ScanDiff }) {
             <Table>
               <thead>
                 <tr>
-                  <Th>Package</Th>
-                  <Th width="180px">Version</Th>
-                  <Th width="120px">Ecosystem</Th>
+                  <Th onSort={() => addedSort.toggle("package")} sorted={addedSort.stateOf("package")}>
+                    Package
+                  </Th>
+                  <Th onSort={() => addedSort.toggle("version")} sorted={addedSort.stateOf("version")} width="180px">
+                    Version
+                  </Th>
+                  <Th
+                    onSort={() => addedSort.toggle("ecosystem")}
+                    sorted={addedSort.stateOf("ecosystem")}
+                    width="120px"
+                  >
+                    Ecosystem
+                  </Th>
                   <Th>Package URL</Th>
                 </tr>
               </thead>
               <tbody>
-                {diff.added.map((c) => (
+                {addedSort.rows.map((c) => (
                   <Tr key={c.id}>
                     <Td>
                       <PackageLink name={c.name} />

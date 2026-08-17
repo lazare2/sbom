@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { ApplicationStatus, PlatformBreakdown } from "@sbom/shared";
+import { applicationSort, sortDirections } from "@sbom/shared";
+import { useServerSort } from "../lib/useSort.ts";
 import {
   useApplications,
   useAttributeDefinitions,
@@ -32,10 +34,11 @@ import {
 } from "../components/ui.tsx";
 
 const ALL_STATUSES = ["active", "inactive", "pending_confirmation"] as const;
-const SORT_FIELDS = ["name", "createdAt", "lastScanAt", "status"] as const;
-const DIRECTIONS = ["asc", "desc"] as const;
+// From the shared declaration, so the headers and the API's validation cannot disagree
+// about which columns are sortable.
+const SORT_FIELDS = applicationSort.fields;
+const DIRECTIONS = sortDirections;
 
-type SortField = (typeof SORT_FIELDS)[number];
 
 /**
  * Default status filter mirrors the API's own default: active plus unconfirmed.
@@ -57,8 +60,10 @@ const DEFAULTS = {
   os: "",
   runtime: "",
   staleOnly: false,
-  sortBy: "name" as SortField,
-  sortDir: "asc" as "asc" | "desc",
+  sortBy: applicationSort.defaultField,
+  sortDir: applicationSort.defaultDirection,
+  /** Which attribute `sortBy=attribute` refers to. */
+  sortAttribute: "",
   page: 1,
 };
 
@@ -78,8 +83,9 @@ const urlSpec = {
       readString(params, "runtime") +
       (params.get("runtimeVersion") ? `|${params.get("runtimeVersion")}` : ""),
     staleOnly: readBool(params, "staleOnly"),
-    sortBy: readEnum(params, "sortBy", SORT_FIELDS, "name"),
-    sortDir: readEnum(params, "sortDir", DIRECTIONS, "asc"),
+    sortBy: readEnum(params, "sortBy", SORT_FIELDS, applicationSort.defaultField),
+    sortDir: readEnum(params, "sortDir", DIRECTIONS, applicationSort.defaultDirection),
+    sortAttribute: readString(params, "sortAttribute"),
     page: readNumber(params, "page", 1),
   }),
 };
@@ -145,16 +151,24 @@ export function ApplicationsPage() {
     setState({ status: next.length > 0 ? next : DEFAULTS.status });
   }
 
-  function sortBy(field: SortField) {
-    if (state.sortBy === field) {
+  const sort = useServerSort(applicationSort, state, setState);
+
+  /*
+    Attribute columns share one sort field and are distinguished by `sortAttribute`, so
+    they need their own toggle: `useServerSort` compares on `sortBy` alone and would treat
+    a click on Owner while sorted by Squad as "same column, reverse it".
+  */
+  function sortByAttribute(key: string) {
+    const active = state.sortBy === "attribute" && state.sortAttribute === key;
+    if (active) {
       setState({ sortDir: state.sortDir === "asc" ? "desc" : "asc" });
     } else {
-      // Dates default to newest-first; names to A–Z.
-      setState({ sortBy: field, sortDir: field === "lastScanAt" || field === "createdAt" ? "desc" : "asc" });
+      setState({ sortBy: "attribute", sortAttribute: key, sortDir: "asc" });
     }
   }
 
-  const sortState = (field: SortField) => (state.sortBy === field ? state.sortDir : false);
+  const attributeSortState = (key: string) =>
+    state.sortBy === "attribute" && state.sortAttribute === key ? state.sortDir : false;
 
   // Falls back to a humanised key rather than the raw key, so the filter labels
   // never flash as lower_snake_case while the definitions request is in flight.
@@ -307,23 +321,45 @@ export function ApplicationsPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th onSort={() => sortBy("name")} sorted={sortState("name")}>
+                    <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
                       Application
                     </Th>
-                    <Th onSort={() => sortBy("status")} sorted={sortState("status")} width="130px">
+                    <Th onSort={() => sort.toggle("status")} sorted={sort.stateOf("status")} width="130px">
                       Status
                     </Th>
-                    <Th>{labelFor("squad")}</Th>
-                    <Th>{labelFor("owner")}</Th>
-                    <Th width="100px">{labelFor("severity")}</Th>
-                    <Th width="240px">Runs on</Th>
-                    <Th align="right" width="110px">
+                    <Th onSort={() => sortByAttribute("squad")} sorted={attributeSortState("squad")}>
+                      {labelFor("squad")}
+                    </Th>
+                    <Th onSort={() => sortByAttribute("owner")} sorted={attributeSortState("owner")}>
+                      {labelFor("owner")}
+                    </Th>
+                    <Th
+                      onSort={() => sortByAttribute("severity")}
+                      sorted={attributeSortState("severity")}
+                      width="100px"
+                    >
+                      {labelFor("severity")}
+                    </Th>
+                    <Th onSort={() => sort.toggle("platform")} sorted={sort.stateOf("platform")} width="240px">
+                      Runs on
+                    </Th>
+                    <Th
+                      onSort={() => sort.toggle("componentCount")}
+                      sorted={sort.stateOf("componentCount")}
+                      align="right"
+                      width="110px"
+                    >
                       Components
                     </Th>
-                    <Th align="right" width="80px">
+                    <Th
+                      onSort={() => sort.toggle("scanCount")}
+                      sorted={sort.stateOf("scanCount")}
+                      align="right"
+                      width="80px"
+                    >
                       Scans
                     </Th>
-                    <Th onSort={() => sortBy("lastScanAt")} sorted={sortState("lastScanAt")} width="150px">
+                    <Th onSort={() => sort.toggle("lastScanAt")} sorted={sort.stateOf("lastScanAt")} width="150px">
                       Last scan
                     </Th>
                   </tr>

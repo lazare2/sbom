@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { IngestTokenSummary } from "@sbom/shared";
+import { useClientSort } from "../../lib/useSort.ts";
 import { formatDate, formatRelative } from "../../lib/format.ts";
 import { useCreateIngestToken, useRevokeIngestToken } from "../../lib/mutations.ts";
 import { useIngestTokens } from "../../lib/queries.ts";
@@ -31,11 +32,50 @@ import {
  * Separate named tokens exist so Jenkins and GitLab can be rotated and revoked
  * independently rather than sharing one secret nobody dares change.
  */
+/**
+ * Sortable columns of the token table.
+ *
+ * Client-side: the endpoint returns every token in one response — there are a handful, one
+ * per pipeline — so there is no page for a server sort to reorder.
+ */
+const TOKEN_COLUMNS = {
+  name: "text",
+  source: "text",
+  status: "text",
+  lastUsedAt: "date",
+  createdAt: "date",
+} as const;
+
 export function AdminTokensPage() {
   const tokens = useIngestTokens();
   const revoke = useRevokeIngestToken();
   const [createOpen, setCreateOpen] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
+
+  const sort = useClientSort(
+    tokens.data,
+    TOKEN_COLUMNS,
+    { sortBy: "name" },
+    (token, field) => {
+      switch (field) {
+        case "source":
+          return token.source;
+        // Sorts on the word the cell shows, so the order matches what is on screen rather
+        // than the boolean behind it.
+        case "status":
+          return token.isActive ? "active" : "revoked";
+        case "lastUsedAt":
+          return token.lastUsedAt;
+        case "createdAt":
+          return token.createdAt;
+        case "name":
+        default:
+          return token.name;
+      }
+    },
+    // Names are not unique across sources, so the suffix is what makes this total.
+    (token) => `${token.name}:${token.tokenSuffix}`,
+  );
 
   async function handleRevoke(token: IngestTokenSummary) {
     if (!token.id) return;
@@ -82,17 +122,28 @@ export function AdminTokensPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>Name</Th>
+                  <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                    Name
+                  </Th>
+                  {/* The visible suffix is four characters of random hex; ordering it is noise. */}
                   <Th>Token</Th>
-                  <Th>Source</Th>
-                  <Th>Status</Th>
-                  <Th>Last used</Th>
-                  <Th>Created</Th>
+                  <Th onSort={() => sort.toggle("source")} sorted={sort.stateOf("source")}>
+                    Source
+                  </Th>
+                  <Th onSort={() => sort.toggle("status")} sorted={sort.stateOf("status")}>
+                    Status
+                  </Th>
+                  <Th onSort={() => sort.toggle("lastUsedAt")} sorted={sort.stateOf("lastUsedAt")}>
+                    Last used
+                  </Th>
+                  <Th onSort={() => sort.toggle("createdAt")} sorted={sort.stateOf("createdAt")}>
+                    Created
+                  </Th>
                   <Th />
                 </tr>
               </thead>
               <tbody>
-                {tokens.data.map((token) => (
+                {sort.rows.map((token) => (
                   <Tr key={token.id ?? `env-${token.name}`}>
                     <Td className="font-medium text-text-base">{token.name}</Td>
                     <Td>

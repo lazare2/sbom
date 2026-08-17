@@ -74,10 +74,10 @@ packages/
       services/
         blob-store/       Raw SBOM storage (fs | s3)
         scanner/          Grype adapter: binary resolution, matching, DB updates
-    test/unit/            275 tests, no database required
+    test/unit/            343 tests, no database required
   web/
     src/
-      lib/                API client, query hooks, URL-state, formatting
+      lib/                API client, query hooks, URL-state, sorting, formatting
       auth/               Session context and the route guard
       components/         Layout, UI primitives, severity and findings blocks,
                           the shared vulnerability filter (VulnFilter.tsx)
@@ -96,7 +96,7 @@ scripts/
   setup-local-db.ps1      One-time local Postgres role + database
   install-grype.mjs       Fetches the pinned Grype build, checksum-verified
   build-offline-bundle.ps1  Builds + saves images into a copyable folder
-  smoke-test.ps1          174 end-to-end API assertions
+  smoke-test.ps1          187 end-to-end API assertions
   ui-drive.mjs            Drives the real UI in Chromium and screenshots it
                           (shots land in var/ui-shots unless a path is given)
 ```
@@ -229,6 +229,66 @@ npm run db:backfill:platform
 ```
 
 That re-parses every stored blob, is idempotent, and is resumable if interrupted.
+
+### Exact or substring name matching
+
+Both searches take an **Exact name match** checkbox, and they default the opposite way on
+purpose.
+
+The single search defaults to **substring**, because you usually do not know the whole
+name — searching `log4j` should find `log4j-core`. The cost is that a search for `react`
+returns `reactive-element` and `reactor`, and if `react` itself is not deployed it returns
+nothing that looks like an answer. Ticking the box switches to a case-insensitive
+whole-name comparison; the two run genuinely different queries against different indexes
+(`component_name_lower_idx` for exact, the pg_trgm GIN index for substring), so this is a
+mode rather than a filter applied afterwards.
+
+The list search defaults to **exact**, because a pasted list is an audit: 200 names in,
+200 verdicts out. Substring matching there is available but changes what a row means — one
+line can match many packages, so the row reports the count and expands to name them, and
+each line is capped at 50 packages with the row saying when it hit the cap. The cap counts
+packages rather than (name, version) rows; `libc6` alone ships five versions here, so a
+row-based cap would let one deb package exhaust an entry's whole budget and then report
+"1 package matched (partial)".
+
+Exact is also the default the other way round for a practical reason: every list anyone has
+already saved and shared was run under exact matching, and re-opening one must not silently
+return a different answer.
+
+### Sorting any table
+
+Every table column that has a meaningful order is sortable by clicking its header. The
+caret cycles `↕` → the column's **natural** direction → the reverse, and alternates from
+there. There is no third click back to unsorted, because a table is always in some order;
+the neutral caret means "not sorting by this column".
+
+Natural direction comes from the column's type, declared once per table in
+`packages/shared/src/schemas/sort.ts` and consumed by both ends: text opens A→Z, counts and
+dates open at the largest and newest. That is the click that answers the question the column
+is usually opened for.
+
+Two things are deliberately not sortable. The Analytics **Top 10** rankings and the
+`critical → low` severity breakdowns already carry their meaning in their order, and
+alphabetising a ranking destroys the thing it is showing. Free-text and composite cells —
+an audit entry's jsonb detail, a list of versions, a `name + version` tool cell — have no
+single value to order by.
+
+Underneath, the split matters more than the arrows. A **paginated** table must sort
+server-side: reordering the 50 rows on screen while the other 4,000 stay put is a control
+that looks like it works and answers a different question. So sort state lives in the URL
+alongside the filters, and every ORDER BY ends in a **unique** column. Without that last
+part, sorting on a column with duplicate values leaves tied rows in whatever order the plan
+chooses, and offset pagination then genuinely loses data — the same row appearing on two
+pages while another appears on none. It needs ties *and* a page boundary inside them to
+reproduce, and it reads as a data bug rather than a sorting one. `scripts/smoke-test.ps1`
+pages through several sorted lists with a page size of 3 and asserts the collected rows are
+exactly the total, with no duplicates.
+
+Sort columns are never interpolated from the request: each service maps its validated
+`sortBy` through a `switch` over literals. The one exception is sorting the applications
+list by a custom attribute, where the target is administrator-defined and cannot be a fixed
+enum — safe because a jsonb key is a *value* (`attributes->>$1`) and binds as an ordinary
+parameter.
 
 ### Searching a list of packages
 
@@ -484,7 +544,7 @@ Full details, backups, and upgrades: [deploy/README.md](deploy/README.md).
 
 | Command | Needs Postgres | Needs `npm run dev` | What it does |
 |---|---|---|---|
-| `npm test` | no | no | Unit tests (256) — pure logic plus PDF and Excel output, no I/O |
+| `npm test` | no | no | Unit tests (343) — pure logic plus PDF and Excel output, no I/O |
 | `npm run typecheck` | no | no | Typecheck all workspaces |
 | `npm run build` | no | no | Compile all workspaces |
 | `npm run setup:db` | yes | no | One-time: create the local `sbom` role and database |

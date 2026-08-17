@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { AnalyticsReport } from "@sbom/shared";
+import { useClientSort } from "../lib/useSort.ts";
 import { osLabel, runtimeLabel } from "../components/Platform.tsx";
 import {
   BaseImageExposureCard,
@@ -402,7 +403,21 @@ function Totals({ report }: { report: AnalyticsReport }) {
 
 function TopPackagesCard({ report }: { report: AnalyticsReport }) {
   const rows = report.topPackages;
-  const max = rows[0]?.applications ?? 0;
+  /*
+    Reduced over every row, not read off rows[0]. The bars are relative to the largest
+    value, and taking it from the first row silently assumed the array was still in the
+    server's descending order — which stopped being true the moment these headers became
+    sortable. Sorting by name would then scale every bar to whatever package happened to
+    sort first.
+  */
+  const max = rows.reduce((m, r) => Math.max(m, r.applications), 0);
+  const sort = useClientSort(
+    rows,
+    { package: "text", version: "text", applications: "number" } as const,
+    { sortBy: "applications" },
+    (r, f) => (f === "package" ? r.name : f === "version" ? r.version : r.applications),
+    (r) => `${r.componentId}:${r.version ?? ""}`,
+  );
 
   return (
     <Card>
@@ -417,14 +432,21 @@ function TopPackagesCard({ report }: { report: AnalyticsReport }) {
           <Table>
             <thead>
               <tr>
-                <Th>Package</Th>
-                <Th>Version</Th>
-                <Th align="right">Apps</Th>
+                <Th onSort={() => sort.toggle("package")} sorted={sort.stateOf("package")}>
+                  Package
+                </Th>
+                <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")}>
+                  Version
+                </Th>
+                <Th onSort={() => sort.toggle("applications")} sorted={sort.stateOf("applications")} align="right">
+                  Apps
+                </Th>
+                {/* A rendering of the Apps column. Sorting it would duplicate that header. */}
                 <Th width="130px">Share</Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((c) => (
+              {sort.rows.map((c) => (
                 <Tr key={`${c.componentId}-${c.version ?? ""}`}>
                   <Td>
                     <Link
@@ -456,7 +478,15 @@ function TopPackagesCard({ report }: { report: AnalyticsReport }) {
 
 function TopProjectsCard({ report }: { report: AnalyticsReport }) {
   const rows = report.topProjects;
-  const max = rows[0]?.packages ?? 0;
+  // Order-independent: see TopPackagesCard.
+  const max = rows.reduce((m, r) => Math.max(m, r.packages), 0);
+  const sort = useClientSort(
+    rows,
+    { application: "text", platform: "text", packages: "number" } as const,
+    { sortBy: "packages" },
+    (r, f) => (f === "application" ? r.name : f === "platform" ? r.platform : r.packages),
+    (r) => r.applicationId,
+  );
 
   return (
     <Card>
@@ -471,14 +501,20 @@ function TopProjectsCard({ report }: { report: AnalyticsReport }) {
           <Table>
             <thead>
               <tr>
-                <Th>Application</Th>
-                <Th>Runs on</Th>
-                <Th align="right">Packages</Th>
+                <Th onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
+                  Application
+                </Th>
+                <Th onSort={() => sort.toggle("platform")} sorted={sort.stateOf("platform")}>
+                  Runs on
+                </Th>
+                <Th onSort={() => sort.toggle("packages")} sorted={sort.stateOf("packages")} align="right">
+                  Packages
+                </Th>
                 <Th width="130px">Share</Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => (
+              {sort.rows.map((p) => (
                 <Tr key={p.applicationId}>
                   <Td>
                     <Link
@@ -636,6 +672,13 @@ function ChurnCard({ report }: { report: AnalyticsReport }) {
 
 function FragmentationCard({ report }: { report: AnalyticsReport }) {
   const rows = report.fragmentation;
+  const sort = useClientSort(
+    rows,
+    { package: "text", count: "number", applications: "number" } as const,
+    { sortBy: "count" },
+    (r, f) => (f === "package" ? r.name : f === "count" ? r.versions : r.applications),
+    (r) => `${r.name}|${r.ecosystem}`,
+  );
   return (
     <Card>
       <CardHeader
@@ -652,14 +695,21 @@ function FragmentationCard({ report }: { report: AnalyticsReport }) {
           <Table>
             <thead>
               <tr>
-                <Th>Package</Th>
+                <Th onSort={() => sort.toggle("package")} sorted={sort.stateOf("package")}>
+                  Package
+                </Th>
+                {/* The list of versions. `Count` is the orderable form of the same thing. */}
                 <Th>Versions in use</Th>
-                <Th align="right">Count</Th>
-                <Th align="right">Apps</Th>
+                <Th onSort={() => sort.toggle("count")} sorted={sort.stateOf("count")} align="right">
+                  Count
+                </Th>
+                <Th onSort={() => sort.toggle("applications")} sorted={sort.stateOf("applications")} align="right">
+                  Apps
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((f) => (
+              {sort.rows.map((f) => (
                 <Tr key={`${f.name}|${f.ecosystem}`}>
                   <Td>
                     <Link
@@ -694,6 +744,14 @@ function FragmentationCard({ report }: { report: AnalyticsReport }) {
 
 function NewPackagesCard({ report }: { report: AnalyticsReport }) {
   const rows = report.newPackages;
+  const sort = useClientSort(
+    rows,
+    { package: "text", version: "text", firstSeen: "date", applications: "number" } as const,
+    { sortBy: "firstSeen" },
+    (r, f) =>
+      f === "package" ? r.name : f === "version" ? r.version : f === "firstSeen" ? r.firstSeenAt : r.applications,
+    (r) => r.componentId,
+  );
   return (
     <Card>
       <CardHeader
@@ -710,14 +768,22 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
           <Table>
             <thead>
               <tr>
-                <Th>Package</Th>
-                <Th>Version</Th>
-                <Th>First seen</Th>
-                <Th align="right">Apps</Th>
+                <Th onSort={() => sort.toggle("package")} sorted={sort.stateOf("package")}>
+                  Package
+                </Th>
+                <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")}>
+                  Version
+                </Th>
+                <Th onSort={() => sort.toggle("firstSeen")} sorted={sort.stateOf("firstSeen")}>
+                  First seen
+                </Th>
+                <Th onSort={() => sort.toggle("applications")} sorted={sort.stateOf("applications")} align="right">
+                  Apps
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => (
+              {sort.rows.map((p) => (
                 <Tr key={p.componentId}>
                   <Td>
                     <Link
@@ -747,6 +813,13 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
 
 function CoverageGapsCard({ report }: { report: AnalyticsReport }) {
   const rows = report.coverage.worstOffenders;
+  const sort = useClientSort(
+    rows,
+    { application: "text", lastScanAt: "date", daysSinceScan: "number" } as const,
+    { sortBy: "daysSinceScan" },
+    (r, f) => (f === "application" ? r.name : f === "lastScanAt" ? r.lastScanAt : r.daysSinceScan),
+    (r) => r.applicationId,
+  );
   return (
     <Card>
       <CardHeader
@@ -767,13 +840,19 @@ function CoverageGapsCard({ report }: { report: AnalyticsReport }) {
           <Table>
             <thead>
               <tr>
-                <Th>Application</Th>
-                <Th>Last build</Th>
-                <Th align="right">Silent for</Th>
+                <Th onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
+                  Application
+                </Th>
+                <Th onSort={() => sort.toggle("lastScanAt")} sorted={sort.stateOf("lastScanAt")}>
+                  Last build
+                </Th>
+                <Th onSort={() => sort.toggle("daysSinceScan")} sorted={sort.stateOf("daysSinceScan")} align="right">
+                  Silent for
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((a) => (
+              {sort.rows.map((a) => (
                 <Tr key={a.applicationId}>
                   <Td>
                     <Link
@@ -799,7 +878,15 @@ function CoverageGapsCard({ report }: { report: AnalyticsReport }) {
 
 function EcosystemCard({ report }: { report: AnalyticsReport }) {
   const rows = report.ecosystems.slice(0, 12);
-  const max = rows[0]?.components ?? 0;
+  // Order-independent: see TopPackagesCard.
+  const max = rows.reduce((m, r) => Math.max(m, r.components), 0);
+  const sort = useClientSort(
+    rows,
+    { ecosystem: "text", components: "number", applications: "number" } as const,
+    { sortBy: "components" },
+    (r, f) => (f === "ecosystem" ? r.ecosystem : f === "components" ? r.components : r.applications),
+    (r) => r.ecosystem,
+  );
   return (
     <Card>
       <CardHeader title="Ecosystem mix" subtitle="Distinct packages in current builds, by package manager." />
@@ -810,14 +897,20 @@ function EcosystemCard({ report }: { report: AnalyticsReport }) {
           <Table>
             <thead>
               <tr>
-                <Th>Ecosystem</Th>
-                <Th align="right">Packages</Th>
-                <Th align="right">Apps</Th>
+                <Th onSort={() => sort.toggle("ecosystem")} sorted={sort.stateOf("ecosystem")}>
+                  Ecosystem
+                </Th>
+                <Th onSort={() => sort.toggle("components")} sorted={sort.stateOf("components")} align="right">
+                  Packages
+                </Th>
+                <Th onSort={() => sort.toggle("applications")} sorted={sort.stateOf("applications")} align="right">
+                  Apps
+                </Th>
                 <Th width="130px">Share</Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((e) => (
+              {sort.rows.map((e) => (
                 <Tr key={e.ecosystem}>
                   <Td>
                     <Link
@@ -855,7 +948,15 @@ function PlatformTable({
   rows: Array<{ key: string; label: string; version: string | null; applications: number; href: string }>;
   note?: string;
 }) {
-  const max = rows[0]?.applications ?? 0;
+  // Order-independent: see TopPackagesCard.
+  const max = rows.reduce((m, r) => Math.max(m, r.applications), 0);
+  const sort = useClientSort(
+    rows,
+    { name: "text", version: "text", applications: "number" } as const,
+    { sortBy: "applications" },
+    (r, f) => (f === "name" ? r.label : f === "version" ? r.version : r.applications),
+    (r) => r.key,
+  );
   return (
     <Card>
       <CardHeader title={title} subtitle="Observed in each application's current build. Click a row to see which." />
@@ -869,9 +970,18 @@ function PlatformTable({
           <Table>
             <thead>
               <tr>
-                <Th>Name</Th>
-                <Th width="140px">Version</Th>
-                <Th align="right" width="70px">
+                <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                  Name
+                </Th>
+                <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")} width="140px">
+                  Version
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("applications")}
+                  sorted={sort.stateOf("applications")}
+                  align="right"
+                  width="70px"
+                >
                   Apps
                 </Th>
                 <Th width="130px">Share</Th>

@@ -14,6 +14,7 @@ import type {
   DashboardStats,
   EcosystemBreakdownEntry,
   IngestTokenSummary,
+  NameMatchMode,
   Paginated,
   PlatformBreakdown,
   RemovedComponent,
@@ -21,6 +22,7 @@ import type {
   ScanDiff,
   ScanSummary,
   SessionUser,
+  SortDirection,
   SuppressionSummary,
   TopComponentEntry,
   UserSummary,
@@ -30,6 +32,7 @@ import type {
   VulnerabilityReport,
   VulnScanStatus,
 } from "@sbom/shared";
+import type { componentSearchSort } from "@sbom/shared";
 import { api, toQueryString } from "./api.ts";
 
 /**
@@ -351,6 +354,10 @@ export interface BulkSearchOptions {
   scope: "current" | "historical" | "all";
   view: "rollup" | "matches";
   includeInactive: boolean;
+  /** Exact by default here, unlike the single search — see bulkOptionsSchema. */
+  match: NameMatchMode;
+  sortBy: (typeof componentSearchSort)["fields"][number];
+  sortDir: SortDirection;
   page: number;
 }
 
@@ -359,6 +366,9 @@ function bulkParams(options: BulkSearchOptions): Record<string, unknown> {
     scope: options.scope,
     view: options.view,
     includeInactive: options.includeInactive || undefined,
+    match: options.match,
+    sortBy: options.sortBy,
+    sortDir: options.sortDir,
     page: options.page,
     pageSize: 100,
   };
