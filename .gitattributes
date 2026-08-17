@@ -1,0 +1,23 @@
+# Normalise line endings on commit, and pin the files where the ending is not
+# cosmetic.
+#
+# The shell scripts and Dockerfiles matter: a CRLF `start.sh` cloned onto Linux
+# fails with `/bin/sh^M: bad interpreter`, and a CRLF line inside a Dockerfile
+# RUN becomes part of the command. Windows checkouts get CRLF for the rest, so
+# editors here behave normally.
+* text=auto
+
+*.sh    text eol=lf
+Dockerfile text eol=lf
+*.conf  text eol=lf
+*.mjs   text eol=lf
+
+# PowerShell stays CRLF — it is only ever run on Windows.
+*.ps1   text eol=crlf
+
+# Binary: keep git from "normalising" these into corruption.
+*.xlsx  binary
+*.pdf   binary
+*.png   binary
+*.zst   binary
+*.tar   binary

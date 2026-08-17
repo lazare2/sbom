@@ -1,0 +1,54 @@
+# Everything here is sent to the Docker daemon as build context before the
+# first instruction runs, so anything left out of this file slows down every
+# build whether or not the Dockerfile copies it.
+#
+# The worst offenders are node_modules (hundreds of MB, and reinstalled inside
+# the image anyway from package-lock.json) and dist-offline/, which contains a
+# ~330 MB tar of the very images being built.
+
+node_modules
+**/node_modules
+dist-offline
+
+# Build output. Both images compile from source inside the container, so host
+# artifacts would at best be redundant and at worst be stale ones baked in.
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Local runtime state: stored SBOM blobs, screenshots from the UI drive.
+var
+**/var
+
+# Secrets. The compose file injects configuration as environment variables;
+# a .env copied into an image layer would be readable by anyone who pulls it.
+.env
+.env.*
+!.env.example
+!.env.docker.example
+deploy/.env
+deploy/CREDENTIALS.txt
+
+.git
+.gitignore
+.github
+
+# Docs and scripts that play no part in a build.
+README.md
+deploy
+ci-templates
+scripts
+**/*.md
+!packages/*/README.md
+
+# Test material. Images are built from source that has already been tested on
+# the build machine; running tests inside the image build would need the dev
+# dependencies the runtime stage deliberately drops.
+**/test
+**/*.test.ts
+
+.vscode
+.idea
+Thumbs.db
+.DS_Store

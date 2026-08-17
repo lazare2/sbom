@@ -1,0 +1,46 @@
+{
+  "name": "sbom-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Internal SBOM / dependency management platform",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/shared",
+    "packages/api",
+    "packages/web"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@sbom/shared && npm run build --workspace=@sbom/api && npm run build --workspace=@sbom/web",
+    "dev": "npm run dev --workspace=@sbom/api",
+    "dev:web": "npm run dev --workspace=@sbom/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:unit": "npm run test:unit --workspaces --if-present",
+    "test:integration": "npm run test:integration --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace=@sbom/api",
+    "db:migrate": "npm run db:migrate --workspace=@sbom/api",
+    "db:seed": "npm run db:seed --workspace=@sbom/api",
+    "db:studio": "npm run db:studio --workspace=@sbom/api",
+    "setup:db": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-local-db.ps1",
+    "smoke": "powershell -ExecutionPolicy Bypass -File ./scripts/smoke-test.ps1",
+    "db:seed:demo": "npm run db:seed:demo --workspace=@sbom/api",
+    "ui:drive": "node scripts/ui-drive.mjs ./var/ui-shots",
+    "grype:install": "node scripts/install-grype.mjs",
+    "bundle:offline": "powershell -ExecutionPolicy Bypass -File ./scripts/build-offline-bundle.ps1",
+    "db:seed:drift": "npm run db:seed:drift --workspace=@sbom/api",
+    "db:backfill:platform": "npm run db:backfill:platform --workspace=@sbom/api"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "playwright": "^1.62.1",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.7"
+  },
+  "overrides": {
+    "vite": "^6.0.7"
+  }
+}

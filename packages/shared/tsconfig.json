@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    // Required so packages/api can reference this project and typecheck against
+    // its emitted declarations rather than re-compiling the sources.
+    "composite": true
+  },
+  "include": ["src/**/*.ts"]
+}

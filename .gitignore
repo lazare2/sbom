@@ -1,0 +1,50 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+.env
+.env.local
+.env.*.local
+
+# Local raw-SBOM blob store (filesystem driver). Not anchored to the repo root:
+# npm runs workspace scripts with the cwd set to the package, so a relative
+# BLOB_STORE_FS_ROOT resolves under packages/api/ rather than here.
+var/
+data/
+storage/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+*.log
+npm-debug.log*
+
+# Offline deployment bundles — hundreds of MB of container images.
+dist-offline/
+
+# Generated on the target machine by deploy/start.*, never committed. Not anchored
+# to deploy/ — a bundle test-run from anywhere writes the same two files, and one
+# committed CREDENTIALS.txt would publish a deployment's admin password.
+**/.env
+**/CREDENTIALS.txt
+
+# Container image archives and Grype database downloads. Both are hundreds of MB
+# and both are reproducible; a committed one is unremovable from history.
+*.tar
+*.tar.gz
+*.tgz
+*.zst
+*.zip
+
+# Test-run output.
+.turbo/
+playwright-report/
+test-results/
+# Reports rendered by the PDF endpoint while testing.
+estate-report.pdf

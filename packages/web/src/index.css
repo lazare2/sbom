@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/**
+ * Design tokens.
+ *
+ * Defined as CSS variables on `:root` for light and overridden under
+ * `prefers-color-scheme: dark`, so every colour has a definition in both themes
+ * and nothing inherits a host background. The palette is deliberately restrained:
+ * this is a data-density tool, and colour is reserved for status meaning
+ * (pending, stale, inactive, removed) rather than decoration.
+ */
+:root {
+  --bg: oklch(99% 0.002 250);
+  --bg-subtle: oklch(97% 0.004 250);
+  --bg-raised: oklch(100% 0 0);
+  --border: oklch(90% 0.006 250);
+  --border-strong: oklch(82% 0.01 250);
+  --text: oklch(25% 0.012 250);
+  --text-muted: oklch(52% 0.014 250);
+  --text-faint: oklch(64% 0.012 250);
+  --accent: oklch(52% 0.16 258);
+  --accent-hover: oklch(45% 0.17 258);
+  --accent-subtle: oklch(95% 0.03 258);
+
+  --ok: oklch(52% 0.13 155);
+  --ok-subtle: oklch(95% 0.04 155);
+  --warn: oklch(62% 0.15 70);
+  --warn-subtle: oklch(96% 0.05 70);
+  --danger: oklch(55% 0.19 22);
+  --danger-subtle: oklch(96% 0.04 22);
+  --info: oklch(55% 0.13 240);
+  --info-subtle: oklch(96% 0.03 240);
+  --neutral-subtle: oklch(94% 0.004 250);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(19% 0.012 255);
+    --bg-subtle: oklch(23% 0.014 255);
+    --bg-raised: oklch(24% 0.015 255);
+    --border: oklch(31% 0.014 255);
+    --border-strong: oklch(40% 0.016 255);
+    --text: oklch(95% 0.006 255);
+    --text-muted: oklch(72% 0.012 255);
+    --text-faint: oklch(58% 0.012 255);
+    --accent: oklch(72% 0.14 258);
+    --accent-hover: oklch(80% 0.13 258);
+    --accent-subtle: oklch(30% 0.06 258);
+
+    --ok: oklch(75% 0.15 155);
+    --ok-subtle: oklch(29% 0.06 155);
+    --warn: oklch(80% 0.14 75);
+    --warn-subtle: oklch(31% 0.06 70);
+    --danger: oklch(72% 0.16 22);
+    --danger-subtle: oklch(30% 0.07 22);
+    --info: oklch(75% 0.12 240);
+    --info-subtle: oklch(29% 0.05 240);
+    --neutral-subtle: oklch(28% 0.01 255);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-bg-raised: var(--bg-raised);
+  --color-border-base: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text-base: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-ok: var(--ok);
+  --color-ok-subtle: var(--ok-subtle);
+  --color-warn: var(--warn);
+  --color-warn-subtle: var(--warn-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --color-neutral-subtle: var(--neutral-subtle);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  /* Explicit, so the page never borrows a background from the host document. */
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+}
+
+/* Visible focus for keyboard users on every interactive element. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Tabular figures keep counts and dates aligned down a column. */
+.nums {
+  font-variant-numeric: tabular-nums;
+}

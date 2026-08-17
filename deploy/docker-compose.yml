@@ -1,0 +1,106 @@
+# SBOM Platform — deployment.
+#
+# Every image is referenced by tag and never built here. That serves two
+# deployments from one file:
+#
+#   Registry    `docker compose up -d` pulls the published images. This file plus a
+#               .env is the entire install — no repository, no Node, no PostgreSQL,
+#               no compiler. Override SBOM_IMAGE_API / SBOM_IMAGE_WEB to run your
+#               own build or pin an older version.
+#   Offline     `docker load` from the bundled images.tar supplies them under the
+#               default tags below, and nothing is fetched from the network.
+#
+# Do not add a `build:` section. It would work on a connected machine with a copy of
+# the source and fail on both of the machines this file exists for.
+#
+# PostgreSQL is pulled from Docker Hub by tag rather than republished under anyone's
+# account: it is unmodified upstream, and re-hosting it means inheriting the job of
+# keeping it patched.
+name: sbom-platform
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sbom
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sbom}
+      POSTGRES_DB: sbom
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sbom -d sbom"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Deliberately not published to the host. Nothing outside this compose
+    # network needs Postgres, and exposing 5432 on a shared machine is a bigger
+    # risk than the debugging convenience is worth. To inspect the database:
+    #   docker compose exec db psql -U sbom -d sbom
+
+  api:
+    # Defaults to the published image, so a registry deployment needs no image
+    # variables at all. Override to run your own build, or a pinned older version.
+    #
+    # The offline bundle loads its images under these same tags, which is what lets
+    # one compose file serve both paths.
+    image: ${SBOM_IMAGE_API:-defaullltt/sbom-api:0.1.0}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://sbom:${POSTGRES_PASSWORD:-sbom}@db:5432/sbom
+      API_PORT: "3000"
+      API_HOST: 0.0.0.0
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set — run start.ps1 or start.sh, which generates one}
+      INGEST_TOKENS: ${INGEST_TOKENS:-}
+      BLOB_STORE_DRIVER: fs
+      BLOB_STORE_FS_ROOT: /data/sboms
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      STALE_APP_THRESHOLD_DAYS: ${STALE_APP_THRESHOLD_DAYS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Vulnerability scanning. Grype itself is inside the API image, so it works with
+      # no network at all. Its database is not: 1.9 GB expanded and rebuilt daily, so
+      # bundling it would multiply this folder's size by twenty and ship something stale
+      # on arrival. It lives on the volume below and is installed once, either by
+      # "Update now" on a connected machine or by uploading an archive under
+      # Admin -> Vulnerability scanning on an isolated one.
+      #
+      # This must point at a volume. Left on Grype's default the database would be
+      # written into the container's writable layer and lost on every restart — which
+      # on an air-gapped machine means re-uploading 1.9 GB by hand each time.
+      GRYPE_DB_CACHE_DIR: /data/grype-db
+      # Point at an internal mirror to keep database traffic inside the network.
+      GRYPE_DB_UPDATE_URL: ${GRYPE_DB_UPDATE_URL:-https://grype.anchore.io/databases}
+      # For a mirror behind a TLS-inspecting proxy or a private CA.
+      GRYPE_DB_CA_CERT: ${GRYPE_DB_CA_CERT:-}
+    volumes:
+      # Raw SBOM blobs. The single most important thing to back up after the
+      # database — scan rows reference blobs by key and cannot regenerate them.
+      - sbom-blobs:/data/sboms
+      # Allow ~4 GB: the database is 1.9 GB expanded, and a replacement briefly holds
+      # the old copy alongside the new archive and its expansion. Not worth backing up
+      # — it is reproducible from upstream and stale within a day.
+      - grype-db:/data/grype-db
+    # Not published either: nginx in the `web` service proxies /api, so the
+    # browser sees one origin and the session cookie needs no CORS handling.
+    # Uncomment to point CI at the API directly instead of through nginx.
+    # ports:
+    #   - "3000:3000"
+
+  web:
+    image: ${SBOM_IMAGE_WEB:-defaullltt/sbom-web:0.1.0}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${SBOM_PORT:-8080}:80"
+
+volumes:
+  db-data:
+  sbom-blobs:
+  grype-db:

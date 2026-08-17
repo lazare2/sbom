@@ -1,0 +1,91 @@
+# Shared GitLab CI template: generate a CycloneDX SBOM for the built image and
+# post it to the SBOM platform.
+#
+# Usage in a project's .gitlab-ci.yml:
+#
+#   include:
+#     - project: 'platform/ci-templates'
+#       ref: main
+#       file: '/sbom-scan.gitlab-ci.yml'
+#
+#   sbom:scan:
+#     extends: .sbom_scan
+#     needs: ["build:image"]
+#     variables:
+#       SBOM_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+#
+# Requires a group-level CI/CD variable `SBOM_INGEST_TOKEN` (masked, protected)
+# and `SBOM_PLATFORM_URL`.
+
+.sbom_scan:
+  stage: test
+  image:
+    name: anchore/syft:latest
+    entrypoint: [""]
+  variables:
+    # Override per project when the GitLab project name does not match the
+    # application name registered on the platform.
+    SBOM_APP_NAME: "$CI_PROJECT_NAME"
+    SBOM_PLATFORM_URL: "$SBOM_PLATFORM_URL"
+    SBOM_FILE: "sbom.cdx.json"
+    # Set to "true" for applications where a failed upload should fail the pipeline.
+    SBOM_REQUIRED: "false"
+  before_script:
+    - |
+      if [ -z "${SBOM_IMAGE:-}" ]; then
+        echo "SBOM_IMAGE is not set — point it at the image this pipeline just built." >&2
+        exit 1
+      fi
+      if [ -z "${SBOM_INGEST_TOKEN:-}" ]; then
+        echo "SBOM_INGEST_TOKEN is not set — add it as a masked group-level CI/CD variable." >&2
+        exit 1
+      fi
+  script:
+    - |
+      set -eu
+
+      echo "Generating CycloneDX SBOM for ${SBOM_IMAGE}"
+      syft "${SBOM_IMAGE}" -o "cyclonedx-json=${SBOM_FILE}"
+
+      # The token goes into a curl config file rather than onto the command
+      # line, so it is not exposed in the process table to anything else sharing
+      # the runner.
+      CURL_CFG="$(mktemp)"
+      trap 'rm -f "$CURL_CFG"' EXIT
+      printf 'header = "Authorization: Bearer %s"\n' "${SBOM_INGEST_TOKEN}" > "$CURL_CFG"
+      chmod 600 "$CURL_CFG"
+
+      set +e
+      # -f makes a non-2xx a failure. curl does not retry 4xx, so a rejected
+      # payload fails fast while a restarting platform is retried.
+      curl -fsS \
+        --config "$CURL_CFG" \
+        --retry 3 --retry-delay 5 --retry-connrefused \
+        --max-time 120 \
+        -F "sbom=@${SBOM_FILE}" \
+        -F "app_name=${SBOM_APP_NAME}" \
+        -F "commit_sha=${CI_COMMIT_SHA}" \
+        -F "build_number=${CI_JOB_ID}" \
+        -F "pipeline_id=${CI_PIPELINE_ID}" \
+        -F "image_ref=${SBOM_IMAGE}" \
+        -F "branch=${CI_COMMIT_REF_NAME}" \
+        "${SBOM_PLATFORM_URL}/api/v1/scans"
+      UPLOAD_STATUS=$?
+      set -e
+
+      if [ "$UPLOAD_STATUS" -ne 0 ]; then
+        if [ "${SBOM_REQUIRED}" = "true" ]; then
+          echo "SBOM upload failed and SBOM_REQUIRED=true — failing the job." >&2
+          exit "$UPLOAD_STATUS"
+        fi
+        echo "SBOM upload failed (exit ${UPLOAD_STATUS}). SBOM_REQUIRED is not true, so the job is allowed to pass." >&2
+        exit 0
+      fi
+
+      echo "Uploaded SBOM for '${SBOM_APP_NAME}' (${SBOM_IMAGE})"
+  artifacts:
+    # Kept briefly so a failed upload can be inspected or replayed by hand.
+    when: always
+    expire_in: 3 days
+    paths:
+      - "$SBOM_FILE"

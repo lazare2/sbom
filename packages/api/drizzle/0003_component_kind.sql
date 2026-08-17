@@ -1,0 +1,2 @@
+ALTER TABLE "component" ADD COLUMN "kind" text DEFAULT 'library' NOT NULL;--> statement-breakpoint
+CREATE INDEX "component_kind_idx" ON "component" USING btree ("kind") WHERE "component"."kind" <> 'library';
