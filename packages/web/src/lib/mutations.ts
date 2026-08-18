@@ -21,7 +21,10 @@ import type {
   UserSummary,
   VulnScanStatus,
   PlatformSettings,
+  ReportRunSummary,
+  ReportSettings,
   UpdatePlatformSettings,
+  UpdateReportSettings,
 } from "@sbom/shared";
 import { api } from "./api.ts";
 import { queryKeys } from "./queries.ts";
@@ -343,6 +346,62 @@ export function useUpdatePlatformSettings() {
     onSuccess: (result) => {
       qc.setQueryData(queryKeys.platformSettings, result);
       void qc.invalidateQueries();
+    },
+  });
+}
+
+/**
+ * Saves report delivery settings.
+ *
+ * A full replace rather than a patch: the form edits every field at once, and a partial
+ * update would let two administrators with the page open overwrite each other's changes one
+ * field at a time without either seeing a conflict.
+ */
+export function useUpdateReportSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateReportSettings) =>
+      api.put<ReportSettings>("/admin/reports/settings", body),
+    onSuccess: (result) => {
+      qc.setQueryData(queryKeys.reportSettings, result);
+    },
+  });
+}
+
+export function useTestReportEmail() {
+  return useMutation({
+    mutationFn: (recipient: string) =>
+      api.post<{ sent: boolean }>("/admin/reports/settings/test", { recipient }),
+  });
+}
+
+/**
+ * Generates a report now.
+ *
+ * Ad-hoc by default, which is what the button sends. An ad-hoc run is compared against the
+ * last monthly report but never becomes the baseline for the next one, so pressing this
+ * cannot shorten next month's reporting period.
+ */
+export function useGenerateReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (kind: "monthly" | "adhoc") =>
+      api.post<{ run: ReportRunSummary; alreadyExisted: boolean }>("/admin/reports", { kind }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.reportRuns });
+    },
+  });
+}
+
+export function useSendReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ sent: boolean; recipients: string[]; error?: string }>(
+        `/admin/reports/${id}/send`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.reportRuns });
     },
   });
 }

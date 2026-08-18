@@ -82,6 +82,16 @@ function watch(target, prefix = "") {
     if (/409/.test(msg.text()) && /\/applications\/[0-9a-f-]+\/scans$/.test(msg.location()?.url ?? "")) {
       return;
     }
+    /*
+     * The rejected mail-server URL in step 21c.
+     *
+     * Matched on the settings endpoint rather than on the status: a blanket /400/ filter
+     * would hide a genuine bad request from anywhere else, and being refused is the exact
+     * behaviour that step is there to prove.
+     */
+    if (/400/.test(msg.text()) && /\/admin\/reports\/settings$/.test(msg.location()?.url ?? "")) {
+      return;
+    }
     problems.push(`${prefix}console.error: ${msg.text()}`);
   });
 
@@ -745,6 +755,78 @@ await page.getByLabel("Days without a scan").fill(original);
 await page.getByRole("button", { name: "Save" }).click();
 await page.waitForTimeout(900);
 log(`  OK   stale threshold restored to ${original}`);
+
+// --- 21c. admin: monthly report ----------------------------------------------
+/*
+  The monthly report, driven end to end: generate one, download the PDF, and confirm the
+  delivery form refuses a mail server address that is really a URL.
+
+  The last of those is the one worth a browser. "smtp://user:pass@host:25/" pasted into a
+  hostname box is exactly what someone does when the field is next to a port field, and the
+  failure it would cause -- the platform opening a connection somewhere unintended -- is
+  invisible until it happens.
+
+  Delivery settings are restored to their original values before moving on.
+*/
+log("21c. admin panel, monthly report");
+await page.goto(`${BASE}/admin/reports`, { waitUntil: "networkidle" });
+await page.waitForTimeout(800);
+await expectText("Generate a report");
+await expectText("Delivery");
+await expectText("Report history");
+
+const originalHost = await page.getByLabel("Mail server").inputValue();
+
+await page.getByRole("button", { name: "Generate now" }).click();
+// Walks the estate and renders a PDF, so it is slower than a form save.
+await page.waitForTimeout(4000);
+
+const downloadLink = page.getByRole("link", { name: /Download .* report/ });
+if ((await downloadLink.count()) === 0) {
+  problems.push("generating a report produced no download link");
+} else {
+  const href = await downloadLink.first().getAttribute("href");
+  const pdf = await page.request.get(`${BASE}${href}`);
+  const body = await pdf.body();
+  // A PDF, not an error page rendered with a 200: the magic number is the only proof.
+  if (!pdf.ok() || body.subarray(0, 4).toString() !== "%PDF") {
+    problems.push(`report PDF was not a PDF: status ${pdf.status()}, ${body.length} bytes`);
+  } else {
+    log(`  OK   report generated and downloaded (${body.length} bytes)`);
+  }
+}
+
+// The report must now appear in the history table with a PDF link of its own.
+if ((await page.getByRole("link", { name: "PDF" }).count()) === 0) {
+  problems.push("the generated report did not appear in the report history");
+} else {
+  log("  OK   the report appears in the history with a download link");
+}
+
+// A URL in the hostname field must be refused by the API rather than accepted and used.
+await page.getByLabel("Mail server").fill("smtp://user:pass@relay.internal:25/");
+await page.getByRole("button", { name: "Save", exact: true }).click();
+await page.waitForTimeout(900);
+if ((await page.getByText(/hostname or IP address/i).count()) === 0) {
+  problems.push("a URL was accepted in the mail server field");
+} else {
+  log("  OK   a URL in the mail server field is refused");
+}
+
+/*
+  Restored by reloading rather than by saving the original value back. On an estate where
+  delivery has never been configured the original host is empty, and saving that is itself
+  rejected -- so the discard has to be the thing that does not touch the API.
+*/
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForTimeout(600);
+const restoredHost = await page.getByLabel("Mail server").inputValue();
+if (restoredHost !== originalHost) {
+  problems.push(`mail server field not restored: expected "${originalHost}", found "${restoredHost}"`);
+} else {
+  log("  OK   the rejected value was not saved");
+}
+await shot("admin-reports");
 
 // --- 22. admin: audit log ---------------------------------------------------
 log("22. admin panel, audit log");

@@ -9,6 +9,7 @@ const TABS = [
   { to: "/admin/attributes", label: "Attributes" },
   { to: "/admin/tokens", label: "CI tokens" },
   { to: "/admin/vulnerabilities", label: "Vulnerability scanning" },
+  { to: "/admin/reports", label: "Monthly report" },
   { to: "/admin/settings", label: "Settings" },
   { to: "/admin/audit", label: "Audit log" },
 ];
@@ -23,7 +24,7 @@ export function AdminLayout() {
     <>
       <PageHeader
         title="Administration"
-        subtitle="Manage applications, accounts, attributes, vulnerability scanning, and the CI credentials that submit SBOMs."
+        subtitle="Manage applications, accounts, attributes, vulnerability scanning, the monthly report, and the CI credentials that submit SBOMs."
       />
 
       <nav

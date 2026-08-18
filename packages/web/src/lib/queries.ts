@@ -32,6 +32,8 @@ import type {
   VulnerabilityReport,
   VulnScanStatus,
   PlatformSettings,
+  ReportRunSummary,
+  ReportSettings,
 } from "@sbom/shared";
 import type { componentSearchSort } from "@sbom/shared";
 import { api, toQueryString } from "./api.ts";
@@ -78,6 +80,8 @@ export const queryKeys = {
   // --- vulnerabilities ---
   vulnStatus: ["vuln", "status"] as const,
   platformSettings: ["admin", "settings"] as const,
+  reportSettings: ["admin", "reports", "settings"] as const,
+  reportRuns: ["admin", "reports", "list"] as const,
   vulnAdminStatus: ["admin", "vuln", "status"] as const,
   vulnHistory: (limit: number) => ["admin", "vuln", "history", limit] as const,
   vulnSuppressions: ["admin", "vuln", "suppressions"] as const,
@@ -510,6 +514,28 @@ export function usePlatformSettings() {
   return useQuery({
     queryKey: queryKeys.platformSettings,
     queryFn: () => api.get<{ settings: PlatformSettings }>("/admin/settings"),
+  });
+}
+
+/** Delivery settings for the monthly report. */
+export function useReportSettings() {
+  return useQuery({
+    queryKey: queryKeys.reportSettings,
+    queryFn: () => api.get<ReportSettings>("/admin/reports/settings"),
+  });
+}
+
+/**
+ * Report history.
+ *
+ * Polled while a generation is in flight would be over-engineering: generating walks the
+ * estate once and the mutation invalidates this on completion, so the table updates when
+ * there is something new to show.
+ */
+export function useReportRuns() {
+  return useQuery({
+    queryKey: queryKeys.reportRuns,
+    queryFn: () => api.get<{ items: ReportRunSummary[] }>("/admin/reports"),
   });
 }
 
