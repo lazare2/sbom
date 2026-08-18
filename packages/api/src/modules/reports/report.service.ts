@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { FastifyBaseLogger } from "fastify";
 import {
   REPORT_DEFAULT_TIMEZONE,
   type ReportDelta,
@@ -11,7 +12,9 @@ import type { Database } from "../../db/client.js";
 import type { BlobStore } from "../../services/blob-store/index.js";
 import { ConflictError, isPgError, NotFoundError, PG_UNIQUE_VIOLATION } from "../../lib/errors.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
+import type { SettingsService } from "../settings/settings.service.js";
 import { computeDelta } from "./delta.js";
+import { Mailer, renderTemplate } from "./mailer.js";
 import { renderMonthlyReportPdf } from "./monthly-pdf.js";
 import { buildMonthlyView } from "./monthly-view.js";
 import { currentMonthPeriod, previousMonthPeriod, type ReportPeriod } from "./period.js";
@@ -83,6 +86,9 @@ export class ReportService {
       db: Database;
       blobStore: BlobStore;
       snapshots: SnapshotService;
+      settings: SettingsService;
+      mailer: Mailer;
+      logger: FastifyBaseLogger;
     },
   ) {}
 
@@ -309,6 +315,81 @@ export class ReportService {
   }
 
   /**
+   * Mails a report to the configured recipients.
+   *
+   * Claimed before it is sent, with a conditional update that only succeeds while `sent_at`
+   * is null. That ordering is what makes a second attempt a no-op: two schedulers racing, or
+   * one restarting mid-month, cannot both win the claim. If the send then fails the claim is
+   * released and the error recorded, so the next attempt retries rather than giving up.
+   *
+   * The remaining window is a crash between claiming and the relay accepting, which leaves a
+   * report marked sent that was not. That is deliberately preferred to the alternative: a
+   * duplicate monthly report to management is a visible embarrassment, while a missing one is
+   * visible too, and can be resent from the history page.
+   */
+  async deliver(id: string): Promise<{ sent: boolean; recipients: string[]; error?: string }> {
+    const { db, settings, mailer, logger } = this.deps;
+    const config = await settings.getReportSettings();
+
+    if (config.recipients.length === 0 || !config.smtpHost || !config.smtpFrom) {
+      throw new ConflictError(
+        "Report delivery is not configured. Set a mail server, a sender address and at least one recipient first.",
+      );
+    }
+
+    const claimed = await db.execute<Row<{ id: string }>>(sql`
+      UPDATE report_run SET sent_at = now()
+      WHERE id = ${id}::uuid AND sent_at IS NULL
+      RETURNING id
+    `);
+    if (rowsOf(claimed).length === 0) {
+      // Already sent, by an earlier attempt or another process. Reporting this as a success
+      // is what makes the scheduler safe to run more than once.
+      const existing = await this.findById(id);
+      if (!existing) throw new NotFoundError("Report");
+      return { sent: false, recipients: (existing.recipients as string[] | null) ?? [] };
+    }
+
+    try {
+      const { buffer, filename, run } = await this.pdf(id);
+      const loaded = await this.get(id);
+      const view = buildMonthlyView({
+        run,
+        snapshot: loaded.snapshot,
+        delta: loaded.delta,
+        baseline: loaded.baselineSnapshot,
+      });
+
+      const values = placeholdersFor(view);
+      const result = await mailer.send(config, {
+        to: config.recipients,
+        subject: renderTemplate(config.subjectTemplate, values),
+        text: renderTemplate(config.bodyTemplate, values),
+        attachments: [{ filename, content: buffer, contentType: "application/pdf" }],
+      });
+
+      await db.execute(sql`
+        UPDATE report_run
+        SET recipients = ${JSON.stringify(result.accepted)}::jsonb, delivery_error = NULL
+        WHERE id = ${id}::uuid
+      `);
+
+      logger.info({ reportId: id, recipients: result.accepted.length }, "monthly report sent");
+      return { sent: true, recipients: result.accepted };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Claim released, so the next attempt retries rather than seeing a report that claims
+      // to have been sent.
+      await db.execute(sql`
+        UPDATE report_run SET sent_at = NULL, delivery_error = ${message}
+        WHERE id = ${id}::uuid
+      `);
+      logger.error({ reportId: id, err }, "monthly report delivery failed");
+      return { sent: false, recipients: [], error: message };
+    }
+  }
+
+  /**
    * Inserts the run, returning null when the monthly guard rejected it.
    *
    * The guard is the unique index rather than a preceding SELECT. A scheduler that checks
@@ -350,4 +431,30 @@ export class ReportService {
       throw err;
     }
   }
+}
+
+/**
+ * The values an administrator's template may refer to.
+ *
+ * Strings rather than numbers, because they go straight into text and a locale-formatted
+ * "1,234" is what a reader expects. Every placeholder documented in the shared schema has an
+ * entry here; one without would render as itself, which is the intended behaviour for a typo
+ * but would be a defect for a documented name.
+ */
+function placeholdersFor(view: ReturnType<typeof buildMonthlyView>): Record<string, string> {
+  const number = (value: number): string => value.toLocaleString("en-US");
+  const severity = (name: string): number =>
+    view.severityMovement.find((row) => row.severity === name)?.now ?? 0;
+
+  return {
+    period: view.run.periodLabel,
+    applications: number(view.headline.applications),
+    findings: number(view.headline.totalFindings),
+    resolved: number(view.headline.resolved),
+    introduced: number(view.headline.introduced),
+    reintroduced: number(view.headline.reintroduced),
+    critical: number(severity("critical")),
+    high: number(severity("high")),
+    generatedAt: new Date(view.run.generatedAt).toISOString().slice(0, 16).replace("T", " ") + " UTC",
+  };
 }

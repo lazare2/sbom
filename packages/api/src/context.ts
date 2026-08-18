@@ -17,6 +17,8 @@ import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
+import { Mailer } from "./modules/reports/mailer.js";
+import { ReportScheduler } from "./modules/reports/report-scheduler.js";
 import { ReportService } from "./modules/reports/report.service.js";
 import { SnapshotService } from "./modules/reports/snapshot.service.js";
 import { ScansService } from "./modules/scans/scans.service.js";
@@ -73,6 +75,8 @@ export interface AppContext {
    */
   snapshots: SnapshotService;
   reports: ReportService;
+  mailer: Mailer;
+  reportScheduler: ReportScheduler;
   scanner: VulnerabilityScanner;
   vulnerabilities: VulnerabilityService;
   vulnDb: VulnDbService;
@@ -144,7 +148,9 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const analytics = new AnalyticsService({ db, config, dashboard, settings, vulnReport });
 
   const snapshots = new SnapshotService({ db });
-  const reports = new ReportService({ db, blobStore, snapshots });
+  const mailer = new Mailer({ logger });
+  const reports = new ReportService({ db, blobStore, snapshots, settings, mailer, logger });
+  const reportScheduler = new ReportScheduler({ settings, reports, logger });
 
   // Vulnerability scanning. The scanner is a port so the wiring tests can supply a
   // fake and never spawn grype.
@@ -201,6 +207,8 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     settings,
     snapshots,
     reports,
+    mailer,
+    reportScheduler,
     scanner,
     vulnerabilities,
     vulnDb,

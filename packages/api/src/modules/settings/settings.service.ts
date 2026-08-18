@@ -1,9 +1,14 @@
 import { sql, type SQL } from "drizzle-orm";
 import {
+  DEFAULT_REPORT_BODY,
+  DEFAULT_REPORT_SUBJECT,
+  REPORT_DEFAULT_TIMEZONE,
   STALE_THRESHOLD_MAX_DAYS,
   STALE_THRESHOLD_MIN_DAYS,
   VULN_DB_INTERVAL_DEFAULT_HOURS,
+  updateReportSettingsSchema,
   type PlatformSettings,
+  type ReportSettings,
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
@@ -18,9 +23,14 @@ import type { Actor } from "../admin/audit.service.js";
  * whoever deploys the service. This is for the few values an administrator changes
  * from the UI while it runs.
  *
- * Deliberately narrow: two keys, both typed, neither of which can influence what code
- * the server executes. Executable paths and credentials stay in the environment,
- * where changing them needs deployment access rather than an admin session.
+ * Deliberately narrow: every key here is typed, and none of them can influence what code
+ * the server executes. Executable paths and credentials stay in the environment, where
+ * changing them needs deployment access rather than an admin session.
+ *
+ * The report's mail settings are the one thing here that reaches the network, and they are
+ * held to the same rule. The host is validated as a bare hostname so it cannot smuggle a
+ * scheme or a credential pair, and there is no password field at all: a secret stored here
+ * would be readable by every administrator and written to the audit log when it changed.
  */
 
 export const SETTING_KEYS = {
@@ -30,7 +40,29 @@ export const SETTING_KEYS = {
   vulnIntervalHours: "vuln.interval_hours",
   /** Days without a scan before an application counts as stale. */
   staleThresholdDays: "app.stale_threshold_days",
+  /** Monthly report delivery, stored as one JSON object. */
+  reportDelivery: "report.delivery",
 } as const;
+
+/**
+ * Where the monthly report starts before anyone configures it.
+ *
+ * Disabled, with no host and no recipients, so a fresh install cannot mail anything to
+ * anyone. Everything else is a working default an administrator only has to change if they
+ * disagree with it.
+ */
+export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
+  enabled: false,
+  smtpHost: "",
+  smtpPort: 25,
+  smtpEncryption: "none",
+  smtpFrom: "",
+  recipients: [],
+  timeZone: REPORT_DEFAULT_TIMEZONE,
+  sendHour: 9,
+  subjectTemplate: DEFAULT_REPORT_SUBJECT,
+  bodyTemplate: DEFAULT_REPORT_BODY,
+};
 
 export interface VulnSettings {
   enabled: boolean;
@@ -71,6 +103,16 @@ export class SettingsService {
    * not invalidate it, and vice versa.
    */
   private platformCache: { value: PlatformSettings; expiresAt: number } | null = null;
+
+  /**
+   * Report settings, cached like the others.
+   *
+   * Read by the scheduler on every tick rather than by a request path, so the TTL matters
+   * less here -- but a shared cache would mean a change to the send hour waited on a
+   * vulnerability toggle to take effect, which is the kind of coupling that produces a bug
+   * report once a month.
+   */
+  private reportCache: { value: ReportSettings; expiresAt: number } | null = null;
 
   constructor(private readonly deps: { db: Database; config: Config }) {}
 
@@ -152,6 +194,99 @@ export class SettingsService {
 
     this.platformCache = null;
     return { before, after: await this.getPlatformSettings() };
+  }
+
+  /**
+   * Monthly report delivery settings.
+   *
+   * Re-validated on read against the same schema that guards the write. A row can predate a
+   * change to the rules or be edited straight in the database, and this value decides where
+   * the platform opens a network connection and who receives an email -- neither of which
+   * should be reachable by writing a bad row.
+   *
+   * An invalid field falls back to its default rather than failing the read, because the
+   * consequence of a bad host is a report that does not send, while the consequence of
+   * throwing here is an admin page that cannot be opened to fix it.
+   */
+  async getReportSettings(): Promise<ReportSettings> {
+    if (this.reportCache && this.reportCache.expiresAt > Date.now()) return this.reportCache.value;
+
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${SETTING_KEYS.reportDelivery}
+    `);
+
+    const stored = rowsOf(rows)[0]?.value;
+    let value = { ...DEFAULT_REPORT_SETTINGS };
+
+    if (stored && typeof stored === "object") {
+      const parsed = updateReportSettingsSchema.safeParse({
+        ...DEFAULT_REPORT_SETTINGS,
+        ...(stored as Record<string, unknown>),
+      });
+      if (parsed.success) {
+        value = parsed.data;
+      } else {
+        /*
+          Merged field by field rather than discarded wholesale. A single invalid field --
+          a host that no longer passes a tightened rule, say -- should not throw away the
+          recipient list an administrator spent time entering.
+        */
+        for (const [key, fieldSchema] of Object.entries(updateReportSettingsSchema.shape)) {
+          const candidate = (stored as Record<string, unknown>)[key];
+          if (candidate === undefined) continue;
+          const field = fieldSchema.safeParse(candidate);
+          if (field.success) (value as Record<string, unknown>)[key] = field.data;
+        }
+      }
+    }
+
+    this.reportCache = { value, expiresAt: Date.now() + SettingsService.CACHE_TTL_MS };
+    return value;
+  }
+
+  /**
+   * Whether the platform has everything it needs to actually send.
+   *
+   * Separate from `enabled` because they answer different questions: `enabled` is the
+   * administrator's intent, this is whether that intent can be carried out. The scheduler
+   * needs both, and the admin page needs to be able to explain which one is missing.
+   */
+  async reportDeliveryConfigured(): Promise<boolean> {
+    const settings = await this.getReportSettings();
+    return (
+      settings.enabled &&
+      settings.smtpHost.length > 0 &&
+      settings.smtpFrom.length > 0 &&
+      settings.recipients.length > 0
+    );
+  }
+
+  async updateReportSettings(
+    next: ReportSettings,
+    actor: Actor | null,
+  ): Promise<{ before: ReportSettings; after: ReportSettings }> {
+    const before = await this.getReportSettings();
+
+    await this.deps.db
+      .insert(setting)
+      .values({
+        key: SETTING_KEYS.reportDelivery,
+        value: next,
+        updatedByUserId: actor?.id ?? null,
+        updatedByEmail: actor?.email ?? null,
+      })
+      .onConflictDoUpdate({
+        target: setting.key,
+        set: {
+          value: next,
+          updatedAt: new Date(),
+          updatedByUserId: actor?.id ?? null,
+          updatedByEmail: actor?.email ?? null,
+        },
+      });
+
+    this.reportCache = null;
+    return { before, after: await this.getReportSettings() };
   }
 
   async getVulnSettings(): Promise<VulnSettings> {
