@@ -199,7 +199,16 @@ separate from the SBOM ingest limit so tightening one cannot break the other.
 `grype.anchore.io` fine, the container has not been told about your proxy.** The browser and
 the API are two different clients, and a container inherits nothing from the host's browser or
 system proxy settings. Set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in `.env` — both compose
-files pass them through — and add `GRYPE_DB_CA_CERT` if the proxy inspects TLS. Uploading the
+files pass them through — and add `GRYPE_DB_CA_CERT` if the proxy inspects TLS.
+
+Setting those variables is necessary but was not sufficient before this release, and the
+reason is worth knowing if you are debugging a similar tool: the update runs a reachability
+check before downloading, and that check used Node's `fetch`, which ignores the proxy
+variables entirely (built-in support arrived in Node 24 behind `NODE_USE_ENV_PROXY`; the
+runtime image is Node 22). Grype is a Go binary and honoured the proxy perfectly well — but
+the check refused first, so the downloader that would have worked never ran, and no amount
+of correct proxy configuration changed the outcome. The check now runs `grype db check`
+whenever a proxy is configured, so the probe and the download use the same client. Uploading the
 archive by hand stays a fully supported path either way; it is what the offline install exists
 for, not a workaround.
 

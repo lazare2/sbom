@@ -290,17 +290,59 @@ export class GrypeScanner implements VulnerabilityScanner {
     return `${base}/v${schema}/latest.json`;
   }
 
+/**
+   * The outbound proxy this process was given, if any.
+   *
+   * Node's fetch ignores these variables. Built-in support arrived in Node 24 behind
+   * NODE_USE_ENV_PROXY and the runtime image is Node 22, so the probe below is blind to a
+   * proxy that grype -- a Go binary, which honours them -- uses perfectly well. Left
+   * unhandled that asymmetry reports "no internet connection" for a download that would
+   * have succeeded, and no amount of correct proxy configuration fixes it.
+   */
+  private proxyFromEnv(): string | null {
+    for (const key of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]) {
+      const value = process.env[key];
+      if (value && value.trim() !== "") return value.trim();
+    }
+    return null;
+  }
+
   /**
    * Probes the listing URL before attempting a download.
    *
-   * Done as a plain fetch rather than by running grype, so the outcome is
-   * unambiguous and the message can name the URL precisely. This is what turns "the
-   * update failed" into "no internet connection to https://…/v6/latest.json", which
-   * is the difference between an administrator knowing they are air-gapped and
-   * filing a bug.
+   * Two implementations, because a preflight check is only worth anything if it predicts
+   * what the real download will do:
+   *
+   *   no proxy   a plain fetch. Cheap, no process to spawn, and it can name the URL
+   *              precisely -- the difference between an administrator knowing they are
+   *              air-gapped and filing a bug.
+   *   proxy set  grype's own `db check`, because fetch cannot see through the proxy and
+   *              would report a failure the downloader would not hit. Same binary, same
+   *              client, same proxy handling as the download it is predicting.
+   *
+   * `db check` exits 0 when the database is current and 100 when an update is available;
+   * both mean the listing was reached, which is the only question being asked here. 1 is a
+   * genuine failure and carries grype's own message, which names the URL and the cause.
    */
   async checkReachable(): Promise<ReachabilityResult> {
     const url = await this.listingUrl();
+
+    const proxy = this.proxyFromEnv();
+    if (proxy !== null) {
+      const probe = await this.run(["db", "check"], {
+        timeoutMs: this.config.GRYPE_REACHABILITY_TIMEOUT_MS,
+      });
+      if (probe.code === 0 || probe.code === 100) {
+        return { reachable: true, url, message: null };
+      }
+      const detail = (probe.stderr.trim() || probe.error?.message || `exit ${probe.code}`).slice(0, 500);
+      return {
+        reachable: false,
+        url,
+        message: `No connection to ${url} via proxy ${proxy} (${detail})`,
+      };
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.GRYPE_REACHABILITY_TIMEOUT_MS);
     timer.unref();
