@@ -20,8 +20,8 @@ import { AdminAttributesPage } from "./pages/admin/AdminAttributesPage.tsx";
 import { AdminAuditPage } from "./pages/admin/AdminAuditPage.tsx";
 import { AdminLayout } from "./pages/admin/AdminLayout.tsx";
 import { AdminPendingPage } from "./pages/admin/AdminPendingPage.tsx";
+import { AdminConfigurationPage } from "./pages/admin/AdminConfigurationPage.tsx";
 import { AdminReportsPage } from "./pages/admin/AdminReportsPage.tsx";
-import { AdminSettingsPage } from "./pages/admin/AdminSettingsPage.tsx";
 import { AdminTokensPage } from "./pages/admin/AdminTokensPage.tsx";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage.tsx";
 import { AdminVulnerabilitiesPage } from "./pages/admin/AdminVulnerabilitiesPage.tsx";
@@ -113,7 +113,13 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="attributes" element={<AdminAttributesPage />} />
                 <Route path="tokens" element={<AdminTokensPage />} />
                 <Route path="reports" element={<AdminReportsPage />} />
-                <Route path="settings" element={<AdminSettingsPage />} />
+                <Route path="configuration" element={<AdminConfigurationPage />} />
+                {/*
+                  The old single-field Settings page became the Configuration tab. Kept as a
+                  redirect rather than removed: this URL has been bookmarked and linked to,
+                  and a 404 on a path that worked yesterday reads as a broken deployment.
+                */}
+                <Route path="settings" element={<Navigate to="/admin/configuration" replace />} />
                 <Route path="vulnerabilities" element={<AdminVulnerabilitiesPage />} />
                 <Route path="audit" element={<AdminAuditPage />} />
               </Route>

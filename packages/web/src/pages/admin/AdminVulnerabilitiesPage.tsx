@@ -1,11 +1,6 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Link } from "react-router";
-import {
-  VULN_DB_INTERVAL_MAX_HOURS,
-  VULN_DB_INTERVAL_MIN_HOURS,
-  type VulnDbUpdateAttempt,
-  type VulnScanStatus,
-} from "@sbom/shared";
+import type { VulnDbUpdateAttempt, VulnScanStatus } from "@sbom/shared";
 import {
   useImportVulnDb,
   useRunVulnSweep,
@@ -25,13 +20,11 @@ import {
   ErrorBanner,
   Field,
   FormError,
-  FormRow,
   LoadingBlock,
   Mono,
   Table,
   TableWrap,
   Td,
-  TextInput,
   Th,
   Tr,
 } from "../../components/ui.tsx";
@@ -77,13 +70,6 @@ export function AdminVulnerabilitiesPage() {
 
 function EnableCard({ status }: { status: VulnScanStatus }) {
   const update = useUpdateVulnSettings();
-  const [interval, setInterval] = useState(String(status.updates.intervalHours));
-
-  const intervalChanged = Number(interval) !== status.updates.intervalHours;
-  const intervalValid =
-    Number.isFinite(Number(interval)) &&
-    Number(interval) >= VULN_DB_INTERVAL_MIN_HOURS &&
-    Number(interval) <= VULN_DB_INTERVAL_MAX_HOURS;
 
   return (
     <Card>
@@ -111,45 +97,26 @@ function EnableCard({ status }: { status: VulnScanStatus }) {
           </p>
         )}
 
-        <div className="flex flex-wrap items-end gap-3 border-t border-border-base pt-4">
-          <div className="w-40">
-            <FormRow
-              label="Check for updates every"
-              htmlFor="vuln-interval"
-              hint={`Hours. ${VULN_DB_INTERVAL_MIN_HOURS}–${VULN_DB_INTERVAL_MAX_HOURS} allowed.`}
-            >
-              <TextInput id="vuln-interval" value={interval} onChange={setInterval} />
-            </FormRow>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!intervalChanged || !intervalValid || update.isPending}
-            onClick={() => update.mutate({ intervalHours: Number(interval) })}
-          >
-            {update.isPending ? "Saving…" : "Save interval"}
-          </Button>
-          {status.updates.nextCheckAt ? (
-            <p className="text-xs text-text-faint">
-              Next check {formatRelative(status.updates.nextCheckAt)}
-            </p>
-          ) : (
-            <p className="text-xs text-text-faint">
-              {/* Honest about the schedule not running, rather than showing a time that will not happen. */}
-              No scheduled checks while scanning is disabled.
-            </p>
-          )}
-        </div>
-
         {/*
-          Anchore rebuilds roughly daily, so a 3-hour check is a cheap listing request that
-          usually finds nothing — worth saying, because "every 3 hours" otherwise sounds
-          like eight 141 MB downloads a day.
+          The interval is set under Configuration, but its current value belongs here: the
+          question "when will this next look for a database" is asked while reading the
+          database status below, not while editing a form on another page.
         */}
-        <p className="text-xs text-text-faint">
-          A check fetches a small listing file first and only downloads when the published database
-          is newer. Anchore rebuilds it about once a day, so most checks transfer nothing.
-        </p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border-base pt-4 text-xs text-text-faint">
+          <span>
+            Checks for a new database every {status.updates.intervalHours}{" "}
+            {status.updates.intervalHours === 1 ? "hour" : "hours"}.
+          </span>
+          {status.updates.nextCheckAt ? (
+            <span>Next check {formatRelative(status.updates.nextCheckAt)}.</span>
+          ) : (
+            /* Honest about the schedule not running, rather than showing a time that will not happen. */
+            <span>No scheduled checks while scanning is disabled.</span>
+          )}
+          <Link to="/admin/configuration" className="text-accent hover:underline">
+            Change interval
+          </Link>
+        </div>
 
         <FormError error={update.error} />
       </div>

@@ -431,7 +431,8 @@ same payload the page renders.
 
 ### The monthly management report
 
-**Administration → Monthly report**. A separate document from the analytics PDF above:
+**Administration → Monthly report**, with its delivery settings under
+**Administration → Configuration**. A separate document from the analytics PDF above:
 that one is an inventory of what exists, this one is an argument about what changed.
 
 The problem it exists to solve is attribution. Findings are matched against *today's*
@@ -790,13 +791,33 @@ Visible only to admins, at `/admin`.
 - **CI tokens** — mint and revoke ingest tokens. Environment-configured tokens are
   listed too, marked as such, because listing only database rows would report "no
   tokens" on a deployment where CI is authenticating perfectly well.
-- **Monthly report** — generate the management report, configure who receives it
-  and when, edit the email template, and see the history of what was sent. See
+- **Monthly report** — generate the management report, switch scheduled sending on
+  or off, and see the history of what was sent and whether it arrived. See
   [The monthly management report](#the-monthly-management-report).
+- **Configuration** — every value set once and forgotten: the staleness threshold,
+  how often to check for a vulnerability database, and the mail relay, recipients
+  and email template for the monthly report. See
+  [The Configuration tab](#the-configuration-tab).
 - **Audit log** — every administrative write, kept indefinitely. This exists mainly
   for merges: a merge moves scan history between applications and then deletes the
   source, so without it "why does this app have someone else's builds" is
   unanswerable.
+
+### The Configuration tab
+
+**Administration → Configuration** gathers the values an administrator sets during setup
+and rarely touches again: the staleness threshold, the vulnerability database check
+interval, and the monthly report's relay, recipients, schedule and email template. Each
+section saves to its own endpoint with its own button — one button spanning three would
+produce partial failures with no way to report which half succeeded.
+
+Master on/off switches deliberately stay where the evidence for flipping them is.
+Vulnerability scanning is enabled on its own tab, beside the scanner status and database
+age that make the decision meaningful; scheduled report delivery is switched on beside the
+history that shows whether delivery works. Each of those tabs shows its current setting
+read-only and links here to change it.
+
+The older single-field `/admin/settings` page is now this tab, and that URL redirects.
 
 ### Accounts and passwords
 
@@ -828,7 +849,8 @@ account immediately — which is why sessions are Postgres-backed rather than JW
 ## Vulnerability scanning
 
 Built in, backed by [Grype](https://github.com/anchore/grype), and **off by default**.
-Enable it under **Admin → Vulnerability scanning**.
+Enable it under **Admin → Vulnerability scanning**; the update interval is under
+**Admin → Configuration**.
 
 Grype ships inside the container image (`COPY --from=anchore/grype:v0.115.0`), pinned so
 findings are reproducible — results shift between releases, and the database schema is

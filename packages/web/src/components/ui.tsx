@@ -435,18 +435,26 @@ export function Checkbox({
   checked,
   onChange,
   label,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  /** Greyed and inert. The caller is expected to say why nearby; a dead control is worse. */
+  disabled?: boolean;
 }) {
   return (
-    <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-text-muted select-none">
+    <label
+      className={`inline-flex items-center gap-1.5 text-sm select-none ${
+        disabled ? "cursor-not-allowed text-text-faint" : "cursor-pointer text-text-muted"
+      }`}
+    >
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="size-3.5 accent-[var(--accent)]"
+        className="size-3.5 accent-[var(--accent)] disabled:opacity-50"
       />
       {label}
     </label>

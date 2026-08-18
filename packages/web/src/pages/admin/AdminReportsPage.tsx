@@ -1,19 +1,7 @@
-import { useEffect, useState } from "react";
-import {
-  REPORT_RECIPIENT_LIMIT,
-  REPORT_TEMPLATE_PLACEHOLDERS,
-  smtpEncryptions,
-  type ReportRunSummary,
-  type ReportSettings,
-  type SmtpEncryption,
-} from "@sbom/shared";
+import { Link } from "react-router";
+import type { ReportRunSummary } from "@sbom/shared";
 import { useReportRuns, useReportSettings } from "../../lib/queries.ts";
-import {
-  useGenerateReport,
-  useSendReport,
-  useTestReportEmail,
-  useUpdateReportSettings,
-} from "../../lib/mutations.ts";
+import { useGenerateReport, useSendReport, useUpdateReportSettings } from "../../lib/mutations.ts";
 import {
   Badge,
   Button,
@@ -22,14 +10,11 @@ import {
   Checkbox,
   EmptyState,
   ErrorBanner,
-  FormRow,
   LoadingBlock,
-  Select,
+  Mono,
   Table,
   TableWrap,
   Td,
-  Textarea,
-  TextInput,
   Th,
   Tr,
 } from "../../components/ui.tsx";
@@ -48,7 +33,7 @@ export function AdminReportsPage() {
   return (
     <div className="space-y-4">
       <GenerateCard />
-      <DeliveryCard />
+      <ScheduleCard />
       <HistoryCard />
     </div>
   );
@@ -109,42 +94,32 @@ function GenerateCard() {
 }
 
 // ---------------------------------------------------------------------------
-// delivery settings
+// scheduled delivery
 // ---------------------------------------------------------------------------
 
-const ENCRYPTION_LABELS: Record<SmtpEncryption, string> = {
-  none: "None (plain SMTP)",
-  starttls: "STARTTLS",
-  tls: "TLS (implicit)",
-};
-
-/** Recipients are edited as one address per line, which is how people paste a list. */
-function parseRecipients(text: string): string[] {
-  return text
-    .split(/[\n,;]+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
-
-function DeliveryCard() {
+/**
+ * The master switch, kept here rather than with the relay settings it depends on.
+ *
+ * This is the one report control an administrator flips while looking at something: the
+ * history below is the evidence that delivery is actually working, and a switch separated
+ * from its evidence is a switch nobody trusts.
+ *
+ * It cannot be turned on until a relay, a sender and at least one recipient exist, because
+ * the server rejects a half-configured object and a checkbox that fails with a validation
+ * error is worse than one that explains why it is unavailable.
+ */
+function ScheduleCard() {
   const query = useReportSettings();
   const update = useUpdateReportSettings();
-  const test = useTestReportEmail();
+  const settings = query.data;
 
-  const [form, setForm] = useState<ReportSettings | null>(null);
-  const [recipientText, setRecipientText] = useState("");
-  const [testAddress, setTestAddress] = useState("");
-
-  // Seeded once the server value arrives, and re-seeded if it changes underneath. Not on
-  // every render, or typing would be overwritten by an in-flight query.
-  useEffect(() => {
-    if (query.data) {
-      setForm(query.data);
-      setRecipientText(query.data.recipients.join("\n"));
-    }
-  }, [query.data]);
-
-  if (query.isLoading) return <Card><LoadingBlock /></Card>;
+  if (query.isLoading) {
+    return (
+      <Card>
+        <LoadingBlock />
+      </Card>
+    );
+  }
   if (query.error) {
     return (
       <Card>
@@ -152,210 +127,68 @@ function DeliveryCard() {
       </Card>
     );
   }
-  if (!form) return null;
+  if (!settings) return null;
 
-  const recipients = parseRecipients(recipientText);
-  const set = <K extends keyof ReportSettings>(key: K, value: ReportSettings[K]) =>
-    setForm({ ...form, [key]: value });
-
-  const tooMany = recipients.length > REPORT_RECIPIENT_LIMIT;
-  const canSave = !update.isPending && !tooMany;
+  const configured =
+    settings.smtpHost.length > 0 &&
+    settings.smtpFrom.length > 0 &&
+    settings.recipients.length > 0;
 
   return (
     <Card>
       <CardHeader
-        title="Delivery"
-        subtitle="Where the monthly report is sent from, and to whom."
+        title="Scheduled delivery"
+        subtitle="Whether the report is emailed automatically each month."
       />
-      <div className="space-y-4 p-4">
+      <div className="space-y-3 p-4">
         <Checkbox
-          checked={form.enabled}
-          onChange={(checked) => set("enabled", checked)}
-          label="Send the report automatically each month"
+          checked={settings.enabled}
+          onChange={(enabled) => update.mutate({ ...settings, enabled })}
+          label={
+            settings.enabled
+              ? "On — sent on the first working day of each month"
+              : "Send the report automatically each month"
+          }
+          disabled={!configured || update.isPending}
         />
-        <p className="text-xs text-text-muted">
-          Sent on the first working day of the month, at the hour below, covering the month
-          that has just finished. Weekends are skipped. If the service is down at that hour it
-          sends when it comes back, and it cannot send the same month twice.
-        </p>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <FormRow
-            label="Mail server"
-            htmlFor="smtp-host"
-            hint="Hostname or IP address only — no scheme, port or credentials."
-          >
-            <TextInput
-              id="smtp-host"
-              value={form.smtpHost}
-              onChange={(value) => set("smtpHost", value)}
-              placeholder="smtp.example.org"
-            />
-          </FormRow>
-          <FormRow label="Port" htmlFor="smtp-port">
-            <TextInput
-              id="smtp-port"
-              value={String(form.smtpPort)}
-              onChange={(value) => set("smtpPort", Number(value) || 0)}
-              placeholder="25"
-            />
-          </FormRow>
-          <FormRow
-            label="Encryption"
-            htmlFor="smtp-encryption"
-            hint="Most internal relays accept plain SMTP from inside the network."
-          >
-            <Select<SmtpEncryption>
-              id="smtp-encryption"
-              value={form.smtpEncryption}
-              onChange={(value) => set("smtpEncryption", value)}
-              options={smtpEncryptions.map((value) => ({
-                value,
-                label: ENCRYPTION_LABELS[value],
-              }))}
-            />
-          </FormRow>
-          <FormRow label="From address" htmlFor="smtp-from">
-            <TextInput
-              id="smtp-from"
-              value={form.smtpFrom}
-              onChange={(value) => set("smtpFrom", value)}
-              placeholder="sbom-platform@example.org"
-            />
-          </FormRow>
-          <FormRow
-            label="Time zone"
-            htmlFor="report-tz"
-            hint="Decides both the reporting month and the hour it is sent."
-          >
-            <TextInput
-              id="report-tz"
-              value={form.timeZone}
-              onChange={(value) => set("timeZone", value)}
-              placeholder="Asia/Tbilisi"
-            />
-          </FormRow>
-          <FormRow label="Send at (hour, 24h)" htmlFor="report-hour">
-            <TextInput
-              id="report-hour"
-              value={String(form.sendHour)}
-              onChange={(value) => set("sendHour", Number(value) || 0)}
-              placeholder="9"
-            />
-          </FormRow>
-        </div>
+        {configured ? (
+          <p className="text-xs text-text-muted">
+            Sent to {settings.recipients.length}{" "}
+            {settings.recipients.length === 1 ? "recipient" : "recipients"} at{" "}
+            {String(settings.sendHour).padStart(2, "0")}:00 {settings.timeZone}, through{" "}
+            <Mono>{settings.smtpHost}</Mono>. Weekends are skipped, and the same month cannot
+            be sent twice.{" "}
+            <Link to="/admin/configuration" className="text-accent hover:underline">
+              Change delivery settings
+            </Link>
+          </p>
+        ) : (
+          /*
+            Names the missing piece rather than saying "not configured". An administrator
+            who has set the relay but no recipients should not have to guess which half is
+            outstanding.
+          */
+          <p className="text-xs text-text-muted">
+            Scheduled sending needs a mail server, a sender address and at least one
+            recipient. Missing:{" "}
+            {[
+              settings.smtpHost.length === 0 ? "mail server" : null,
+              settings.smtpFrom.length === 0 ? "sender address" : null,
+              settings.recipients.length === 0 ? "recipients" : null,
+            ]
+              .filter(Boolean)
+              .join(", ")}
+            .{" "}
+            <Link to="/admin/configuration" className="text-accent hover:underline">
+              Configure delivery
+            </Link>
+          </p>
+        )}
 
-        <FormRow
-          label="Recipients"
-          htmlFor="report-recipients"
-          hint={`One address per line. ${recipients.length} of ${REPORT_RECIPIENT_LIMIT} used.`}
-          error={tooMany ? `At most ${REPORT_RECIPIENT_LIMIT} recipients.` : undefined}
-        >
-          <Textarea
-            id="report-recipients"
-            rows={4}
-            value={recipientText}
-            onChange={setRecipientText}
-            placeholder={"management@example.org\nsecurity@example.org"}
-          />
-        </FormRow>
-
-        {/*
-          No password field, and the absence is stated rather than left as a gap someone
-          later "fixes". A secret held in this table would be readable by every administrator
-          and written to the audit log the moment it changed.
-        */}
-        <p className="text-xs text-text-faint">
-          There is no username or password: the report is sent through a relay that accepts
-          mail from this server without authenticating it. If your relay requires credentials,
-          they belong in the deployment environment rather than on this page.
-        </p>
-
-        <div className="border-t border-border-base pt-4">
-          <TemplateFields form={form} set={set} />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 border-t border-border-base pt-4">
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!canSave}
-            onClick={() => update.mutate({ ...form, recipients })}
-          >
-            {update.isPending ? "Saving…" : "Save"}
-          </Button>
-
-          <span className="text-xs text-text-faint">Send a test message to:</span>
-          <div className="w-64">
-            <TextInput
-              value={testAddress}
-              onChange={setTestAddress}
-              ariaLabel="Test recipient"
-              placeholder="you@example.org"
-            />
-          </div>
-          <Button
-            size="sm"
-            disabled={test.isPending || testAddress.trim() === ""}
-            onClick={() => test.mutate(testAddress.trim())}
-          >
-            {test.isPending ? "Sending…" : "Send test"}
-          </Button>
-          {test.isSuccess ? <span className="text-xs text-ok">Test message sent.</span> : null}
-        </div>
-
-        {/*
-          A failing test is the whole point of the button, so its error is shown in full
-          rather than as "something went wrong": the relay's own message is what tells an
-          administrator whether the host is wrong, the port is closed or the sender refused.
-        */}
-        {test.error ? <ErrorBanner error={test.error} /> : null}
         {update.error ? <ErrorBanner error={update.error} /> : null}
       </div>
     </Card>
-  );
-}
-
-function TemplateFields({
-  form,
-  set,
-}: {
-  form: ReportSettings;
-  set: <K extends keyof ReportSettings>(key: K, value: ReportSettings[K]) => void;
-}) {
-  return (
-    <div className="space-y-3">
-      <FormRow label="Email subject" htmlFor="report-subject">
-        <TextInput
-          id="report-subject"
-          value={form.subjectTemplate}
-          onChange={(value) => set("subjectTemplate", value)}
-        />
-      </FormRow>
-      <FormRow
-        label="Email body"
-        htmlFor="report-body"
-        hint="Plain text. The report itself is attached as a PDF."
-      >
-        <Textarea
-          id="report-body"
-          rows={10}
-          value={form.bodyTemplate}
-          onChange={(value) => set("bodyTemplate", value)}
-        />
-      </FormRow>
-      <div className="text-xs text-text-faint">
-        Available placeholders:{" "}
-        {REPORT_TEMPLATE_PLACEHOLDERS.map((placeholder, index) => (
-          <span key={placeholder}>
-            {index > 0 ? ", " : ""}
-            <code className="rounded bg-bg-subtle px-1 py-0.5 text-[11px]">{placeholder}</code>
-          </span>
-        ))}
-        . Anything else is left exactly as typed, so a misspelled placeholder shows up in the
-        email rather than disappearing.
-      </div>
-    </div>
   );
 }
 

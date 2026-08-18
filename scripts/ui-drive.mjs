@@ -722,16 +722,29 @@ await shot("admin-tokens");
   or one that changes the dashboards and cannot be put back. The value is restored before
   moving on, so a run of this script leaves the estate as it found it.
 */
-log("21b. admin panel, platform settings");
-await page.getByRole("link", { name: "Settings" }).click();
-await page.waitForURL(/\/admin\/settings/, { timeout: 10000 });
+log("21b. admin panel, configuration");
+await page.getByRole("link", { name: "Configuration" }).click();
+await page.waitForURL(/\/admin\/configuration/, { timeout: 10000 });
 await page.waitForLoadState("networkidle");
 await expectText("Stale applications");
+// The three sections that were gathered here from three different tabs.
+await expectText("Vulnerability database updates");
+await expectText("Monthly report delivery");
+
+// The old single-field Settings URL has been linked to and bookmarked; it must land here
+// rather than 404, or an upgrade looks like a broken deployment.
+await page.goto(`${BASE}/admin/settings`, { waitUntil: "networkidle" });
+await page.waitForTimeout(600);
+if (!page.url().includes("/admin/configuration")) {
+  problems.push(`/admin/settings did not redirect to configuration, landed on ${page.url()}`);
+} else {
+  log("  OK   the old /admin/settings URL redirects to Configuration");
+}
 
 const staleField = page.getByLabel("Days without a scan");
 const original = await staleField.inputValue();
 await staleField.fill("7");
-await page.getByRole("button", { name: "Save" }).click();
+await page.getByRole("button", { name: "Save threshold" }).click();
 await page.waitForTimeout(900);
 await page.reload({ waitUntil: "networkidle" });
 const saved = await page.getByLabel("Days without a scan").inputValue();
@@ -740,19 +753,19 @@ if (saved !== "7") {
 } else {
   log("  OK   stale threshold saved and survived a reload");
 }
-await shot("admin-settings");
+await shot("admin-configuration");
 
 // Out of range must be refused by the UI, not sent and rejected by the API.
 await page.getByLabel("Days without a scan").fill("0");
 await page.waitForTimeout(250);
-if (await page.getByRole("button", { name: "Save" }).isEnabled()) {
+if (await page.getByRole("button", { name: "Save threshold" }).isEnabled()) {
   problems.push("Save stayed enabled for an out-of-range threshold");
 } else {
   log("  OK   Save is refused for a threshold of 0");
 }
 
 await page.getByLabel("Days without a scan").fill(original);
-await page.getByRole("button", { name: "Save" }).click();
+await page.getByRole("button", { name: "Save threshold" }).click();
 await page.waitForTimeout(900);
 log(`  OK   stale threshold restored to ${original}`);
 
@@ -772,10 +785,29 @@ log("21c. admin panel, monthly report");
 await page.goto(`${BASE}/admin/reports`, { waitUntil: "networkidle" });
 await page.waitForTimeout(800);
 await expectText("Generate a report");
-await expectText("Delivery");
+await expectText("Scheduled delivery");
 await expectText("Report history");
 
-const originalHost = await page.getByLabel("Mail server").inputValue();
+// The relay settings moved to Configuration, so this tab must not still carry the form.
+if ((await page.getByLabel("Mail server").count()) > 0) {
+  problems.push("the mail server field is still on the report tab");
+} else {
+  log("  OK   delivery settings are no longer duplicated on the report tab");
+}
+
+/*
+  The switch cannot be turned on before a relay and recipients exist. Asserted because the
+  server rejects a half-configured object outright, so an enabled-looking checkbox here
+  would fail with a validation error the reader has no way to interpret.
+*/
+const scheduleToggle = page.getByRole("checkbox", {
+  name: /Send the report automatically|sent on the first working day/,
+});
+if (await scheduleToggle.isEnabled()) {
+  log("  NOTE delivery is already configured on this estate, so the switch is available");
+} else {
+  log("  OK   scheduled delivery cannot be switched on until a relay is configured");
+}
 
 await page.getByRole("button", { name: "Generate now" }).click();
 // Walks the estate and renders a PDF, so it is slower than a form save.
@@ -803,9 +835,15 @@ if ((await page.getByRole("link", { name: "PDF" }).count()) === 0) {
   log("  OK   the report appears in the history with a download link");
 }
 
+await shot("admin-reports");
+
 // A URL in the hostname field must be refused by the API rather than accepted and used.
+// The form itself now lives under Configuration, so the check follows it there.
+await page.goto(`${BASE}/admin/configuration`, { waitUntil: "networkidle" });
+await page.waitForTimeout(600);
+const originalHost = await page.getByLabel("Mail server").inputValue();
 await page.getByLabel("Mail server").fill("smtp://user:pass@relay.internal:25/");
-await page.getByRole("button", { name: "Save", exact: true }).click();
+await page.getByRole("button", { name: "Save delivery settings" }).click();
 await page.waitForTimeout(900);
 if ((await page.getByText(/hostname or IP address/i).count()) === 0) {
   problems.push("a URL was accepted in the mail server field");
@@ -826,7 +864,7 @@ if (restoredHost !== originalHost) {
 } else {
   log("  OK   the rejected value was not saved");
 }
-await shot("admin-reports");
+await shot("admin-configuration-delivery");
 
 // --- 22. admin: audit log ---------------------------------------------------
 log("22. admin panel, audit log");
