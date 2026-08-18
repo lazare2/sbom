@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { AdvisoryImpact, VulnSeverity } from "@sbom/shared";
 import { useAdvisoryImpact, useAdvisorySearch, useVulnStatus } from "../lib/queries.ts";
-import { AdvisoryPackagesCell } from "../components/AdvisoryPackages.tsx";
+import {
+  AdvisoryApplicationsCell,
+  AdvisoryPackagesCell,
+} from "../components/AdvisoryPackages.tsx";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
@@ -282,12 +285,8 @@ export function VulnerabilitiesPage() {
                         {advisory.description ?? "—"}
                       </Td>
                       <AdvisoryPackagesCell advisory={advisory} />
-                      <Td align="right" className="nums font-medium text-text-base">
-                        {formatNumber(advisory.currentApplications)}
-                      </Td>
-                      <Td align="right" className="nums text-text-faint">
-                        {formatNumber(advisory.historicalApplications)}
-                      </Td>
+                      <AdvisoryApplicationsCell advisory={advisory} />
+                      <AdvisoryApplicationsCell advisory={advisory} historical />
                       <Td>
                         {advisory.fixAvailable ? (
                           <Badge tone="ok">available</Badge>

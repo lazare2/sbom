@@ -195,6 +195,16 @@ the browser rewrites the colons in the filename, which Windows requires. The arc
 ~145 MB; `GRYPE_DB_MAX_UPLOAD_BYTES` caps the upload at 1 GiB by default, which is
 separate from the SBOM ingest limit so tightening one cannot break the other.
 
+**If you put your own reverse proxy in front, raise its request body limit too.** The
+bundled nginx allows 1 GiB to match the API. This is the failure worth knowing about
+because of how it presents: a proxy that rejects the body closes the connection, and the
+browser reports "failed to fetch" rather than a status, so the size-specific error the API
+raises for exactly this case never reaches you. nginx's own default is 1 MB and this
+config shipped with 128 MB — both below the archive, both silent. Whichever limit is
+lowest is the one that decides, and it should not be the one that cannot explain itself.
+Allow at least 30 minutes of read timeout as well: the import expands ~1.9 GB and
+validates it before swapping, and a proxy timing out mid-import kills a *working* install.
+
 Then tick **Enable vulnerability scanning**. Every package already in the platform is
 matched in the background — historical builds included — and the dashboards gain the
 findings. Expect a couple of minutes for a few thousand packages.

@@ -1307,29 +1307,74 @@ for (const route of ["/", "/analytics"]) {
   }
 }
 
-await page.goto(`${BASE}/vulnerabilities`, { waitUntil: "networkidle" });
-await page.waitForTimeout(1200);
+/*
+  currentOnly=false deliberately. The default view adds `sc.scan_id = a.latest_scan_id` to
+  the WHERE clause, which makes the historical count's own FILTER
+  (`sc.scan_id <> a.latest_scan_id`) unsatisfiable -- so "Apps dropped" is structurally 0
+  there, and a count with an empty list renders as a plain number rather than a disclosure.
+  Driving the default view would assert two disclosures and never exercise the historical
+  list at all.
+*/
+await page.goto(`${BASE}/vulnerabilities?currentOnly=false`, { waitUntil: "networkidle" });
+await page.waitForTimeout(1500);
 if ((await page.locator("tbody tr").count()) === 0) {
   log("  note: no advisories in this estate, so the disclosure cannot be driven");
 } else {
-  const summary = page.locator("tbody details > summary").first();
-  if ((await summary.count()) === 0) {
-    problems.push("the advisory table has no expandable package count");
+  /*
+    Three disclosures per row: affected packages, applications now, applications with
+    history. Each is driven, because they read from different aggregates with different
+    FILTERs and a cell wired to the wrong one would still expand and still look right.
+  */
+  const firstRow = page.locator("tbody tr").first();
+  const summaries = firstRow.locator("details > summary");
+  const found = await summaries.count();
+
+  /*
+    Not a fixed count of disclosures. Any of the three numbers can legitimately be zero -- an
+    advisory can affect no current build, or every build except the current one -- and a zero
+    renders as a plain number by design, because a control that opens onto an empty box is
+    worse than the number it replaced. Asserting "three" made the test a claim about the
+    fixture; twice it failed while the feature was correct.
+
+    So the rule under test is the actual invariant: a cell is a disclosure exactly when it
+    counted something. The expected number is read from the row itself.
+  */
+  const cells = firstRow.locator("td");
+  const cellCount = await cells.count();
+  if (cellCount !== 7) {
+    problems.push(`advisory row shape changed: expected 7 cells, found ${cellCount} -- the count columns below are positional`);
+  }
+  // Severity, Advisory, Description, [Packages, Apps now, Apps dropped], Fix
+  let expected = 0;
+  for (const i of [3, 4, 5]) {
+    // Closed <details> hides its chips and its overflow note, so this is just the number.
+    const text = (await cells.nth(i).innerText()).trim();
+    const n = Number(text.split(/\s+/)[0].replace(/,/g, ""));
+    if (Number.isFinite(n) && n > 0) expected++;
+  }
+  if (found !== expected) {
+    problems.push(
+      `advisory row has ${expected} non-zero count(s) but ${found} expandable one(s): a count that counted something must be openable`,
+    );
   } else {
-    /*
-      Counted under details[open] rather than as plain descendants. A closed <details> keeps
-      its children in the DOM, so counting all of them would report the same number before
-      and after the click and the assertion would never fail.
-    */
-    const open = page.locator("tbody details[open] a[href*='/search?name=']");
+    log(`  OK   ${found} of 3 counts are non-zero, and exactly those are expandable`);
+  }
+  /*
+    Counted under details[open] rather than as plain descendants. A closed <details> keeps
+    its children in the DOM, so counting all of them would report the same number before and
+    after the click and the assertion could never fail. The selector is any link, not just
+    the package one: application chips point at /applications instead.
+  */
+  const open = firstRow.locator("details[open] a");
+  for (let i = 0; i < found; i++) {
     const before = await open.count();
-    await summary.click();
-    await page.waitForTimeout(300);
+    await summaries.nth(i).click();
+    await page.waitForTimeout(250);
     const after = await open.count();
     if (after <= before) {
-      problems.push(`expanding a package count revealed no packages (${before} -> ${after})`);
+      problems.push(`expanding count ${i + 1} on an advisory row revealed nothing (${before} -> ${after})`);
     } else {
-      log(`  OK   expanding a package count listed ${after - before} package(s)`);
+      log(`  OK   advisory disclosure ${i + 1} of ${found} listed ${after - before} entr(y/ies)`);
     }
   }
   await shot("advisory-packages-expanded");

@@ -13,7 +13,7 @@ import { SEVERITY_ORDER } from "@sbom/shared";
 import { formatNumber, formatRelative } from "../lib/format.ts";
 import { useAdvisorySearch } from "../lib/queries.ts";
 import { useClientSort } from "../lib/useSort.ts";
-import { AdvisoryPackagesCell } from "./AdvisoryPackages.tsx";
+import { AdvisoryApplicationsCell, AdvisoryPackagesCell } from "./AdvisoryPackages.tsx";
 import { SeverityBar, SeverityBadge } from "./Severity.tsx";
 import {
   Badge,
@@ -387,9 +387,7 @@ export function TopAdvisoriesCard() {
                     ) : null}
                   </Td>
                   <AdvisoryPackagesCell advisory={advisory} />
-                  <Td align="right" className="nums font-medium text-text-base">
-                    {formatNumber(advisory.currentApplications)}
-                  </Td>
+                  <AdvisoryApplicationsCell advisory={advisory} />
                 </Tr>
               ))}
             </tbody>

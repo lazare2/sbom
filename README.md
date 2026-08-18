@@ -802,6 +802,17 @@ possible. Entries are keyed on name **and** version to match what the count coun
 vulnerable versions of `openssl` is one name and eight rows, and the difference is the whole
 finding.
 
+The application counts open the same way, and the two are not complements of each other.
+An application shipping one affected version in an older build and a different affected
+version in its current one appears under *both*, so the historical list means "has history
+with this advisory" rather than "is clean now" — the second reading would turn a
+still-vulnerable application into a resolved one. Note also that the historical count is
+structurally zero in the default view, because restricting to current builds makes its own
+filter unsatisfiable; tick **include historical** to populate it.
+
+A count of zero renders as a plain number rather than an expandable one. A control that
+opens onto an empty box is worse than the number it replaced.
+
 A **top ten by blast radius** sits on the overview and analytics tabs. It defaults to
 applications-reached descending, where the full table defaults to severity: a glance surface
 answers "where are we most exposed", while a triage list must not bury a critical in one

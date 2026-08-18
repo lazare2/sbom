@@ -4,78 +4,135 @@ import { formatNumber } from "../lib/format.ts";
 import { Td } from "./ui.tsx";
 
 /**
- * The affected-package count for one advisory, expandable to the packages behind it.
+ * Counts on an advisory row that open to show what they counted.
  *
- * The count alone was the honest answer for as long as the list was not available: one CVE
- * affects many packages, so a per-advisory row has no single package to name. Now that the
- * list travels with the row there is something to open, and opening it is the whole point —
- * "8 packages" and "eight versions of openssl" are very different findings, and only the
- * second one tells you it is a single upgrade.
+ * A count alone was the honest answer for as long as the detail was not on the row: one
+ * advisory reaches many packages and many applications, so there is no single value to put
+ * in the cell. Now that the lists travel with the row there is something to open, and
+ * opening it is the point — "8 packages" and "eight versions of openssl" are very different
+ * findings, and only the second says it is one upgrade.
  *
- * The list comes from the same aggregate and the same WHERE clause as the number beside it,
- * which is why this takes both from one row rather than fetching on expand. The app and
- * base-image split is a shared SQL predicate rather than a column, so a list fetched
- * separately could not be narrowed to match the count, and a scoped count of 3 above an
- * unscoped list of 8 is a contradiction a reader cannot resolve.
+ * Every list here is produced by the same aggregate, under the same WHERE clause and the
+ * same FILTER, as the number beside it. That is a correctness constraint rather than an
+ * optimisation: the app/base-image split is a shared SQL predicate rather than a column, so
+ * a list fetched separately could not be narrowed to the same scope, and a scoped count of 3
+ * above an unscoped list of 8 is a contradiction the reader cannot resolve.
  */
-export function AdvisoryPackagesCell({ advisory }: { advisory: AdvisorySummary }) {
-  const listed = advisory.affectedPackageList.length;
+function ExpandableCountCell({
+  count,
+  items,
+  hrefFor,
+  linkTitle,
+  overflowTitle,
+  className,
+  summaryTitle,
+}: {
+  count: number;
+  items: string[];
+  hrefFor: (item: string) => string;
+  linkTitle: (item: string) => string;
+  overflowTitle: string;
+  className: string;
+  summaryTitle: string;
+}) {
   /*
     Derived rather than carried as a flag, so it cannot disagree with the list it describes.
-    Also covers the case where two components share a name and version across ecosystems:
-    they collapse into one entry but count as two, which reads here as truncation. That
-    over-reports "more not shown" in a rare case and never under-reports it, which is the
-    safe direction -- a partial list that looks complete is the failure worth avoiding.
+    Over-reports in one rare case — two entries identical after formatting collapse into one
+    but count as two — and never under-reports, which is the safe direction: a partial list
+    that looks complete is the failure worth avoiding.
   */
-  const hidden = advisory.affectedPackages - listed;
+  const hidden = count - items.length;
 
-  if (listed === 0) {
+  // Nothing to open. A disclosure control that reveals an empty box is worse than a number.
+  if (items.length === 0) {
     return (
-      <Td align="right" className="nums text-text-muted">
-        {formatNumber(advisory.affectedPackages)}
+      <Td align="right" className={`nums ${className}`}>
+        {formatNumber(count)}
       </Td>
     );
   }
 
   return (
-    <Td align="right" className="text-text-muted">
+    <Td align="right" className={className}>
       <details>
-        <summary
-          className="nums cursor-pointer list-none hover:text-accent"
-          title="Show the affected packages"
-        >
-          {formatNumber(advisory.affectedPackages)}
+        <summary className="nums cursor-pointer list-none hover:text-accent" title={summaryTitle}>
+          {formatNumber(count)}
         </summary>
         <div className="mt-1 flex flex-wrap justify-end gap-1">
-          {advisory.affectedPackageList.map((entry) => {
-            /*
-              Entries are "name version". Split on the first space: package names do not
-              contain spaces in any ecosystem here, and versions can, so the first space is
-              the only reliable boundary.
-            */
-            const cut = entry.indexOf(" ");
-            const name = cut === -1 ? entry : entry.slice(0, cut);
-            return (
-              <Link
-                key={entry}
-                to={`/search?name=${encodeURIComponent(name)}&match=exact&scope=all`}
-                title={`Find ${name} across the estate`}
-                className="rounded border border-border-base px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap text-text-muted hover:border-accent hover:text-accent"
-              >
-                {entry}
-              </Link>
-            );
-          })}
+          {items.map((item) => (
+            <Link
+              key={item}
+              to={hrefFor(item)}
+              title={linkTitle(item)}
+              className="rounded border border-border-base px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap text-text-muted hover:border-accent hover:text-accent"
+            >
+              {item}
+            </Link>
+          ))}
         </div>
         {hidden > 0 ? (
-          <p
-            className="mt-1 text-[11px] text-warn"
-            title={`Only the first ${ADVISORY_PACKAGE_LIST_CAP} are carried on the row. Open the advisory for the full list.`}
-          >
+          <p className="mt-1 text-[11px] text-warn" title={overflowTitle}>
             {formatNumber(hidden)} more not shown
           </p>
         ) : null}
       </details>
     </Td>
+  );
+}
+
+/** Affected package count, expanding to the exact name-and-version pairs behind it. */
+export function AdvisoryPackagesCell({ advisory }: { advisory: AdvisorySummary }) {
+  return (
+    <ExpandableCountCell
+      count={advisory.affectedPackages}
+      items={advisory.affectedPackageList}
+      /*
+        Entries are "name version". Split on the first space: package names contain no spaces
+        in any ecosystem here, and versions can, so the first space is the only reliable
+        boundary.
+      */
+      hrefFor={(entry) => {
+        const cut = entry.indexOf(" ");
+        const name = cut === -1 ? entry : entry.slice(0, cut);
+        return `/search?name=${encodeURIComponent(name)}&match=exact&scope=all`;
+      }}
+      linkTitle={(entry) => `Find ${entry.split(" ")[0]} across the estate`}
+      overflowTitle={`Only the first ${ADVISORY_PACKAGE_LIST_CAP} are carried on the row. Open the advisory for the full list.`}
+      className="text-text-muted"
+      summaryTitle="Show the affected packages"
+    />
+  );
+}
+
+/**
+ * Application count, expanding to which applications.
+ *
+ * `historical` changes only the wording, never the reading. The two counts are *not*
+ * complements: an application shipping one affected version in an older build and a
+ * different affected version in its current one appears under both, so the historical list
+ * says "has history with this advisory" rather than "is clean now". Labelling it as resolved
+ * would turn a still-vulnerable application into a fixed one.
+ */
+export function AdvisoryApplicationsCell({
+  advisory,
+  historical = false,
+}: {
+  advisory: AdvisorySummary;
+  historical?: boolean;
+}) {
+  return (
+    <ExpandableCountCell
+      count={historical ? advisory.historicalApplications : advisory.currentApplications}
+      items={historical ? advisory.historicalApplicationList : advisory.currentApplicationList}
+      hrefFor={(name) => `/applications?search=${encodeURIComponent(name)}`}
+      linkTitle={(name) => `Open ${name}`}
+      overflowTitle={`Only the first ${ADVISORY_PACKAGE_LIST_CAP} are carried on the row. Open the advisory for the full list.`}
+      className={historical ? "text-text-faint" : "font-medium text-text-base"}
+      summaryTitle={
+        historical
+          ? "Show the applications that shipped an affected package in an earlier build"
+          : "Show the applications whose current build is affected"
+      }
+    />
   );
 }
