@@ -872,6 +872,99 @@ export const setting = pgTable("setting", {
 });
 
 /**
+ * One generated report, with the snapshot the next one diffs against.
+ *
+ * The snapshot is the reason this table exists rather than the report being recomputed on
+ * demand. Two things cannot be recovered from live data later:
+ *
+ *   1. Deleted applications. Once an application is removed its rows are gone, so "which
+ *      applications disappeared this month" is unanswerable without a record of what was
+ *      there. Diffing live history would silently report no change.
+ *   2. What was *known* at the time. Findings are matched against today's vulnerability
+ *      database across retained builds, so re-running last month's query today yields
+ *      today's answer, not last month's. Without a snapshot, "47 fixed" cannot be
+ *      distinguished from "the database changed", which is the distinction the report is
+ *      for.
+ *
+ * `baseline_run_id` records what each report was actually compared against, so a reader can
+ * tell whether a delta covers one month or three -- rather than assuming a regular cadence
+ * that a missed run would quietly break.
+ */
+export const reportRun = pgTable(
+  "report_run",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /**
+     * `monthly` is the scheduled series; `adhoc` is the button.
+     *
+     * Kept apart because ad-hoc runs must not move the monthly baseline. If a mid-month
+     * click became the next month's comparison point, the monthly report would silently
+     * cover a fortnight while still being labelled a month.
+     */
+    kind: text("kind").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    /**
+     * `YYYY-MM` of the month covered, and the zone that decided it.
+     *
+     * Stored rather than derived from `period_start`, because deriving it needs a timezone
+     * and the bounds are local midnights: July in UTC+4 starts at 20:00 on 30 June UTC, so
+     * formatting the start in UTC labels a July report "June". Recomputing it on read would
+     * also let an administrator relabel every historical report by changing one setting,
+     * which is not something a record of what management was told should permit.
+     */
+    periodLabel: text("period_label").notNull(),
+    timeZone: text("time_zone").notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Null for a scheduled run: nobody pressed anything. */
+    generatedByUserId: uuid("generated_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    generatedByEmail: text("generated_by_email"),
+    /** The run this was compared against. Null for the first report, which has no baseline. */
+    baselineRunId: uuid("baseline_run_id"),
+    /**
+     * Build date of the vulnerability database at generation time.
+     *
+     * The single most important field for honest attribution: if this moved between two
+     * reports, some of the difference in findings is the database rather than the estate,
+     * and the report has to say so instead of crediting the change to anyone.
+     */
+    vulnDbBuiltAt: timestamp("vuln_db_built_at", { withTimezone: true }),
+    /**
+     * `full` carries per-finding keys, so a change can be attributed to a cause. `aggregate`
+     * carries totals only, for an estate too large to snapshot in detail.
+     *
+     * Explicit rather than inferred from the payload, so a degraded snapshot degrades the
+     * report's claims visibly instead of producing confident numbers from thinner data.
+     */
+    detailLevel: text("detail_level").notNull().default("full"),
+    snapshot: jsonb("snapshot").notNull(),
+    /** Key in the blob store. Null while a run is still being rendered, or if rendering failed. */
+    pdfBlobKey: text("pdf_blob_key"),
+    /** Delivery is recorded separately from generation: a report can exist and not be sent. */
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    recipients: jsonb("recipients"),
+    deliveryError: text("delivery_error"),
+  },
+  (t) => [
+    /*
+      The guarantee that a restart cannot send twice, held in the database rather than in
+      application logic. A scheduler that checks "have I run this month" and then inserts has
+      a window between the two, and process restarts are exactly when that window is hit. A
+      unique index makes the second insert fail instead.
+
+      Scoped to the monthly series so ad-hoc runs stay unconstrained -- pressing the button
+      twice in a month is a reasonable thing to do.
+    */
+    uniqueIndex("report_run_monthly_period_key")
+      .on(t.kind, t.periodStart)
+      .where(sql`kind = 'monthly'`),
+    index("report_run_generated_at_idx").on(t.generatedAt),
+  ],
+);
+
+/**
  * History of vulnerability database update attempts, successful or not.
  *
  * Every attempt is recorded, including the ones that failed because the server has

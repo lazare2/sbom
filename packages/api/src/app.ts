@@ -21,6 +21,7 @@ import {
   vulnerabilityRoutes,
   vulnStatusRoutes,
 } from "./modules/vulnerabilities/vulnerability.routes.js";
+import { reportRoutes } from "./modules/reports/reports.routes.js";
 import { scanRoutes } from "./modules/scans/scans.routes.js";
 import { authPlugin } from "./plugins/auth.plugin.js";
 import { contextPlugin } from "./plugins/context.plugin.js";
@@ -151,6 +152,16 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       // Write APIs. Guarded as a whole scope by `requireAdmin`, so a route
       // added to that file is protected whether or not its author thought about it.
       await api.register(adminRoutes, { prefix: "/admin" });
+      // Inside the admin prefix but its own plugin, because it applies `requireAdmin`
+      // itself: registering it as part of `adminRoutes` would work today and silently stop
+      // working the day someone splits that file.
+      await api.register(
+        async (scoped) => {
+          scoped.addHook("preHandler", scoped.requireAdmin);
+          await scoped.register(reportRoutes);
+        },
+        { prefix: "/admin/reports" },
+      );
 
       await api.register(
         async (scoped) => {

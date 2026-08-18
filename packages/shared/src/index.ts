@@ -1,5 +1,6 @@
 export * from "./enums.js";
 export * from "./schemas/common.js";
+export * from "./schemas/report.js";
 export * from "./schemas/sort.js";
 export * from "./schemas/auth.js";
 export * from "./schemas/user.js";

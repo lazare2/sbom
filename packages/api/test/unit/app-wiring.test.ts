@@ -116,6 +116,25 @@ describe("app wiring", () => {
     expect(post.statusCode).toBe(401);
   });
 
+  it("guards the report routes, which are a separate plugin under the same prefix", async () => {
+    /*
+      Reports sit under /api/v1/admin but are registered as their own plugin, so they do not
+      inherit admin.routes.ts's scope hook and apply `requireAdmin` themselves. Sharing a
+      prefix with a guarded scope is not the same as being inside it, and the difference is
+      invisible by inspection — hence this test.
+    */
+    const list = await app.inject({ method: "GET", url: "/api/v1/admin/reports" });
+    expect(list.statusCode).toBe(401);
+
+    // The write matters most: generating a report files a permanent record.
+    const generate = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/reports",
+      payload: { kind: "monthly" },
+    });
+    expect(generate.statusCode).toBe(401);
+  });
+
   it("guards the bulk package search behind a session", async () => {
     /*
      * Worth its own check because this is the one read-scope route that *writes*:

@@ -17,6 +17,8 @@ import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
+import { ReportService } from "./modules/reports/report.service.js";
+import { SnapshotService } from "./modules/reports/snapshot.service.js";
 import { ScansService } from "./modules/scans/scans.service.js";
 import { SettingsService } from "./modules/settings/settings.service.js";
 import { SweepService } from "./modules/vulnerabilities/sweep.service.js";
@@ -61,6 +63,16 @@ export interface AppContext {
    * instead of the routes disappearing.
    */
   settings: SettingsService;
+  /*
+   * The management report.
+   *
+   * Two objects rather than one because they answer to different pressures: the snapshot is
+   * a query over the live estate, while the report is a record with a baseline and a
+   * duplicate guard. Keeping the capture separable is also what lets the delta be tested
+   * against hand-written estates that no database has to contain.
+   */
+  snapshots: SnapshotService;
+  reports: ReportService;
   scanner: VulnerabilityScanner;
   vulnerabilities: VulnerabilityService;
   vulnDb: VulnDbService;
@@ -131,6 +143,9 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const vulnReport = new VulnReportService({ db });
   const analytics = new AnalyticsService({ db, config, dashboard, settings, vulnReport });
 
+  const snapshots = new SnapshotService({ db });
+  const reports = new ReportService({ db, snapshots });
+
   // Vulnerability scanning. The scanner is a port so the wiring tests can supply a
   // fake and never spawn grype.
   const scanner = overrides.scanner ?? createScanner(config);
@@ -184,6 +199,8 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     dashboard,
     analytics,
     settings,
+    snapshots,
+    reports,
     scanner,
     vulnerabilities,
     vulnDb,
