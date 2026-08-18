@@ -1,12 +1,7 @@
 import { Link } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useClientSort } from "../lib/useSort.ts";
-import {
-  TopAdvisoriesCard,
-  TopVulnerableApplicationsCard,
-  TopVulnerablePackagesCard,
-  VulnBreakdownBlock,
-} from "../components/VulnSummary.tsx";
+import { TopVulnerableApplicationsCard, VulnBreakdownBlock } from "../components/VulnSummary.tsx";
 import {
   fromVulnFilter,
   readVulnFilterParams,
@@ -17,23 +12,18 @@ import {
   vulnFilterQuery,
 } from "../components/VulnFilter.tsx";
 import { useUrlState } from "../lib/useUrlState.ts";
-import { formatNumber, formatRelative } from "../lib/format.ts";
+import { formatDate, formatNumber, formatRelative } from "../lib/format.ts";
 import {
-  useDashboardEcosystems,
+  useCoverageGaps,
   useDashboardStats,
-  usePlatformBreakdown,
   useDashboardVulnerabilities,
   useRecentScans,
   useVulnStatus,
-  useTopComponents,
 } from "../lib/queries.ts";
-import { osLabel, PlatformTable, runtimeLabel } from "../components/Platform.tsx";
-import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
 import {
   Badge,
   Card,
   CardHeader,
-  EcosystemBadge,
   EmptyState,
   ErrorBanner,
   LoadingBlock,
@@ -123,29 +113,12 @@ export function DashboardPage() {
   const { isAdmin } = useAuth();
   const { state, setState } = useUrlState(urlSpec);
   const stats = useDashboardStats();
-  const ecosystems = useDashboardEcosystems();
-  const platforms = usePlatformBreakdown();
-  const top = useTopComponents({ limit: 10 });
   const recent = useRecentScans(8);
 
   /*
-    Client-side on all three: these endpoints return a fixed top-N or the last few scans in
-    one response, so there is no second page for a server sort to reach.
+    Client-side: the endpoint returns the last few scans in one response, so there is no
+    second page for a server sort to reach.
   */
-  const topSort = useClientSort(
-    top.data,
-    { package: "text", version: "text", applications: "number" } as const,
-    { sortBy: "applications" },
-    (c, f) => (f === "package" ? c.name : f === "version" ? c.version : c.applications),
-    (c) => `${c.componentId}:${c.version ?? ""}`,
-  );
-  const ecoSort = useClientSort(
-    ecosystems.data?.slice(0, 12),
-    { ecosystem: "text", components: "number", applications: "number" } as const,
-    { sortBy: "components" },
-    (e, f) => (f === "ecosystem" ? e.ecosystem : f === "components" ? e.components : e.applications),
-    (e) => e.ecosystem,
-  );
   const recentSort = useClientSort(
     recent.data,
     { application: "text", build: "text", branch: "text", packages: "number", received: "date" } as const,
@@ -174,7 +147,6 @@ export function DashboardPage() {
   if (!stats.data) return null;
 
   const s = stats.data;
-  const maxEcosystem = ecosystems.data?.[0]?.components ?? 0;
 
   return (
     <>
@@ -252,179 +224,33 @@ export function DashboardPage() {
           </div>
           <VulnFilterBanner label={vulns.data.filter.label} />
           <VulnBreakdownBlock report={vulns.data} />
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <TopVulnerableApplicationsCard report={vulns.data} />
-            <TopVulnerablePackagesCard report={vulns.data} />
-          </div>
+          {/*
+            Applications only. The package and advisory rankings answer "what should we fix
+            centrally", which is an analysis question and lives on the analytics page; this
+            page answers "whose estate needs attention today".
+          */}
           <div className="mt-4">
-            <TopAdvisoriesCard />
+            <TopVulnerableApplicationsCard report={vulns.data} />
           </div>
+          <p className="mt-2 text-xs text-text-faint">
+            <Link to="/analytics" className="text-accent hover:underline">
+              Analytics
+            </Link>{" "}
+            ranks the packages and advisories behind these findings, and separates base-image
+            exposure from application dependencies.
+          </p>
         </section>
       ) : null}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        {/* --- most widely used packages ------------------------------------ */}
-        <Card>
-          <CardHeader
-            title="Most widely deployed packages"
-            subtitle="Across every active application's current build. This is the blast radius if one of them turns out to be a problem."
-          />
-          {top.isLoading ? (
-            <LoadingBlock />
-          ) : !top.data || top.data.length === 0 ? (
-            <EmptyState title="No package data yet" hint="Counts appear once the first SBOM is ingested." />
-          ) : (
-            <TableWrap>
-              <Table>
-                <thead>
-                  <tr>
-                    <Th onSort={() => topSort.toggle("package")} sorted={topSort.stateOf("package")}>
-                      Package
-                    </Th>
-                    <Th onSort={() => topSort.toggle("version")} sorted={topSort.stateOf("version")}>
-                      Version
-                    </Th>
-                    <Th
-                      onSort={() => topSort.toggle("applications")}
-                      sorted={topSort.stateOf("applications")}
-                      align="right"
-                    >
-                      Apps
-                    </Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topSort.rows.map((c) => (
-                    <Tr key={`${c.componentId}-${c.version ?? ""}`}>
-                      <Td>
-                        <Link
-                          to={`/search?name=${encodeURIComponent(c.name)}&match=exact&scope=all`}
-                          className="font-medium text-accent hover:underline"
-                        >
-                          {c.name}
-                        </Link>{" "}
-                        <EcosystemBadge ecosystem={c.ecosystem} />
-                      </Td>
-                      <Td>
-                        <Mono>{c.version ?? "—"}</Mono>
-                      </Td>
-                      <ApplicationsCell
-                        count={c.applications}
-                        names={c.applicationList}
-                        what="ship this package"
-                      />
-                    </Tr>
-                  ))}
-                </tbody>
-              </Table>
-            </TableWrap>
-          )}
-        </Card>
+      {/*
+        The one ranked list the overview keeps besides vulnerabilities, because it is a work
+        queue rather than an analysis: an application nobody is scanning is invisible to
+        every other number on this page, and burying that on a page people open occasionally
+        is how an estate quietly stops being covered.
+      */}
+      <NeedsAttentionCard />
 
-        {/* --- ecosystem mix ------------------------------------------------ */}
-        <Card>
-          <CardHeader
-            title="Ecosystem mix"
-            subtitle="Distinct packages currently deployed, by package type."
-          />
-          {ecosystems.isLoading ? (
-            <LoadingBlock />
-          ) : !ecosystems.data || ecosystems.data.length === 0 ? (
-            <EmptyState title="No components yet" />
-          ) : (
-            <TableWrap>
-              <Table>
-                <thead>
-                  <tr>
-                    <Th onSort={() => ecoSort.toggle("ecosystem")} sorted={ecoSort.stateOf("ecosystem")}>
-                      Ecosystem
-                    </Th>
-                    <Th
-                      onSort={() => ecoSort.toggle("components")}
-                      sorted={ecoSort.stateOf("components")}
-                      align="right"
-                    >
-                      Packages
-                    </Th>
-                    <Th
-                      onSort={() => ecoSort.toggle("applications")}
-                      sorted={ecoSort.stateOf("applications")}
-                      align="right"
-                    >
-                      Apps
-                    </Th>
-                    <Th>Share</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ecoSort.rows.map((e) => (
-                    <Tr key={e.ecosystem}>
-                      <Td>
-                        <EcosystemBadge ecosystem={e.ecosystem} />
-                      </Td>
-                      <Td align="right" className="nums">
-                        {formatNumber(e.components)}
-                      </Td>
-                      <ApplicationsCell
-                        count={e.applications}
-                        names={e.applicationList}
-                        what="ship a package from this ecosystem"
-                      />
-                      <Td>
-                        <ShareBar value={e.components} total={maxEcosystem} />
-                      </Td>
-                    </Tr>
-                  ))}
-                </tbody>
-              </Table>
-            </TableWrap>
-          )}
-        </Card>
-      </div>
 
-      {/* --- runtime platforms ---------------------------------------------- */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <PlatformTable
-          title="Operating systems"
-          subtitle="What each application's current build is running on. Click a row to see which."
-          rows={(platforms.data?.operatingSystems ?? []).map((entry) => ({
-            key: `${entry.name}|${entry.version ?? ""}`,
-            label: osLabel(entry.name) ?? "unknown",
-            version: entry.version,
-            applications: entry.applications,
-            applicationList: entry.applicationList,
-            href: `/applications?os=${encodeURIComponent(entry.name ?? "")}${
-              entry.version ? `&osVersion=${encodeURIComponent(entry.version)}` : ""
-            }`,
-          }))}
-          loading={platforms.isLoading}
-          what="run this operating system"
-          note={
-            (platforms.data?.unknown ?? 0) > 0
-              ? `${formatNumber(platforms.data?.unknown ?? 0)} application${
-                  (platforms.data?.unknown ?? 0) === 1 ? "" : "s"
-                } reported no OS or runtime — normal for scratch and distroless images.`
-              : undefined
-          }
-        />
-
-        <PlatformTable
-          title="Language runtimes"
-          subtitle="An application appears once per runtime it ships, so an image with both Node and Python counts in each."
-          rows={(platforms.data?.runtimes ?? []).map((entry) => ({
-            key: `${entry.name}|${entry.version ?? ""}`,
-            label: runtimeLabel(entry.name),
-            version: entry.version,
-            applications: entry.applications,
-            applicationList: entry.applicationList,
-            href: `/applications?runtime=${encodeURIComponent(entry.name)}${
-              entry.version ? `&runtimeVersion=${encodeURIComponent(entry.version)}` : ""
-            }`,
-          }))}
-          loading={platforms.isLoading}
-          what="ship this runtime"
-        />
-      </div>
 
       {/* --- recent activity ------------------------------------------------ */}
       <Card className="mt-4">
@@ -499,5 +325,98 @@ export function DashboardPage() {
         )}
       </Card>
     </>
+  );
+}
+
+/**
+ * Applications the inventory cannot see, plus the queue of ones it has not been told about.
+ *
+ * Deliberately the only non-vulnerability table on this page. Every other figure here is
+ * computed from applications that *do* report, so an application that stopped reporting
+ * silently improves them — this is the row that says the numbers above are incomplete.
+ */
+function NeedsAttentionCard() {
+  const { user } = useAuth();
+  const coverage = useCoverageGaps(8);
+  const data = coverage.data;
+  const gaps = data?.worstOffenders ?? [];
+  const pending = data?.pendingConfirmation ?? 0;
+
+  return (
+    <Card className="mt-5">
+      <CardHeader
+        title="Needs attention"
+        subtitle="Active applications that have gone quiet, longest-silent first. Never-scanned applications sort above stale ones."
+        actions={
+          gaps.length > 0 ? (
+            <Link to="/applications?staleOnly=true" className="text-xs text-accent hover:underline">
+              See all
+            </Link>
+          ) : undefined
+        }
+      />
+      {coverage.isLoading ? (
+        <LoadingBlock />
+      ) : coverage.error ? (
+        <ErrorBanner error={coverage.error} onRetry={() => void coverage.refetch()} />
+      ) : gaps.length === 0 ? (
+        <EmptyState
+          title="Full coverage"
+          hint="No active application is stale or unscanned."
+        />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Application</Th>
+                <Th>Last build</Th>
+                <Th align="right">Silent for</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {gaps.map((a) => (
+                <Tr key={a.applicationId}>
+                  <Td>
+                    <Link
+                      to={`/applications/${a.applicationId}`}
+                      className="font-medium text-accent hover:underline"
+                    >
+                      {a.name}
+                    </Link>
+                  </Td>
+                  <Td>
+                    {a.lastScanAt ? formatDate(a.lastScanAt) : <Badge tone="danger">never</Badge>}
+                  </Td>
+                  <Td align="right" className="nums">
+                    {a.daysSinceScan === null ? "—" : `${formatNumber(a.daysSinceScan)}d`}
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+
+      {/*
+        Shown to everyone, because an estate with unconfirmed applications is incomplete for
+        every reader. Only admins get the link: they are the only ones the queue is
+        actionable for, and a link that answers 403 is worse than no link.
+      */}
+      {pending > 0 ? (
+        <div className="border-t border-border-base px-4 py-3 text-xs text-text-muted">
+          {formatNumber(pending)} application{pending === 1 ? "" : "s"} awaiting confirmation —
+          registered by a build under a name nobody has matched to an application yet.
+          {user?.role === "admin" ? (
+            <>
+              {" "}
+              <Link to="/admin/pending" className="text-accent hover:underline">
+                Review the queue
+              </Link>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </Card>
   );
 }

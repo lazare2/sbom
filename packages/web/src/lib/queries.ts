@@ -31,6 +31,7 @@ import type {
   VulnerabilityFinding,
   VulnerabilityReport,
   VulnScanStatus,
+  CoverageReport,
   PlatformSettings,
   ReportRunSummary,
   ReportSettings,
@@ -80,6 +81,7 @@ export const queryKeys = {
   // --- vulnerabilities ---
   vulnStatus: ["vuln", "status"] as const,
   platformSettings: ["admin", "settings"] as const,
+  coverageGaps: (limit: number) => ["analytics", "coverage", limit] as const,
   reportSettings: ["admin", "reports", "settings"] as const,
   reportRuns: ["admin", "reports", "list"] as const,
   vulnAdminStatus: ["admin", "vuln", "status"] as const,
@@ -514,6 +516,20 @@ export function usePlatformSettings() {
   return useQuery({
     queryKey: queryKeys.platformSettings,
     queryFn: () => api.get<{ settings: PlatformSettings }>("/admin/settings"),
+  });
+}
+
+/**
+ * Scan coverage, without the rest of the analytics report.
+ *
+ * The overview shows which applications nobody is scanning; fetching the full report to
+ * render one table would compute churn, fragmentation and every package ranking to throw
+ * them away. Same server-side query as the report, so the two always agree.
+ */
+export function useCoverageGaps(limit = 8) {
+  return useQuery({
+    queryKey: queryKeys.coverageGaps(limit),
+    queryFn: () => api.get<CoverageReport>(`/analytics/coverage?limit=${limit}`),
   });
 }
 

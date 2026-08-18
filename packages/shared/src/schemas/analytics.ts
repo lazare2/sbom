@@ -37,6 +37,18 @@ export const analyticsQuerySchema = z.object({
 });
 export type AnalyticsQuery = z.infer<typeof analyticsQuerySchema>;
 
+/**
+ * Query for the coverage section on its own.
+ *
+ * Exists so the overview can ask "which applications is nobody scanning" without paying for
+ * churn, fragmentation and the package rankings it does not display. The answer comes from
+ * the same query the full report uses, so the two can never disagree about what is stale.
+ */
+export const coverageQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(8),
+});
+export type CoverageQuery = z.infer<typeof coverageQuerySchema>;
+
 /** Provenance. Printed on the report's first page and shown in the page header. */
 export interface ReportMeta {
   generatedAt: string;

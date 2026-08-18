@@ -199,10 +199,20 @@ await page.getByRole("link", { name: "Overview" }).click();
 await page.waitForURL(`${BASE}/`, { timeout: 10000 });
 await page.waitForLoadState("networkidle");
 await expectText("Applications");
-await expectText("Most widely deployed packages");
-await expectText("Ecosystem mix");
+await expectText("Needs attention", "the triage queue that moved here from analytics");
 await expectText("Recent scans");
 await expectText("Awaiting confirmation");
+/*
+  The point of the split: the overview must NOT carry the inventory tables any more. A
+  duplicate that quietly comes back is invisible in a screenshot and is exactly what this
+  restructure was for.
+*/
+for (const owned of ["Most widely deployed packages", "Ecosystem mix", "Operating systems"]) {
+  if ((await page.getByText(owned, { exact: false }).count()) > 0) {
+    problems.push(`"${owned}" is back on the overview; analytics owns it`);
+  }
+}
+log("  OK   the overview no longer duplicates the analytics inventory tables");
 await shot("dashboard");
 
 log("5. a dashboard tile links into a filtered list");
@@ -337,8 +347,15 @@ await expectText("applications by package count");
 await expectText("Dependency churn, last 30 days");
 await expectText("Version fragmentation");
 await expectText("New to the estate, last 30 days");
-await expectText("Coverage gaps");
 await expectText("Language runtimes");
+/*
+  Coverage gaps moved to the overview, where a work queue belongs. Matched exactly: the
+  default is a case-insensitive substring, which also hits the churn card's legitimate
+  "see coverage gaps" cross-reference and would fail forever on correct output.
+*/
+if ((await page.getByText("Coverage gaps", { exact: true }).count()) > 0) {
+  problems.push("the Coverage gaps card is still on analytics; the overview owns it now");
+}
 await expectText("How to read this page");
 // The one claim the page must make about itself.
 /*
@@ -972,8 +989,8 @@ if (swept) {
   log("22e. overview and analytics carry the vulnerability sections");
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1200);
+  // The overview's half of the split: who to chase. The packages ranking is on analytics.
   await expectText("Vulnerable Applications");
-  await expectText("Vulnerable Packages");
   /*
     The row count in the title. These tables are the server's worst N, and sorting reorders
     only those N — so ascending shows the least vulnerable *of the worst N*. Without the cap
@@ -992,6 +1009,8 @@ if (swept) {
 
   await page.goto(`${BASE}/analytics`, { waitUntil: "networkidle" });
   await page.waitForTimeout(2000);
+  // Analytics' half: what to fix, and how much of it nobody's team owns.
+  await expectText("Vulnerable Packages");
   await expectText("Base image exposure");
   await expectText("vulnerability findings in total");
   await shot("analytics-with-vulnerabilities");
@@ -1312,9 +1331,8 @@ await driveSort("/analytics", "Ecosystem");
   distinctive header. Both platform tables have it and .first() takes the OS one, which is
   the point of sharing the component -- driving either exercises both.
 */
-await driveSort("/", "Name", { markerColumn: "Name" });
-await driveSort("/", "Apps", { markerColumn: "Name" });
 await driveSort("/analytics", "Name", { markerColumn: "Name" });
+await driveSort("/analytics", "Apps", { markerColumn: "Name" });
 
 /*
   The two vulnerability rankings. Both are one shared component that the overview and the
@@ -1339,16 +1357,22 @@ await driveSort("/", "Crit", {
   markerColumn: "Findings \\(app / base image\\)",
   expectRowsChange: false,
 });
-await driveSort("/", "Advisories", { markerColumn: "Advisories" });
-await driveSort("/", "Package", { markerColumn: "Advisories" });
+await driveSort("/analytics", "Advisories", { markerColumn: "Advisories" });
+await driveSort("/analytics", "Package", { markerColumn: "Advisories" });
 
-// The analytics copy of the same two cards must expose the same controls.
+/*
+  Each page owns exactly one of the two rankings: the overview answers "who do I chase" and
+  analytics answers "what do we fix". Asserted as ownership rather than presence, because the
+  failure worth catching is a card quietly reappearing on both pages, which looks fine.
+*/
 await page.goto(`${BASE}/analytics`, { waitUntil: "networkidle" });
 await page.waitForTimeout(2000);
-for (const [title, marker] of [
-  ["Vulnerable Applications", "Findings \\(app / base image\\)"],
-  ["Vulnerable Packages", "Advisories"],
-]) {
+if ((await page.getByText("Vulnerable Applications").count()) > 0) {
+  problems.push("Vulnerable Applications is back on analytics; the overview owns it");
+} else {
+  log("  OK   analytics does not duplicate the overview's application ranking");
+}
+for (const [title, marker] of [["Vulnerable Packages", "Advisories"]]) {
   const table = page
     .locator("table")
     .filter({ has: page.getByRole("columnheader", { name: new RegExp(marker, "i") }) })
@@ -1471,11 +1495,12 @@ if ((await listExact.count()) === 0) {
 log("23d. top advisories card and package disclosure");
 
 /*
-  Every table that counts applications now opens to name them. Checked on both tabs because
-  the counts come from five different aggregates, and a cell wired to the wrong one would
-  still expand and still look right.
+  Every table that counts applications opens to name them. Analytics only, now that it owns
+  all four of them -- the packages ranking, the advisories card and both platform tables.
+  The counts come from four different aggregates, and a cell wired to the wrong one would
+  still expand and still look right, so several are sampled rather than one.
 */
-for (const route of ["/", "/analytics"]) {
+for (const route of ["/analytics"]) {
   await page.goto(`${BASE}${route}`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1800);
   const appSummaries = page.locator("tbody details > summary");
@@ -1498,24 +1523,24 @@ for (const route of ["/", "/analytics"]) {
   } else {
     log(`  OK   ${route}: ${opened} of ${Math.min(n, 6)} sampled counts expanded (${n} total)`);
   }
-  await shot(`expandable-counts${route === "/" ? "-overview" : "-analytics"}`);
+  await shot("expandable-counts-analytics");
 }
 
-await driveSort("/", "Advisory", { markerColumn: "Severity" });
-await driveSort("/", "Apps", { markerColumn: "Severity" });
+await driveSort("/analytics", "Advisory", { markerColumn: "Severity" });
+await driveSort("/analytics", "Apps", { markerColumn: "Severity" });
 
-for (const route of ["/", "/analytics"]) {
-  await page.goto(`${BASE}${route}`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(1800);
-  const card = page
-    .locator("table")
-    .filter({ has: page.getByRole("columnheader", { name: /Severity/i }) })
-    .first();
-  if ((await card.count()) === 0) {
-    problems.push(`the advisories card is missing on ${route}`);
-  } else {
-    log(`  OK   ${route} carries the advisories card`);
-  }
+// Analytics only: the advisories ranking answers "what should we fix", which is this
+// page's question. The overview keeps the applications ranking instead.
+await page.goto(`${BASE}/analytics`, { waitUntil: "networkidle" });
+await page.waitForTimeout(1800);
+const advisoryCard = page
+  .locator("table")
+  .filter({ has: page.getByRole("columnheader", { name: /Severity/i }) })
+  .first();
+if ((await advisoryCard.count()) === 0) {
+  problems.push("the advisories card is missing on /analytics");
+} else {
+  log("  OK   /analytics carries the advisories card");
 }
 
 /*
@@ -1604,7 +1629,7 @@ await darkPage.waitForURL(`${BASE}/`, { timeout: 10000 });
 await darkPage.waitForLoadState("networkidle");
 // Wait for real content, not just a quiet network: otherwise the shot can catch
 // the loading state and tell us nothing about how the page looks.
-await darkPage.getByText("Most widely deployed packages").waitFor({ timeout: 10000 });
+await darkPage.getByText("Needs attention").waitFor({ timeout: 10000 });
 // Numbered off the same counter as `shot()`, so adding a step earlier in the run
 // no longer makes the dark screenshots collide with light ones.
 await darkShot(darkPage, "dark-dashboard");

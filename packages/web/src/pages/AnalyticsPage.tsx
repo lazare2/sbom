@@ -7,7 +7,6 @@ import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
 import {
   BaseImageExposureCard,
   TopAdvisoriesCard,
-  TopVulnerableApplicationsCard,
   TopVulnerablePackagesCard,
   VulnBreakdownBlock,
 } from "../components/VulnSummary.tsx";
@@ -177,11 +176,14 @@ export function AnalyticsPage() {
           <>
             <VulnFilterBanner label={report.vulnerabilities.filter.label} />
             <VulnBreakdownBlock report={report.vulnerabilities} />
+            {/*
+              Packages and advisories, not applications. Which application is worst is a
+              triage question the overview answers; this page answers what to fix, which is
+              usually one package upgrade clearing several applications at once. Paired in
+              one row because they are two views of the same question.
+            */}
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <TopVulnerableApplicationsCard report={report.vulnerabilities} />
               <TopVulnerablePackagesCard report={report.vulnerabilities} />
-            </div>
-            <div className="mt-4">
               <TopAdvisoriesCard />
             </div>
             <div className="mt-4">
@@ -208,7 +210,6 @@ export function AnalyticsPage() {
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <CoverageGapsCard report={report} />
         <EcosystemCard report={report} />
       </div>
 
@@ -813,71 +814,6 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
                   <Td title={p.firstSeenAt}>{formatDate(p.firstSeenAt)}</Td>
                   <Td align="right" className="nums">
                     {formatNumber(p.applications)}
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
-    </Card>
-  );
-}
-
-function CoverageGapsCard({ report }: { report: AnalyticsReport }) {
-  const rows = report.coverage.worstOffenders;
-  const sort = useClientSort(
-    rows,
-    { application: "text", lastScanAt: "date", daysSinceScan: "number" } as const,
-    { sortBy: "daysSinceScan" },
-    (r, f) => (f === "application" ? r.name : f === "lastScanAt" ? r.lastScanAt : r.daysSinceScan),
-    (r) => r.applicationId,
-  );
-  return (
-    <Card>
-      <CardHeader
-        title="Coverage gaps"
-        subtitle="Active applications the inventory cannot see, longest-silent first. Never-scanned applications sort above stale ones."
-        actions={
-          rows.length > 0 ? (
-            <Link to="/applications?staleOnly=true" className="text-xs text-accent hover:underline">
-              See all
-            </Link>
-          ) : undefined
-        }
-      />
-      {rows.length === 0 ? (
-        <EmptyState title="Full coverage" hint="No active application is stale or unscanned." />
-      ) : (
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr>
-                <Th onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
-                  Application
-                </Th>
-                <Th onSort={() => sort.toggle("lastScanAt")} sorted={sort.stateOf("lastScanAt")}>
-                  Last build
-                </Th>
-                <Th onSort={() => sort.toggle("daysSinceScan")} sorted={sort.stateOf("daysSinceScan")} align="right">
-                  Silent for
-                </Th>
-              </tr>
-            </thead>
-            <tbody>
-              {sort.rows.map((a) => (
-                <Tr key={a.applicationId}>
-                  <Td>
-                    <Link
-                      to={`/applications/${a.applicationId}`}
-                      className="font-medium text-accent hover:underline"
-                    >
-                      {a.name}
-                    </Link>
-                  </Td>
-                  <Td>{a.lastScanAt ? formatDate(a.lastScanAt) : <Badge tone="danger">never</Badge>}</Td>
-                  <Td align="right" className="nums">
-                    {a.daysSinceScan === null ? "—" : `${formatNumber(a.daysSinceScan)}d`}
                   </Td>
                 </Tr>
               ))}

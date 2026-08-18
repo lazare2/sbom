@@ -1,5 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { analyticsQuerySchema, normalizeVulnFilter, vulnFilterQuerySchema } from "@sbom/shared";
+import {
+  analyticsQuerySchema,
+  coverageQuerySchema,
+  normalizeVulnFilter,
+  vulnFilterQuerySchema,
+} from "@sbom/shared";
 import { getUser } from "../../plugins/auth.plugin.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { renderReportPdf } from "../reports/pdf.js";
@@ -33,6 +38,19 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
       vulnFilter: normalizeVulnFilter(parseOrThrow(vulnFilterQuerySchema, request.query, "Query")),
     });
     return reply.send(report);
+  });
+
+  /**
+   * Scan coverage on its own.
+   *
+   * The overview asks "which applications is nobody scanning" on every page load, and
+   * answering it from the full report would mean computing churn, fragmentation and the
+   * package rankings to display none of them. Same method as the report uses, so the two
+   * can never disagree about which applications are stale.
+   */
+  fastify.get("/coverage", async (request, reply) => {
+    const query = parseOrThrow(coverageQuerySchema, request.query, "Query");
+    return reply.send(await analytics.coverage(query.limit));
   });
 
   /**

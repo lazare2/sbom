@@ -706,22 +706,35 @@ real one. A CORS-relaxed dev setup can hide a cookie problem until deploy.
 status, and staleness, plus sortable columns. Unconfirmed applications are shown to
 everyone with a badge; inactive ones are hidden until asked for.
 
-**Overview** is the landing page: application counts by status, stale and
-never-scanned counts, scan volume, the ecosystem mix, and the packages deployed in
-the most applications — the blast-radius list, which is the figure that decides
-whether a bad package is one team's afternoon or an organisation-wide exercise.
-Every counter that can be filtered for links into the filtered list.
+**Overview** is the landing page, and it answers one question: *does anything need
+me today?* Application counts by status, scan volume, the severity split, the
+applications carrying the most findings in their own dependencies, and **Needs
+attention** — the applications that have gone quiet, plus any registered by a build
+under a name nobody has matched yet. Every counter that can be filtered for links
+into the filtered list.
+
+Deliberately no inventory tables. Nothing about the ecosystem mix or the platform
+breakdown changes between one morning and the next, so it does not earn space on a
+page opened every day; Analytics owns all of it, and no table appears on both.
 
 **Package search** has two modes behind one toggle. *One package* answers who
 ships X, now or at any point in history. *A list* checks a whole pasted list at
 once and reports a verdict per package — see
 [Searching a list of packages](#searching-a-list-of-packages).
 
-**Analytics** is the reporting view: coverage, the two top-10 rankings, dependency
-churn over a selectable window with a scan-volume trend, version fragmentation,
-packages new to the estate, coverage gaps, and the platform and ecosystem
-breakdowns — downloadable as a PDF. See
+**Analytics** answers the other question: *what shape is the estate in, and how is
+it changing?* Coverage, the vulnerable-package and advisory rankings, base-image
+exposure, the most widely deployed packages — the blast-radius list that decides
+whether a bad package is one team's afternoon or an organisation-wide exercise —
+dependency churn over a selectable window with a scan-volume trend, version
+fragmentation, packages new to the estate, and the platform and ecosystem
+breakdowns. Downloadable as a PDF. See
 [Analytics and the PDF report](#analytics-and-the-pdf-report).
+
+The split between the two pages runs along *who acts on it*. The overview ranks
+**applications**, because that is who gets chased; analytics ranks **packages and
+advisories**, because that is what gets fixed — usually once, centrally, clearing
+several applications at a stroke.
 
 **Application detail** has four tabs:
 
