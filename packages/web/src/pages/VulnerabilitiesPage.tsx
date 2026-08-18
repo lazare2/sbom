@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { AdvisoryImpact, VulnSeverity } from "@sbom/shared";
 import { useAdvisoryImpact, useAdvisorySearch, useVulnStatus } from "../lib/queries.ts";
+import { AdvisoryPackagesCell } from "../components/AdvisoryPackages.tsx";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
@@ -280,9 +281,7 @@ export function VulnerabilitiesPage() {
                       <Td className="max-w-[520px] truncate text-text-muted" title={advisory.description ?? undefined}>
                         {advisory.description ?? "—"}
                       </Td>
-                      <Td align="right" className="nums text-text-muted">
-                        {formatNumber(advisory.affectedPackages)}
-                      </Td>
+                      <AdvisoryPackagesCell advisory={advisory} />
                       <Td align="right" className="nums font-medium text-text-base">
                         {formatNumber(advisory.currentApplications)}
                       </Td>

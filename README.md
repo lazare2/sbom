@@ -785,6 +785,28 @@ order applications by base-image age and bury the handful of findings a team act
 and can act on. Each row shows both halves in one column — `38 / 28` — so the pair reads as
 a pair rather than as two numbers to add up.
 
+### One row per advisory
+
+The estate advisory table on the vulnerabilities tab answers the other direction: not "how
+bad is this application" but "how far does this CVE reach". One row per advisory, with the
+packages it affects, the applications running them now, and the applications that dropped it.
+
+The package cell is a **count that expands to the packages behind it**, and the reason it is
+a count at all is that one advisory affects many packages — there is no single name to put in
+the cell. The list travels on the row rather than being fetched when opened, which is a
+correctness constraint rather than an optimisation: the app/base-image split is a shared SQL
+predicate rather than a column, so a list fetched from the per-advisory endpoint could not be
+narrowed to the same scope, and a scoped count of 3 above an unscoped list of 8 is a
+contradiction the reader cannot resolve. One query, one WHERE clause, no disagreement
+possible. Entries are keyed on name **and** version to match what the count counts — eight
+vulnerable versions of `openssl` is one name and eight rows, and the difference is the whole
+finding.
+
+A **top ten by blast radius** sits on the overview and analytics tabs. It defaults to
+applications-reached descending, where the full table defaults to severity: a glance surface
+answers "where are we most exposed", while a triage list must not bury a critical in one
+application under a low-severity advisory in eight.
+
 Both halves report the same figures, including fix availability and known-exploited counts.
 That symmetry is why `scan_vuln_summary` carries `os_fixable` and `os_known_exploited`: "is
 a rebuild going to fix this" is the first question a reader has when they select base image

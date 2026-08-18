@@ -5,6 +5,7 @@ import { useClientSort } from "../lib/useSort.ts";
 import { osLabel, runtimeLabel } from "../components/Platform.tsx";
 import {
   BaseImageExposureCard,
+  TopAdvisoriesCard,
   TopVulnerableApplicationsCard,
   TopVulnerablePackagesCard,
   VulnBreakdownBlock,
@@ -178,6 +179,9 @@ export function AnalyticsPage() {
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <TopVulnerableApplicationsCard report={report.vulnerabilities} />
               <TopVulnerablePackagesCard report={report.vulnerabilities} />
+            </div>
+            <div className="mt-4">
+              <TopAdvisoriesCard />
             </div>
             <div className="mt-4">
               <BaseImageExposureCard report={report.vulnerabilities} />

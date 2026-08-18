@@ -1278,6 +1278,63 @@ if ((await listExact.count()) === 0) {
   log("  OK   the list search defaults to exact matching");
 }
 
+// --- 23d. top advisories card and its expandable package list ---------------
+/*
+  Two things to prove. The card sorts by blast radius by default while the full table on the
+  vulnerabilities tab sorts by severity, so the two must not have been wired to one shared
+  default. And the package count must open: a count that cannot be expanded is exactly the
+  state this replaced, and it would look identical in a screenshot.
+
+  Scoped on "Severity" rather than "Advisory". markerColumn is an unanchored regex, and
+  /Advisory/i also matches the "Advisories" header on the Vulnerable Packages card, which
+  sits earlier in the DOM -- the lookup would have quietly measured the wrong table.
+*/
+log("23d. top advisories card and package disclosure");
+await driveSort("/", "Advisory", { markerColumn: "Severity" });
+await driveSort("/", "Apps", { markerColumn: "Severity" });
+
+for (const route of ["/", "/analytics"]) {
+  await page.goto(`${BASE}${route}`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1800);
+  const card = page
+    .locator("table")
+    .filter({ has: page.getByRole("columnheader", { name: /Severity/i }) })
+    .first();
+  if ((await card.count()) === 0) {
+    problems.push(`the advisories card is missing on ${route}`);
+  } else {
+    log(`  OK   ${route} carries the advisories card`);
+  }
+}
+
+await page.goto(`${BASE}/vulnerabilities`, { waitUntil: "networkidle" });
+await page.waitForTimeout(1200);
+if ((await page.locator("tbody tr").count()) === 0) {
+  log("  note: no advisories in this estate, so the disclosure cannot be driven");
+} else {
+  const summary = page.locator("tbody details > summary").first();
+  if ((await summary.count()) === 0) {
+    problems.push("the advisory table has no expandable package count");
+  } else {
+    /*
+      Counted under details[open] rather than as plain descendants. A closed <details> keeps
+      its children in the DOM, so counting all of them would report the same number before
+      and after the click and the assertion would never fail.
+    */
+    const open = page.locator("tbody details[open] a[href*='/search?name=']");
+    const before = await open.count();
+    await summary.click();
+    await page.waitForTimeout(300);
+    const after = await open.count();
+    if (after <= before) {
+      problems.push(`expanding a package count revealed no packages (${before} -> ${after})`);
+    } else {
+      log(`  OK   expanding a package count listed ${after - before} package(s)`);
+    }
+  }
+  await shot("advisory-packages-expanded");
+}
+
 await context.close();
 const darkContext = await browser.newContext({
   viewport: { width: 1500, height: 950 },

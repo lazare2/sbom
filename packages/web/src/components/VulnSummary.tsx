@@ -9,10 +9,25 @@ import {
   type VulnerabilityReport,
   type VulnScopeTotals,
 } from "@sbom/shared";
+import { SEVERITY_ORDER } from "@sbom/shared";
 import { formatNumber, formatRelative } from "../lib/format.ts";
+import { useAdvisorySearch } from "../lib/queries.ts";
 import { useClientSort } from "../lib/useSort.ts";
-import { SeverityBar } from "./Severity.tsx";
-import { Badge, Card, CardHeader, EmptyState, Mono, Table, TableWrap, Td, Th, Tr } from "./ui.tsx";
+import { AdvisoryPackagesCell } from "./AdvisoryPackages.tsx";
+import { SeverityBar, SeverityBadge } from "./Severity.tsx";
+import {
+  Badge,
+  Card,
+  CardHeader,
+  EmptyState,
+  LoadingBlock,
+  Mono,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Tr,
+} from "./ui.tsx";
 
 /**
  * Vulnerability summary blocks shared by the overview page and the analytics page.
@@ -252,6 +267,136 @@ function UnfilteredReference({
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The advisories reaching the most applications.
+ *
+ * Fetches its own slice rather than taking it from the report prop, because it asks a
+ * different question from the cards around it: those rank applications and packages, this
+ * ranks the advisories themselves. It is the estate advisory table from the vulnerabilities
+ * tab, held to its widest-reaching ten.
+ *
+ * Scoped to application dependencies in a current build. Unscoped, the list would be base-image
+ * OS packages to the last row -- measured on a realistic container SBOM, 2,817 of 2,845 findings
+ * came from the base image -- and a "top advisories" card that never shows a dependency anyone
+ * chose is a card nobody can act on.
+ */
+export function TopAdvisoriesCard() {
+  const query = useAdvisorySearch({
+    page: 1,
+    pageSize: 10,
+    // Blast radius first: this surface answers "where are we most exposed", which is the
+    // question a glance is for. The full table on the vulnerabilities tab stays
+    // severity-first, because triage reads in a different order.
+    sortBy: "applications",
+    sortDir: "desc",
+    scope: "app",
+    currentOnly: "true",
+  });
+  const rows = query.data?.items ?? [];
+  /* Same capped-ranking caveat as the cards above -- see the note there. */
+  const capNote =
+    rows.length > 0
+      ? ` Sorting reorders these ${rows.length} rows; it does not rank every advisory.`
+      : "";
+  const sort = useClientSort(
+    rows,
+    { severity: "number", advisory: "text", packages: "number", applications: "number" } as const,
+    { sortBy: "applications" },
+    (row, field) =>
+      field === "severity"
+        ? // Ranked, not alphabetical: "critical" must not sort between "high" and "low".
+          SEVERITY_ORDER[row.severity]
+        : field === "advisory"
+          ? row.vulnerabilityId
+          : field === "packages"
+            ? row.affectedPackages
+            : row.currentApplications,
+    (row) => row.vulnerabilityId,
+  );
+
+  return (
+    <Card>
+      <CardHeader
+        title={`Vulnerabilities${rows.length > 0 ? ` · top ${rows.length}` : ""}`}
+        subtitle={`Advisories against application dependencies in some current build, by how many applications they reach. Expand a package count to see the versions behind it.${capNote}`}
+      />
+      {query.isLoading ? (
+        <LoadingBlock />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title="No advisory affects an application dependency"
+          hint="Base-image findings are reported separately."
+        />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th
+                  onSort={() => sort.toggle("severity")}
+                  sorted={sort.stateOf("severity")}
+                  width="105px"
+                >
+                  Severity
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("advisory")}
+                  sorted={sort.stateOf("advisory")}
+                  width="190px"
+                >
+                  Advisory
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("packages")}
+                  sorted={sort.stateOf("packages")}
+                  align="right"
+                  width="100px"
+                >
+                  Packages
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("applications")}
+                  sorted={sort.stateOf("applications")}
+                  align="right"
+                  width="90px"
+                >
+                  Apps
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {sort.rows.map((advisory) => (
+                <Tr key={advisory.vulnerabilityId}>
+                  <Td>
+                    <SeverityBadge severity={advisory.severity} />
+                  </Td>
+                  <Td>
+                    <Link
+                      to={`/vulnerabilities/${encodeURIComponent(advisory.vulnerabilityId)}`}
+                      className="font-mono text-xs text-accent hover:underline"
+                    >
+                      {advisory.vulnerabilityId}
+                    </Link>
+                    {advisory.knownExploited ? (
+                      <Badge tone="danger" title="On CISA's Known Exploited Vulnerabilities list.">
+                        exploited
+                      </Badge>
+                    ) : null}
+                  </Td>
+                  <AdvisoryPackagesCell advisory={advisory} />
+                  <Td align="right" className="nums font-medium text-text-base">
+                    {formatNumber(advisory.currentApplications)}
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
   );
 }
 

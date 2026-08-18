@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useClientSort } from "../lib/useSort.ts";
 import {
+  TopAdvisoriesCard,
   TopVulnerableApplicationsCard,
   TopVulnerablePackagesCard,
   VulnBreakdownBlock,
@@ -353,6 +354,9 @@ export function DashboardPage() {
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <TopVulnerableApplicationsCard report={vulns.data} />
             <TopVulnerablePackagesCard report={vulns.data} />
+          </div>
+          <div className="mt-4">
+            <TopAdvisoriesCard />
           </div>
         </section>
       ) : null}
