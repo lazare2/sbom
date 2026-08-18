@@ -195,6 +195,14 @@ the browser rewrites the colons in the filename, which Windows requires. The arc
 ~145 MB; `GRYPE_DB_MAX_UPLOAD_BYTES` caps the upload at 1 GiB by default, which is
 separate from the SBOM ingest limit so tightening one cannot break the other.
 
+**If "Update now" reports no internet connection on a machine whose browser reaches
+`grype.anchore.io` fine, the container has not been told about your proxy.** The browser and
+the API are two different clients, and a container inherits nothing from the host's browser or
+system proxy settings. Set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in `.env` — both compose
+files pass them through — and add `GRYPE_DB_CA_CERT` if the proxy inspects TLS. Uploading the
+archive by hand stays a fully supported path either way; it is what the offline install exists
+for, not a workaround.
+
 **If you put your own reverse proxy in front, raise its request body limit too.** The
 bundled nginx allows 1 GiB to match the API. This is the failure worth knowing about
 because of how it presents: a proxy that rejects the body closes the connection, and the

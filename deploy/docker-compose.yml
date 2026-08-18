@@ -73,6 +73,22 @@ services:
       # This must point at a volume. Left on Grype's default the database would be
       # written into the container's writable layer and lost on every restart — which
       # on an air-gapped machine means re-uploading 1.9 GB by hand each time.
+      # Outbound proxy, for "Update now" on a network that requires one.
+      #
+      # A container inherits nothing from the host's browser or system proxy settings, which
+      # is why the admin panel can report no connection on a machine whose browser reaches
+      # grype.anchore.io perfectly well: the browser and this service are two different
+      # clients, and only one of them was told about the proxy. Grype is a Go binary and
+      # honours these standard variables; empty means direct, which is the default.
+      #
+      # Keep `db` in NO_PROXY so nothing internal is routed to an external proxy.
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db,api,web}
+      # Lowercase too: some clients read only these.
+      http_proxy: ${HTTP_PROXY:-}
+      https_proxy: ${HTTPS_PROXY:-}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,db,api,web}
       GRYPE_DB_CACHE_DIR: /data/grype-db
       # Point at an internal mirror to keep database traffic inside the network.
       GRYPE_DB_UPDATE_URL: ${GRYPE_DB_UPDATE_URL:-https://grype.anchore.io/databases}

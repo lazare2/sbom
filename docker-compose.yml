@@ -63,6 +63,22 @@ services:
       # Vulnerability scanning. Grype ships in the image; the database does not — it is
       # ~1.9 GB expanded, so it lives on the volume below and is fetched at runtime when
       # an administrator enables scanning. Nothing is downloaded on a fresh start.
+      # Outbound proxy, for "Update now" on a network that requires one.
+      #
+      # A container inherits nothing from the host's browser or system proxy settings, which
+      # is why the admin panel can report no connection on a machine whose browser reaches
+      # grype.anchore.io perfectly well: the browser and this service are two different
+      # clients, and only one of them was told about the proxy. Grype is a Go binary and
+      # honours these standard variables; empty means direct, which is the default.
+      #
+      # Keep `db` in NO_PROXY so nothing internal is routed to an external proxy.
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db,api,web}
+      # Lowercase too: some clients read only these.
+      http_proxy: ${HTTP_PROXY:-}
+      https_proxy: ${HTTPS_PROXY:-}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,db,api,web}
       GRYPE_DB_CACHE_DIR: /data/grype-db
       # Point this at an internal mirror to keep database traffic inside the network.
       GRYPE_DB_UPDATE_URL: ${GRYPE_DB_UPDATE_URL:-https://grype.anchore.io/databases}
