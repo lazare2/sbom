@@ -24,8 +24,9 @@ appear on the dashboards, in the report, and in a "who is affected by CVE-X" sea
 | 7 | History / diff view | ✅ done |
 | 8 | Stale detection, dashboard | ✅ done |
 | 9 | Vulnerability scanning (Grype) | ✅ done |
+| 10 | Monthly management report | ✅ done |
 
-All nine phases are implemented. Out of scope by design: any per-application or
+All ten phases are implemented. Out of scope by design: any per-application or
 per-squad access restriction — every authenticated user can read every application,
 and the two roles are `admin` (writes) and `user` (reads).
 
@@ -428,6 +429,76 @@ report like this could do. When it is on, the report gains estate totals, Top 10
 vulnerable applications, Top 10 vulnerable packages and base-image exposure, all from the
 same payload the page renders.
 
+### The monthly management report
+
+**Administration → Monthly report**. A separate document from the analytics PDF above:
+that one is an inventory of what exists, this one is an argument about what changed.
+
+The problem it exists to solve is attribution. Findings are matched against *today's*
+vulnerability database across every retained build, so a count that fell between two
+reports means one of two very different things — somebody upgraded a package, or the
+database changed its mind. A report that presents both as "47 fixed" tells management the
+team did work it did not do.
+
+So every movement is attributed to a cause:
+
+| Resolved because | Meaning |
+|---|---|
+| **Fixed by upgrade or removal** | The vulnerable package has left the build. Work the teams did |
+| **Advisory withdrawn or re-scored** | The package is unchanged; the advisory changed. Nobody fixed anything |
+| **Application no longer tracked** | The findings left with the application; they were not resolved |
+
+| Introduced because | Meaning |
+|---|---|
+| **New or changed dependency** | A package entered a build carrying a known vulnerability |
+| **Newly published advisory** | The package was already in use; the advisory is new |
+| **Newly tracked application** | Existing risk becoming visible, not new risk |
+
+Findings resolved in an earlier period that have returned are counted as **reintroduced**,
+in addition to being introduced rather than instead of it — a regression is a property of
+a finding, not a fourth bucket, and counting it separately would stop the totals adding up.
+
+That distinction is only possible because **each report stores a snapshot of what it
+counted**, alongside the database build it counted against. Neither survives otherwise: a
+deleted application leaves no rows to diff, and re-running last month's query today answers
+with today's database. The delta is recomputed from those snapshots on every read rather
+than stored, so a later correction to the attribution logic fixes old reports instead of
+leaving them asserting the old answer forever.
+
+Base-image findings are separated from application dependencies throughout, and promoted to
+the headline. On a typical estate here they outnumber real dependency findings four to one,
+so a combined total is dominated by packages no application team can change.
+
+**Generate now** produces a report to look at. It is not emailed, and it does not become
+the comparison point for next month — the monthly series keeps that role, so pressing the
+button cannot quietly shorten the period the next report covers.
+
+#### Scheduling and delivery
+
+Sent on the **first working day of each month** (weekends skipped) at an hour and timezone
+set in the panel, covering the month that has just finished. If the service is down at that
+hour it sends when it comes back.
+
+It cannot send the same month twice. That guarantee lives in the database — a unique index
+on `(kind, period_start)` and a conditional claim on `sent_at` — not in application logic,
+because a process that is restarting is precisely the process that cannot be trusted to
+remember what it already did.
+
+Mail settings (server, port, encryption, sender, recipients, subject and body template) are
+edited in the panel rather than the environment. That is a deliberate exception to this
+project's rule that configuration belongs to whoever deploys: a relay address is not a
+credential or an executable path, and correcting it should not need a redeploy.
+
+The exception stops at credentials. **There is no password field**, and the host is
+validated as a bare hostname — `smtp://user:pass@host:25/` pasted into that box is rejected
+rather than interpreted. If your relay needs authenticating, that belongs in the
+environment with everything else secret.
+
+Template placeholders (`{{period}}`, `{{findings}}`, `{{critical}}`, and the rest listed in
+the panel) are substituted literally. No expressions, no property access: the body is
+authored through a web form and rendered by the server. An unknown placeholder is left
+visible, so a typo arrives as `{{aplications}}` rather than as a blank.
+
 #### Filtering the vulnerability figures
 
 The overview and the analytics page share one filter: **scope** (application dependencies
@@ -719,6 +790,9 @@ Visible only to admins, at `/admin`.
 - **CI tokens** — mint and revoke ingest tokens. Environment-configured tokens are
   listed too, marked as such, because listing only database rows would report "no
   tokens" on a deployment where CI is authenticating perfectly well.
+- **Monthly report** — generate the management report, configure who receives it
+  and when, edit the email template, and see the history of what was sent. See
+  [The monthly management report](#the-monthly-management-report).
 - **Audit log** — every administrative write, kept indefinitely. This exists mainly
   for merges: a merge moves scan history between applications and then deletes the
   source, so without it "why does this app have someone else's builds" is
@@ -726,9 +800,13 @@ Visible only to admins, at `/admin`.
 
 ### Accounts and passwords
 
-User "emails" are **login identifiers, not mailboxes**. The platform never sends
-mail — no invites, no notifications, no reset links — so nothing needs an SMTP
-server and `admin@localhost` is a perfectly valid account.
+User "emails" are **login identifiers, not mailboxes**. Nothing is ever sent to an
+account's address — no invites, no notifications, no reset links — so `admin@localhost`
+is a perfectly valid account.
+
+The one thing the platform mails is the monthly report, and it goes to an explicitly
+configured recipient list that has nothing to do with account addresses. A deployment
+that never configures it never opens an SMTP connection at all.
 
 That makes password recovery entirely admin-driven:
 
@@ -1282,7 +1360,9 @@ At roughly 1000 applications building a few times a day:
   `access_grant` table awkward to add.
 - **Elasticsearch or a search service.** Postgres with a trigram index is the
   right size for this.
-- **Outbound email.** No invites, notifications, or password-reset links, and so
-  no SMTP dependency to configure or keep alive. Recovery is admin-driven; see
-  [Accounts and passwords](#accounts-and-passwords).
+- **Email to user accounts.** No invites, notifications, or password-reset links,
+  so an account identifier never has to be a deliverable address. Recovery is
+  admin-driven; see [Accounts and passwords](#accounts-and-passwords). The only
+  outbound mail is the monthly report, to a recipient list configured on purpose,
+  and a deployment that leaves it unconfigured never connects to a relay.
 - **Self-service signup.** Accounts are created by an admin only.
