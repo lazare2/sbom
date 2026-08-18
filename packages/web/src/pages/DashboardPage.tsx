@@ -27,7 +27,8 @@ import {
   useVulnStatus,
   useTopComponents,
 } from "../lib/queries.ts";
-import { osLabel, runtimeLabel } from "../components/Platform.tsx";
+import { osLabel, PlatformTable, runtimeLabel } from "../components/Platform.tsx";
+import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
 import {
   Badge,
   Card,
@@ -106,106 +107,6 @@ function ShareBar({ value, total }: { value: number; total: number }) {
   );
 }
 
-/**
- * Counts of applications by OS or runtime, newest-first by application count.
- *
- * Every row links into the filtered applications list. That link is the point:
- * "3 applications on Node 18" is only actionable once you can see which three.
- */
-function PlatformCard({
-  title,
-  subtitle,
-  rows,
-  loading,
-  unknown,
-}: {
-  title: string;
-  subtitle: string;
-  rows: Array<{
-    key: string;
-    label: string;
-    version: string | null;
-    applications: number;
-    href: string;
-  }>;
-  loading: boolean;
-  /** Applications whose current build revealed neither an OS nor a runtime. */
-  unknown?: number;
-}) {
-  // Reduced over every row so the bars stay correct under any sort order.
-  const max = rows.reduce((m, r) => Math.max(m, r.applications), 0);
-  const sort = useClientSort(
-    rows,
-    { name: "text", version: "text", applications: "number" } as const,
-    { sortBy: "applications" },
-    (r, f) => (f === "name" ? r.label : f === "version" ? r.version : r.applications),
-    (r) => r.key,
-  );
-
-  return (
-    <Card>
-      <CardHeader title={title} subtitle={subtitle} />
-      {loading ? (
-        <LoadingBlock />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title="Nothing detected yet"
-          hint="Platform data is read from each SBOM. Scans ingested before this existed need `npm run db:backfill:platform`."
-        />
-      ) : (
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr>
-                <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
-                  Name
-                </Th>
-                <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")} width="140px">
-                  Version
-                </Th>
-                <Th
-                  onSort={() => sort.toggle("applications")}
-                  sorted={sort.stateOf("applications")}
-                  align="right"
-                  width="80px"
-                >
-                  Apps
-                </Th>
-                <Th width="140px">Share</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {sort.rows.map((row) => (
-                <Tr key={row.key}>
-                  <Td>
-                    <Link to={row.href} className="font-medium text-accent hover:underline">
-                      {row.label}
-                    </Link>
-                  </Td>
-                  <Td>
-                    <Mono>{row.version ?? "—"}</Mono>
-                  </Td>
-                  <Td align="right" className="nums">
-                    {formatNumber(row.applications)}
-                  </Td>
-                  <Td>
-                    <ShareBar value={row.applications} total={max} />
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
-      {unknown && unknown > 0 ? (
-        <div className="border-t border-border-base px-4 py-2 text-xs text-text-muted">
-          {formatNumber(unknown)} application{unknown === 1 ? "" : "s"} reported no OS or runtime —
-          normal for scratch and distroless images.
-        </div>
-      ) : null}
-    </Card>
-  );
-}
 
 /*
  * The overview had no URL state before the vulnerability filter existed. It has some now
@@ -407,9 +308,11 @@ export function DashboardPage() {
                       <Td>
                         <Mono>{c.version ?? "—"}</Mono>
                       </Td>
-                      <Td align="right" className="nums">
-                        {formatNumber(c.applications)}
-                      </Td>
+                      <ApplicationsCell
+                        count={c.applications}
+                        names={c.applicationList}
+                        what="ship this package"
+                      />
                     </Tr>
                   ))}
                 </tbody>
@@ -462,9 +365,11 @@ export function DashboardPage() {
                       <Td align="right" className="nums">
                         {formatNumber(e.components)}
                       </Td>
-                      <Td align="right" className="nums">
-                        {formatNumber(e.applications)}
-                      </Td>
+                      <ApplicationsCell
+                        count={e.applications}
+                        names={e.applicationList}
+                        what="ship a package from this ecosystem"
+                      />
                       <Td>
                         <ShareBar value={e.components} total={maxEcosystem} />
                       </Td>
@@ -479,7 +384,7 @@ export function DashboardPage() {
 
       {/* --- runtime platforms ---------------------------------------------- */}
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <PlatformCard
+        <PlatformTable
           title="Operating systems"
           subtitle="What each application's current build is running on. Click a row to see which."
           rows={(platforms.data?.operatingSystems ?? []).map((entry) => ({
@@ -487,15 +392,23 @@ export function DashboardPage() {
             label: osLabel(entry.name) ?? "unknown",
             version: entry.version,
             applications: entry.applications,
+            applicationList: entry.applicationList,
             href: `/applications?os=${encodeURIComponent(entry.name ?? "")}${
               entry.version ? `&osVersion=${encodeURIComponent(entry.version)}` : ""
             }`,
           }))}
           loading={platforms.isLoading}
-          unknown={platforms.data?.unknown ?? 0}
+          what="run this operating system"
+          note={
+            (platforms.data?.unknown ?? 0) > 0
+              ? `${formatNumber(platforms.data?.unknown ?? 0)} application${
+                  (platforms.data?.unknown ?? 0) === 1 ? "" : "s"
+                } reported no OS or runtime — normal for scratch and distroless images.`
+              : undefined
+          }
         />
 
-        <PlatformCard
+        <PlatformTable
           title="Language runtimes"
           subtitle="An application appears once per runtime it ships, so an image with both Node and Python counts in each."
           rows={(platforms.data?.runtimes ?? []).map((entry) => ({
@@ -503,11 +416,13 @@ export function DashboardPage() {
             label: runtimeLabel(entry.name),
             version: entry.version,
             applications: entry.applications,
+            applicationList: entry.applicationList,
             href: `/applications?runtime=${encodeURIComponent(entry.name)}${
               entry.version ? `&runtimeVersion=${encodeURIComponent(entry.version)}` : ""
             }`,
           }))}
           loading={platforms.isLoading}
+          what="ship this runtime"
         />
       </div>
 

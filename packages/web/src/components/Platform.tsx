@@ -1,5 +1,19 @@
 import { Link } from "react-router";
 import type { ScanPlatform } from "@sbom/shared";
+import { useClientSort } from "../lib/useSort.ts";
+import { ApplicationsCell } from "./ExpandableCounts.tsx";
+import {
+  Card,
+  CardHeader,
+  EmptyState,
+  LoadingBlock,
+  Mono,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Tr,
+} from "./ui.tsx";
 
 /**
  * Renders what an image is built on: OS distribution plus language runtimes.
@@ -184,5 +198,129 @@ export function PlatformText({ platform }: { platform: ScanPlatform | null }) {
     <span className="text-text-muted" title={platform.osPretty ?? platform.summary}>
       {platform.summary}
     </span>
+  );
+}
+
+/**
+ * The OS / runtime breakdown table, shared by the overview and the analytics page.
+ *
+ * Both pages rendered their own copy of this until now, and the copies had already drifted:
+ * the analytics one mapped `rows` instead of the sorted rows, so its headers flipped their
+ * carets and announced a direction while the rows never moved. Two implementations of one
+ * table is how that happens and stays unnoticed, which is why there is now one.
+ */
+export function PlatformTable({
+  title,
+  subtitle,
+  rows,
+  loading = false,
+  note,
+  what,
+}: {
+  title: string;
+  subtitle: string;
+  rows: Array<{
+    key: string;
+    label: string;
+    version: string | null;
+    applications: number;
+    applicationList: string[];
+    href: string;
+  }>;
+  loading?: boolean;
+  note?: string;
+  /** Completes "the applications that ..." in the expand tooltip. */
+  what: string;
+}) {
+  // Reduced over every row rather than read off the first, so the bars stay correct under
+  // any sort order.
+  const max = rows.reduce((m, r) => Math.max(m, r.applications), 0);
+  const sort = useClientSort(
+    rows,
+    { name: "text", version: "text", applications: "number" } as const,
+    { sortBy: "applications" },
+    (r, f) => (f === "name" ? r.label : f === "version" ? r.version : r.applications),
+    (r) => r.key,
+  );
+
+  return (
+    <Card>
+      <CardHeader title={title} subtitle={subtitle} />
+      {loading ? (
+        <LoadingBlock />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title="Nothing detected yet"
+          hint="Platform data is read from each SBOM. Scans ingested before this existed need the platform backfill."
+        />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                  Name
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("version")}
+                  sorted={sort.stateOf("version")}
+                  width="140px"
+                >
+                  Version
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("applications")}
+                  sorted={sort.stateOf("applications")}
+                  align="right"
+                  width="80px"
+                >
+                  Apps
+                </Th>
+                {/* A rendering of the Apps column, so sorting it would duplicate that header. */}
+                <Th width="140px">Share</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {sort.rows.map((row) => (
+                <Tr key={row.key}>
+                  <Td>
+                    <Link to={row.href} className="font-medium text-accent hover:underline">
+                      {row.label}
+                    </Link>
+                  </Td>
+                  <Td>
+                    <Mono>{row.version ?? "—"}</Mono>
+                  </Td>
+                  <ApplicationsCell
+                    count={row.applications}
+                    names={row.applicationList}
+                    className="text-text-base"
+                    what={what}
+                  />
+                  <Td>
+                    <span className="flex items-center gap-2">
+                      <span className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-subtle">
+                        <span
+                          className="block h-full rounded-full bg-accent"
+                          style={{
+                            width: `${max > 0 ? Math.max(1, Math.round((row.applications / max) * 100)) : 0}%`,
+                          }}
+                        />
+                      </span>
+                      <span className="nums w-9 text-right text-xs text-text-muted">
+                        {max > 0 ? Math.max(1, Math.round((row.applications / max) * 100)) : 0}%
+                      </span>
+                    </span>
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+      {note ? (
+        <div className="border-t border-border-base px-4 py-2 text-xs text-text-muted">{note}</div>
+      ) : null}
+    </Card>
   );
 }

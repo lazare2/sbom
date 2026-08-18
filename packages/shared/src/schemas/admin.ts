@@ -115,6 +115,14 @@ export interface EcosystemBreakdownEntry {
   components: number;
   /** Applications currently shipping at least one package of this ecosystem. */
   applications: number;
+  /**
+   * The applications behind that count, capped at EXPANDABLE_LIST_CAP.
+   *
+   * Produced by the same aggregate and the same WHERE clause as the count, so the two
+   * cannot disagree on screen. See EXPANDABLE_LIST_CAP for why that is a constraint rather
+   * than a convenience.
+   */
+  applicationList: string[];
 }
 
 /** Packages present in the most applications right now — the blast-radius list. */
@@ -124,6 +132,14 @@ export interface TopComponentEntry {
   version: string | null;
   ecosystem: string;
   applications: number;
+  /**
+   * The applications behind that count, capped at EXPANDABLE_LIST_CAP.
+   *
+   * Produced by the same aggregate and the same WHERE clause as the count, so the two
+   * cannot disagree on screen. See EXPANDABLE_LIST_CAP for why that is a constraint rather
+   * than a convenience.
+   */
+  applicationList: string[];
 }
 
 /**
@@ -140,11 +156,15 @@ export interface PlatformBreakdown {
     name: string | null;
     version: string | null;
     applications: number;
+    /** The applications behind that count, capped at EXPANDABLE_LIST_CAP. */
+    applicationList: string[];
   }>;
   runtimes: Array<{
     name: string;
     version: string | null;
     applications: number;
+    /** The applications behind that count, capped at EXPANDABLE_LIST_CAP. */
+    applicationList: string[];
   }>;
   /** Applications whose current build revealed no OS and no runtime at all. */
   unknown: number;

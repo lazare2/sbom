@@ -1,4 +1,4 @@
-import { ADVISORY_PACKAGE_LIST_CAP, type AdvisorySummary } from "@sbom/shared";
+import { EXPANDABLE_LIST_CAP, type AdvisorySummary } from "@sbom/shared";
 import { Link } from "react-router";
 import { formatNumber } from "../lib/format.ts";
 import { Td } from "./ui.tsx";
@@ -18,7 +18,7 @@ import { Td } from "./ui.tsx";
  * a list fetched separately could not be narrowed to the same scope, and a scoped count of 3
  * above an unscoped list of 8 is a contradiction the reader cannot resolve.
  */
-function ExpandableCountCell({
+export function ExpandableCountCell({
   count,
   items,
   hrefFor,
@@ -97,7 +97,7 @@ export function AdvisoryPackagesCell({ advisory }: { advisory: AdvisorySummary }
         return `/search?name=${encodeURIComponent(name)}&match=exact&scope=all`;
       }}
       linkTitle={(entry) => `Find ${entry.split(" ")[0]} across the estate`}
-      overflowTitle={`Only the first ${ADVISORY_PACKAGE_LIST_CAP} are carried on the row. Open the advisory for the full list.`}
+      overflowTitle={`Only the first ${EXPANDABLE_LIST_CAP} are carried on the row. Open the advisory for the full list.`}
       className="text-text-muted"
       summaryTitle="Show the affected packages"
     />
@@ -126,13 +126,46 @@ export function AdvisoryApplicationsCell({
       items={historical ? advisory.historicalApplicationList : advisory.currentApplicationList}
       hrefFor={(name) => `/applications?search=${encodeURIComponent(name)}`}
       linkTitle={(name) => `Open ${name}`}
-      overflowTitle={`Only the first ${ADVISORY_PACKAGE_LIST_CAP} are carried on the row. Open the advisory for the full list.`}
+      overflowTitle={`Only the first ${EXPANDABLE_LIST_CAP} are carried on the row. Open the advisory for the full list.`}
       className={historical ? "text-text-faint" : "font-medium text-text-base"}
       summaryTitle={
         historical
           ? "Show the applications that shipped an affected package in an earlier build"
           : "Show the applications whose current build is affected"
       }
+    />
+  );
+}
+
+/**
+ * An application count on any row, expanding to which applications.
+ *
+ * Every table that counts applications uses this one cell, so "click the number to see who"
+ * is learned once rather than per table. The names must come from the same aggregate as the
+ * count -- see ExpandableCountCell -- which is why each caller passes both together rather
+ * than fetching the list on expand.
+ */
+export function ApplicationsCell({
+  count,
+  names,
+  className = "text-text-muted",
+  what,
+}: {
+  count: number;
+  names: string[];
+  className?: string;
+  /** What the applications have in common, for the tooltip: "ship this package". */
+  what: string;
+}) {
+  return (
+    <ExpandableCountCell
+      count={count}
+      items={names}
+      hrefFor={(name) => `/applications?search=${encodeURIComponent(name)}`}
+      linkTitle={(name) => `Open ${name}`}
+      overflowTitle={`Only the first ${EXPANDABLE_LIST_CAP} are carried on the row.`}
+      className={className}
+      summaryTitle={`Show the applications that ${what}`}
     />
   );
 }

@@ -13,7 +13,11 @@ import { SEVERITY_ORDER } from "@sbom/shared";
 import { formatNumber, formatRelative } from "../lib/format.ts";
 import { useAdvisorySearch } from "../lib/queries.ts";
 import { useClientSort } from "../lib/useSort.ts";
-import { AdvisoryApplicationsCell, AdvisoryPackagesCell } from "./AdvisoryPackages.tsx";
+import {
+  AdvisoryApplicationsCell,
+  AdvisoryPackagesCell,
+  ApplicationsCell,
+} from "./ExpandableCounts.tsx";
 import { SeverityBar, SeverityBadge } from "./Severity.tsx";
 import {
   Badge,
@@ -712,9 +716,11 @@ export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityRep
                   >
                     {formatNumber(row.critical)}
                   </Td>
-                  <Td align="right" className="nums text-text-muted">
-                    {formatNumber(row.applications)}
-                  </Td>
+                  <ApplicationsCell
+                    count={row.applications}
+                    names={row.applicationList}
+                    what="ship this package version"
+                  />
                   <Td>
                     {row.fixVersions.length > 0 ? (
                       <Mono title={row.fixVersions.join(", ")}>{row.fixVersions[0]}</Mono>

@@ -5,7 +5,7 @@ import { useAdvisoryImpact, useAdvisorySearch, useVulnStatus } from "../lib/quer
 import {
   AdvisoryApplicationsCell,
   AdvisoryPackagesCell,
-} from "../components/AdvisoryPackages.tsx";
+} from "../components/ExpandableCounts.tsx";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";

@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { EXPANDABLE_LIST_CAP } from "@sbom/shared";
 import type {
   DashboardStats,
   EcosystemBreakdownEntry,
@@ -98,7 +99,11 @@ export class DashboardService {
     const { db } = this.deps;
 
     const osRows = await db.execute<Row<OsRow>>(sql`
-      SELECT s.os_name AS name, s.os_version AS version, count(*)::int AS applications
+      SELECT s.os_name AS name, s.os_version AS version, count(*)::int AS applications,
+             -- Same FROM and WHERE as the count, so the list cannot contradict it. One row
+             -- per application here (the join is on latest_scan_id), which is why the count
+             -- can be count(*) and the names still need no DISTINCT beyond the aggregate's.
+             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
       WHERE a.status <> 'inactive'
@@ -117,7 +122,8 @@ export class DashboardService {
       SELECT
         r.value ->> 'name'    AS name,
         r.value ->> 'version' AS version,
-        count(DISTINCT a.id)::int AS applications
+        count(DISTINCT a.id)::int AS applications,
+        (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.runtimes, '[]'::jsonb)) AS r(value)
@@ -140,13 +146,25 @@ export class DashboardService {
         // A row with no OS is reported through `unknown` instead, so it does not
         // appear as a nameless bar in the breakdown.
         .filter((r) => r.name !== null)
-        .map((r) => ({ name: r.name, version: r.version, applications: Number(r.applications) })),
+        .map((r) => ({
+          name: r.name,
+          version: r.version,
+          applications: Number(r.applications),
+          applicationList: r.application_list ?? [],
+        })),
       // A runtime entry with no name cannot happen — the parser only stores
       // named ones — but jsonb carries no guarantee, so it is filtered rather
       // than asserted.
       runtimes: rowsOf(runtimeRows).flatMap((r) =>
         typeof r.name === "string" && r.name !== ""
-          ? [{ name: r.name, version: r.version, applications: Number(r.applications) }]
+          ? [
+              {
+                name: r.name,
+                version: r.version,
+                applications: Number(r.applications),
+                applicationList: r.application_list ?? [],
+              },
+            ]
           : [],
       ),
       unknown: Number(rowsOf(unknownRows)[0]?.count ?? 0),
@@ -159,6 +177,7 @@ export class DashboardService {
       SELECT
         c.ecosystem,
         count(DISTINCT c.id)::int AS components,
+        (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list,
         count(DISTINCT sc.application_id)::int AS applications
       FROM scan_component sc
       JOIN application a ON a.latest_scan_id = sc.scan_id
@@ -174,6 +193,7 @@ export class DashboardService {
       ecosystem: r.ecosystem,
       components: Number(r.components),
       applications: Number(r.applications),
+      applicationList: r.application_list ?? [],
     }));
   }
 
@@ -194,7 +214,8 @@ export class DashboardService {
             min(c.name) AS name,
             NULL::text AS version,
             c.ecosystem,
-            count(DISTINCT sc.application_id)::int AS applications
+            count(DISTINCT sc.application_id)::int AS applications,
+            (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
           FROM scan_component sc
           JOIN application a ON a.latest_scan_id = sc.scan_id AND a.status <> 'inactive'
           -- Libraries only. The base OS and the language runtime are in the
@@ -209,7 +230,8 @@ export class DashboardService {
       : await this.deps.db.execute<Row<TopRow>>(sql`
           SELECT
             c.id, c.name, c.version, c.ecosystem,
-            count(DISTINCT sc.application_id)::int AS applications
+            count(DISTINCT sc.application_id)::int AS applications,
+            (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
           FROM scan_component sc
           JOIN application a ON a.latest_scan_id = sc.scan_id AND a.status <> 'inactive'
           -- Libraries only. The base OS and the language runtime are in the
@@ -228,6 +250,7 @@ export class DashboardService {
       version: r.version,
       ecosystem: r.ecosystem,
       applications: Number(r.applications),
+      applicationList: r.application_list ?? [],
     }));
   }
 }
@@ -251,18 +274,21 @@ interface EcosystemRow {
   ecosystem: string;
   components: number | string;
   applications: number | string;
+  application_list: string[] | null;
 }
 
 interface OsRow {
   name: string | null;
   version: string | null;
   applications: number | string;
+  application_list: string[] | null;
 }
 
 interface RuntimeRow {
   name: string | null;
   version: string | null;
   applications: number | string;
+  application_list: string[] | null;
 }
 
 interface TopRow {
@@ -271,4 +297,5 @@ interface TopRow {
   version: string | null;
   ecosystem: string;
   applications: number | string;
+  application_list: string[] | null;
 }

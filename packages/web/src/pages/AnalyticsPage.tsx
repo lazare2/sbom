@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { AnalyticsReport } from "@sbom/shared";
 import { useClientSort } from "../lib/useSort.ts";
-import { osLabel, runtimeLabel } from "../components/Platform.tsx";
+import { osLabel, PlatformTable, runtimeLabel } from "../components/Platform.tsx";
+import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
 import {
   BaseImageExposureCard,
   TopAdvisoriesCard,
@@ -214,11 +215,14 @@ export function AnalyticsPage() {
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <PlatformTable
           title="Operating systems"
+          subtitle="Observed in each application's current build. Expand a count to see which."
+          what="run this operating system"
           rows={report.platforms.operatingSystems.map((e) => ({
             key: `${e.name ?? ""}|${e.version ?? ""}`,
             label: osLabel(e.name) ?? "not detected",
             version: e.version,
             applications: e.applications,
+            applicationList: e.applicationList,
             href: `/applications?os=${encodeURIComponent(e.name ?? "")}${
               e.version ? `&osVersion=${encodeURIComponent(e.version)}` : ""
             }`,
@@ -233,11 +237,14 @@ export function AnalyticsPage() {
         />
         <PlatformTable
           title="Language runtimes"
+          subtitle="Observed in each application's current build. Expand a count to see which."
+          what="ship this runtime"
           rows={report.platforms.runtimes.map((e) => ({
             key: `${e.name}|${e.version ?? ""}`,
             label: runtimeLabel(e.name),
             version: e.version,
             applications: e.applications,
+            applicationList: e.applicationList,
             href: `/applications?runtime=${encodeURIComponent(e.name)}${
               e.version ? `&runtimeVersion=${encodeURIComponent(e.version)}` : ""
             }`,
@@ -464,9 +471,11 @@ function TopPackagesCard({ report }: { report: AnalyticsReport }) {
                   <Td>
                     <Mono>{c.version ?? "—"}</Mono>
                   </Td>
-                  <Td align="right" className="nums">
-                    {formatNumber(c.applications)}
-                  </Td>
+                  <ApplicationsCell
+                    count={c.applications}
+                    names={c.applicationList}
+                    what="ship this package"
+                  />
                   <Td>
                     <ShareBar value={c.applications} max={max} />
                   </Td>
@@ -927,9 +936,11 @@ function EcosystemCard({ report }: { report: AnalyticsReport }) {
                   <Td align="right" className="nums">
                     {formatNumber(e.components)}
                   </Td>
-                  <Td align="right" className="nums">
-                    {formatNumber(e.applications)}
-                  </Td>
+                  <ApplicationsCell
+                    count={e.applications}
+                    names={e.applicationList}
+                    what="ship a package from this ecosystem"
+                  />
                   <Td>
                     <ShareBar value={e.components} max={max} />
                   </Td>
@@ -943,83 +954,6 @@ function EcosystemCard({ report }: { report: AnalyticsReport }) {
   );
 }
 
-function PlatformTable({
-  title,
-  rows,
-  note,
-}: {
-  title: string;
-  rows: Array<{ key: string; label: string; version: string | null; applications: number; href: string }>;
-  note?: string;
-}) {
-  // Order-independent: see TopPackagesCard.
-  const max = rows.reduce((m, r) => Math.max(m, r.applications), 0);
-  const sort = useClientSort(
-    rows,
-    { name: "text", version: "text", applications: "number" } as const,
-    { sortBy: "applications" },
-    (r, f) => (f === "name" ? r.label : f === "version" ? r.version : r.applications),
-    (r) => r.key,
-  );
-  return (
-    <Card>
-      <CardHeader title={title} subtitle="Observed in each application's current build. Click a row to see which." />
-      {rows.length === 0 ? (
-        <EmptyState
-          title="Nothing detected"
-          hint="Platform data is read from each SBOM. Scans ingested before this existed need the platform backfill."
-        />
-      ) : (
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr>
-                <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
-                  Name
-                </Th>
-                <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")} width="140px">
-                  Version
-                </Th>
-                <Th
-                  onSort={() => sort.toggle("applications")}
-                  sorted={sort.stateOf("applications")}
-                  align="right"
-                  width="70px"
-                >
-                  Apps
-                </Th>
-                <Th width="130px">Share</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <Tr key={r.key}>
-                  <Td>
-                    <Link to={r.href} className="font-medium text-accent hover:underline">
-                      {r.label}
-                    </Link>
-                  </Td>
-                  <Td>
-                    <Mono>{r.version ?? "—"}</Mono>
-                  </Td>
-                  <Td align="right" className="nums">
-                    {formatNumber(r.applications)}
-                  </Td>
-                  <Td>
-                    <ShareBar value={r.applications} max={max} />
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
-      {note ? (
-        <div className="border-t border-border-base px-4 py-2 text-xs text-text-muted">{note}</div>
-      ) : null}
-    </Card>
-  );
-}
 
 /**
  * Definitions, at the bottom.

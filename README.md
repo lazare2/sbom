@@ -255,6 +255,27 @@ Exact is also the default the other way round for a practical reason: every list
 already saved and shared was run under exact matching, and re-opening one must not silently
 return a different answer.
 
+### Counts that open
+
+Any table cell showing an application count expands to name the applications: widely deployed
+packages, ecosystem mix, operating systems, language runtimes, vulnerable packages, and both
+counts on an advisory row. One cell component, so "click the number to see who" is learned
+once instead of per table.
+
+Every one of those lists is produced by the **same aggregate, under the same WHERE clause and
+the same FILTER, as the number it opens from**. That is a correctness constraint rather than a
+convenience. The app/base-image split is a shared SQL predicate rather than a column, so a
+list fetched from a separate endpoint could not be narrowed to the count's scope, and a
+scoped count of 3 above an unscoped list of 8 is a contradiction the reader cannot resolve.
+Entries are keyed to match what the count counts — name *and* version for packages, because
+eight vulnerable versions of `openssl` is one name and eight rows, and the difference is the
+whole finding.
+
+Lists are capped at `EXPANDABLE_LIST_CAP` and a row says so when it stops. Truncation is
+derived as `count > list.length` rather than carried as a flag, so it cannot drift out of step
+with the list. A count of **zero renders as a plain number**, not an expandable one: a control
+that opens onto an empty box is worse than the number it replaced.
+
 ### Sorting any table
 
 Every table column that has a meaningful order is sortable by clicking its header. The

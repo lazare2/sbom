@@ -260,6 +260,14 @@ export interface TopVulnerablePackage {
   knownExploited: number;
   /** Applications whose current build contains this package version. */
   applications: number;
+  /**
+   * The applications behind that count, capped at EXPANDABLE_LIST_CAP.
+   *
+   * Produced by the same aggregate and the same WHERE clause as the count, so the two
+   * cannot disagree on screen. See EXPANDABLE_LIST_CAP for why that is a constraint rather
+   * than a convenience.
+   */
+  applicationList: string[];
   /** True when at least one advisory on it has a fix available. */
   fixAvailable: boolean;
   /** Highest fixed version offered across its advisories, when there is one. */

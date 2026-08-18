@@ -1138,6 +1138,24 @@ await driveSort("/admin/tokens", "Name", { expectRowsChange: false });
 await driveSort("/analytics", "Ecosystem");
 
 /*
+  The analytics platform table sorted nothing until these tables were unified: it mapped the
+  unsorted rows while the header flipped its caret and announced a direction, so the control
+  looked correct and did nothing. driveSort's row-reordering assertion is exactly the check
+  for that, and it had simply never been pointed here. Both tabs now, because the point of
+  sharing the component is that neither can drift again.
+*/
+/*
+  Scoped on "Name", not "Share": several tables on these pages carry a Share column, and the
+  widely-deployed-packages table has one and sits earlier in the DOM, so a "Share" marker
+  resolved to a table whose first column is "Package". "Name" is the platform tables' own
+  distinctive header. Both platform tables have it and .first() takes the OS one, which is
+  the point of sharing the component -- driving either exercises both.
+*/
+await driveSort("/", "Name", { markerColumn: "Name" });
+await driveSort("/", "Apps", { markerColumn: "Name" });
+await driveSort("/analytics", "Name", { markerColumn: "Name" });
+
+/*
   The two vulnerability rankings. Both are one shared component that the overview and the
   analytics page each render, so the full click cycle runs here against the overview copy
   and the analytics copy is checked for the controls themselves below — that pair catches a
@@ -1290,6 +1308,38 @@ if ((await listExact.count()) === 0) {
   sits earlier in the DOM -- the lookup would have quietly measured the wrong table.
 */
 log("23d. top advisories card and package disclosure");
+
+/*
+  Every table that counts applications now opens to name them. Checked on both tabs because
+  the counts come from five different aggregates, and a cell wired to the wrong one would
+  still expand and still look right.
+*/
+for (const route of ["/", "/analytics"]) {
+  await page.goto(`${BASE}${route}`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1800);
+  const appSummaries = page.locator("tbody details > summary");
+  const n = await appSummaries.count();
+  if (n === 0) {
+    problems.push(`no expandable counts anywhere on ${route}`);
+    continue;
+  }
+  let opened = 0;
+  for (let i = 0; i < Math.min(n, 6); i++) {
+    const s = appSummaries.nth(i);
+    const before = await page.locator("tbody details[open] a").count();
+    await s.click();
+    await page.waitForTimeout(180);
+    const after = await page.locator("tbody details[open] a").count();
+    if (after > before) opened += 1;
+  }
+  if (opened === 0) {
+    problems.push(`${route}: no expandable count revealed anything`);
+  } else {
+    log(`  OK   ${route}: ${opened} of ${Math.min(n, 6)} sampled counts expanded (${n} total)`);
+  }
+  await shot(`expandable-counts${route === "/" ? "-overview" : "-analytics"}`);
+}
+
 await driveSort("/", "Advisory", { markerColumn: "Severity" });
 await driveSort("/", "Apps", { markerColumn: "Severity" });
 
