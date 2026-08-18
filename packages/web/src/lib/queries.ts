@@ -31,6 +31,7 @@ import type {
   VulnerabilityFinding,
   VulnerabilityReport,
   VulnScanStatus,
+  PlatformSettings,
 } from "@sbom/shared";
 import type { componentSearchSort } from "@sbom/shared";
 import { api, toQueryString } from "./api.ts";
@@ -76,6 +77,7 @@ export const queryKeys = {
   ingestTokens: ["admin", "ingest-tokens"] as const,
   // --- vulnerabilities ---
   vulnStatus: ["vuln", "status"] as const,
+  platformSettings: ["admin", "settings"] as const,
   vulnAdminStatus: ["admin", "vuln", "status"] as const,
   vulnHistory: (limit: number) => ["admin", "vuln", "history", limit] as const,
   vulnSuppressions: ["admin", "vuln", "suppressions"] as const,
@@ -502,6 +504,13 @@ export interface VulnStatusResponse {
     path: string | null;
   } | null;
   coverage: { scanned: number; pending: number; sweeping: boolean; lastSweepFinishedAt: string | null } | null;
+}
+
+export function usePlatformSettings() {
+  return useQuery({
+    queryKey: queryKeys.platformSettings,
+    queryFn: () => api.get<{ settings: PlatformSettings }>("/admin/settings"),
+  });
 }
 
 export function useVulnStatus() {

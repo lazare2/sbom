@@ -12,6 +12,7 @@ import type {
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
+import type { SettingsService } from "../settings/settings.service.js";
 import { NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
 import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
@@ -29,15 +30,24 @@ import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
  */
 export class ApplicationsService {
   constructor(
-    private readonly deps: { db: Database; config: Config },
+    private readonly deps: { db: Database; config: Config; settings: SettingsService },
   ) {}
 
-  private get staleInterval(): SQL {
-    return sql.raw(`interval '${this.deps.config.STALE_APP_THRESHOLD_DAYS} days'`);
+  /**
+   * Delegates to the settings service so the threshold has one definition.
+   *
+   * It used to read the environment directly, which made it a deployment constant. It is now
+   * an administrator's setting, and three separate queries compare against it -- if they
+   * resolved it independently the applications list could disagree with the overview about
+   * which applications are stale.
+   */
+  private staleInterval(): Promise<SQL> {
+    return this.deps.settings.staleInterval();
   }
 
   async list(query: ListApplicationsQuery): Promise<Paginated<ApplicationSummary>> {
     const { db } = this.deps;
+    const staleInterval = await this.staleInterval();
 
     const conditions: SQL[] = [];
 
@@ -108,7 +118,7 @@ export class ApplicationsService {
     }
 
     if (query.staleOnly) {
-      conditions.push(sql`a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${this.staleInterval}`);
+      conditions.push(sql`a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${staleInterval}`);
     }
 
     const where = sql.join([sql`WHERE `, sql.join(conditions, sql` AND `)]);
@@ -129,7 +139,7 @@ export class ApplicationsService {
         a.created_at,
         s.component_count AS latest_component_count,
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
-        (a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${this.staleInterval}) AS is_stale,
+        (a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${staleInterval}) AS is_stale,
         count(*) OVER () AS total
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
@@ -192,6 +202,7 @@ export class ApplicationsService {
 
   async getById(id: string): Promise<ApplicationDetail> {
     const { db } = this.deps;
+    const staleInterval = await this.staleInterval();
 
     const rows = await db.execute<Row<ApplicationListRow & { aliases: string[] | null; updated_at: Date }>>(sql`
       SELECT
@@ -206,7 +217,7 @@ export class ApplicationsService {
         a.updated_at,
         s.component_count AS latest_component_count,
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
-        (a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${this.staleInterval}) AS is_stale,
+        (a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${staleInterval}) AS is_stale,
         COALESCE(
           (SELECT array_agg(al.alias_name ORDER BY al.alias_name)
            FROM application_alias al WHERE al.application_id = a.id),

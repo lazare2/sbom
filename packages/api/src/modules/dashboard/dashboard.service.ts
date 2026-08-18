@@ -9,6 +9,7 @@ import type {
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
+import type { SettingsService } from "../settings/settings.service.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 
 /**
@@ -26,11 +27,16 @@ import { rowsOf, toIso, type Row } from "../applications/applications.service.js
  * a correlated max() over the scan history.
  */
 export class DashboardService {
-  constructor(private readonly deps: { db: Database; config: Config }) {}
+  constructor(
+    private readonly deps: { db: Database; config: Config; settings: SettingsService },
+  ) {}
 
   async stats(): Promise<DashboardStats> {
-    const { db, config } = this.deps;
-    const staleInterval = sql.raw(`interval '${config.STALE_APP_THRESHOLD_DAYS} days'`);
+    const { db, settings } = this.deps;
+    // One definition of "stale", shared with the applications list and the analytics
+    // report. Resolved once here so every aggregate in this query agrees.
+    const staleInterval = await settings.staleInterval();
+    const { staleThresholdDays } = await settings.getPlatformSettings();
 
     // One round trip. These are independent aggregates over three tables, and
     // issuing them separately would cost three pool checkouts to build a single
@@ -78,7 +84,7 @@ export class DashboardService {
         distinct: Number(r.component_total),
         inCurrentUse: Number(r.component_current),
       },
-      staleThresholdDays: config.STALE_APP_THRESHOLD_DAYS,
+      staleThresholdDays,
     };
   }
 

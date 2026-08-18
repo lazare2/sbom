@@ -14,6 +14,7 @@ import {
   updateApplicationRequestSchema,
   updateAttributeDefinitionSchema,
   updateUserRequestSchema,
+  updatePlatformSettingsSchema,
 } from "@sbom/shared";
 import { NotFoundError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
@@ -45,7 +46,8 @@ const aliasBodySchema = z.object({
  * `preHandler` is protected only if the author remembered.
  */
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
-  const { adminUsers, adminApplications, attributeDefinitions, audit, ingestTokens } = fastify.ctx;
+  const { adminUsers, adminApplications, attributeDefinitions, audit, ingestTokens, settings } =
+    fastify.ctx;
 
   fastify.addHook("preHandler", fastify.requireAdmin);
 
@@ -223,6 +225,39 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   // -------------------------------------------------------------------------
   // Vulnerability scanning
   // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // Platform settings
+  // -------------------------------------------------------------------------
+
+  /*
+    Separate from /vuln/settings, which owns the scanning switches. This is for values that
+    describe the estate rather than the scanner -- currently the staleness threshold, which
+    is a property of how often an organisation builds rather than of the software, and so
+    belongs to whoever runs it rather than to whoever deployed it.
+  */
+  fastify.get("/settings", async (_request, reply) => {
+    return reply.send({ settings: await settings.getPlatformSettings() });
+  });
+
+  fastify.patch("/settings", async (request, reply) => {
+    const body = parseOrThrow(updatePlatformSettingsSchema, request.body);
+    const actor = actorOf(request);
+    const { before, after } = await settings.updatePlatformSettings(body, actor);
+
+    // Recorded because it changes what every dashboard reports: an application that was
+    // fine yesterday can be stale today with no scan having changed, and the audit trail is
+    // what explains that to whoever asks.
+    await audit.record({
+      actor,
+      action: "settings.update",
+      targetType: "setting",
+      targetId: "platform",
+      metadata: { before, after },
+    });
+
+    return reply.send({ settings: after });
+  });
 
   // Nested inside this scope so it inherits `requireAdmin` rather than declaring its
   // own guard, which is the pattern that makes a forgotten guard impossible here.

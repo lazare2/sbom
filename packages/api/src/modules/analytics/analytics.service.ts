@@ -123,7 +123,7 @@ export class AnalyticsService {
       generatedBy: args.generatedBy,
       periodDays: args.periodDays,
       periodStart: periodStart.toISOString(),
-      staleThresholdDays: this.deps.config.STALE_APP_THRESHOLD_DAYS,
+      staleThresholdDays: (await this.deps.settings.getPlatformSettings()).staleThresholdDays,
     };
 
     return {
@@ -197,7 +197,7 @@ export class AnalyticsService {
    */
   async coverage(limit: number): Promise<CoverageReport> {
     const { db, config } = this.deps;
-    const staleInterval = sql.raw(`interval '${config.STALE_APP_THRESHOLD_DAYS} days'`);
+    const staleInterval = await this.deps.settings.staleInterval();
 
     const summaryRows = await db.execute<Row<CoverageSummaryRow>>(sql`
       SELECT

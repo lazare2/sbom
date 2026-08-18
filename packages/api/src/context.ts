@@ -111,15 +111,17 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const ingestion = new IngestionService({ db, blobStore, logger });
 
   // Read side. Stateless query services over the same pool.
-  const applications = new ApplicationsService({ db, config });
+  //
+  // Settings first: the applications list, the overview and the analytics report all
+  // resolve the stale threshold through it, and resolving it independently would let them
+  // disagree about which applications are stale.
+  const settings = new SettingsService({ db, config });
+  const applications = new ApplicationsService({ db, config, settings });
   const scans = new ScansService({ db, blobStore });
   const components = new ComponentsService({ db });
   const bulkSearch = new BulkSearchService({ db });
   const diff = new DiffService({ db });
-  const dashboard = new DashboardService({ db, config });
-  // Constructed before analytics: the report asks the flag whether to include
-  // vulnerability sections at all.
-  const settings = new SettingsService({ db });
+  const dashboard = new DashboardService({ db, config, settings });
   // Composed onto the dashboard rather than duplicating its aggregates: the
   // report's ecosystem, platform and top-package sections must be the same
   // numbers the overview page shows, and sharing the query is the only way to

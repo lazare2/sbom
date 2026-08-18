@@ -20,6 +20,8 @@ import type {
   UserCredentialResponse,
   UserSummary,
   VulnScanStatus,
+  PlatformSettings,
+  UpdatePlatformSettings,
 } from "@sbom/shared";
 import { api } from "./api.ts";
 import { queryKeys } from "./queries.ts";
@@ -324,6 +326,25 @@ function invalidateVulnerabilities(qc: QueryClient): void {
   void qc.invalidateQueries({ queryKey: ["applications"] });
   void qc.invalidateQueries({ queryKey: ["scans"] });
   void qc.invalidateQueries({ queryKey: ["admin", "audit-log"] });
+}
+
+/**
+ * Saves the platform settings.
+ *
+ * Invalidates broadly on purpose: the stale threshold changes which applications the list,
+ * the overview and the analytics report each call stale, so a narrow invalidation would
+ * leave two of the three showing the old answer.
+ */
+export function useUpdatePlatformSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdatePlatformSettings) =>
+      api.patch<{ settings: PlatformSettings }>("/admin/settings", body),
+    onSuccess: (result) => {
+      qc.setQueryData(queryKeys.platformSettings, result);
+      void qc.invalidateQueries();
+    },
+  });
 }
 
 export function useUpdateVulnSettings() {

@@ -125,6 +125,43 @@ export interface EcosystemBreakdownEntry {
   applicationList: string[];
 }
 
+/**
+ * Runtime settings an administrator owns, as opposed to whoever deploys the service.
+ *
+ * The environment still supplies the default: an operator who has never opened the settings
+ * page gets the deployment's value, and clearing the override returns to it rather than to a
+ * number hard-coded somewhere else.
+ */
+export interface PlatformSettings {
+  /**
+   * Days without a scan before an application is called stale.
+   *
+   * Editable because the right answer is a property of how often an organisation builds, not
+   * of the software. A team on weekly releases and one on quarterly releases disagree about
+   * this by an order of magnitude, and both are right.
+   */
+  staleThresholdDays: number;
+}
+
+/**
+ * Bounds on the stale threshold.
+ *
+ * The floor is 1 rather than 0: a threshold of zero would mark every application stale the
+ * instant it was scanned, which reads as a broken platform rather than as a setting. The
+ * ceiling keeps the value inside a sane interval and out of Postgres interval overflow.
+ */
+export const STALE_THRESHOLD_MIN_DAYS = 1;
+export const STALE_THRESHOLD_MAX_DAYS = 3650;
+
+export const updatePlatformSettingsSchema = z.object({
+  staleThresholdDays: z.coerce
+    .number()
+    .int()
+    .min(STALE_THRESHOLD_MIN_DAYS)
+    .max(STALE_THRESHOLD_MAX_DAYS),
+});
+export type UpdatePlatformSettings = z.infer<typeof updatePlatformSettingsSchema>;
+
 /** Packages present in the most applications right now — the blast-radius list. */
 export interface TopComponentEntry {
   componentId: string;

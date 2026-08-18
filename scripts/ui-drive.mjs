@@ -705,6 +705,47 @@ await expectText("CI ingest tokens");
 await expectText("environment", "the env-sourced token badge");
 await shot("admin-tokens");
 
+// --- 21b. admin: platform settings ------------------------------------------
+/*
+  The stale threshold. Driven through a save and back rather than just rendered, because the
+  failure that matters is not a missing field: it is a value that saves and changes nothing,
+  or one that changes the dashboards and cannot be put back. The value is restored before
+  moving on, so a run of this script leaves the estate as it found it.
+*/
+log("21b. admin panel, platform settings");
+await page.getByRole("link", { name: "Settings" }).click();
+await page.waitForURL(/\/admin\/settings/, { timeout: 10000 });
+await page.waitForLoadState("networkidle");
+await expectText("Stale applications");
+
+const staleField = page.getByLabel("Days without a scan");
+const original = await staleField.inputValue();
+await staleField.fill("7");
+await page.getByRole("button", { name: "Save" }).click();
+await page.waitForTimeout(900);
+await page.reload({ waitUntil: "networkidle" });
+const saved = await page.getByLabel("Days without a scan").inputValue();
+if (saved !== "7") {
+  problems.push(`stale threshold did not persist: expected 7, found ${saved}`);
+} else {
+  log("  OK   stale threshold saved and survived a reload");
+}
+await shot("admin-settings");
+
+// Out of range must be refused by the UI, not sent and rejected by the API.
+await page.getByLabel("Days without a scan").fill("0");
+await page.waitForTimeout(250);
+if (await page.getByRole("button", { name: "Save" }).isEnabled()) {
+  problems.push("Save stayed enabled for an out-of-range threshold");
+} else {
+  log("  OK   Save is refused for a threshold of 0");
+}
+
+await page.getByLabel("Days without a scan").fill(original);
+await page.getByRole("button", { name: "Save" }).click();
+await page.waitForTimeout(900);
+log(`  OK   stale threshold restored to ${original}`);
+
 // --- 22. admin: audit log ---------------------------------------------------
 log("22. admin panel, audit log");
 await page.getByRole("link", { name: "Audit log" }).click();

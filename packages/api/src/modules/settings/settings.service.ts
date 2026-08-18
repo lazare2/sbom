@@ -1,5 +1,11 @@
-import { sql } from "drizzle-orm";
-import { VULN_DB_INTERVAL_DEFAULT_HOURS } from "@sbom/shared";
+import { sql, type SQL } from "drizzle-orm";
+import {
+  STALE_THRESHOLD_MAX_DAYS,
+  STALE_THRESHOLD_MIN_DAYS,
+  VULN_DB_INTERVAL_DEFAULT_HOURS,
+  type PlatformSettings,
+} from "@sbom/shared";
+import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import { setting } from "../../db/schema.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
@@ -22,6 +28,8 @@ export const SETTING_KEYS = {
   vulnEnabled: "vuln.enabled",
   /** Hours between scheduled database update checks. */
   vulnIntervalHours: "vuln.interval_hours",
+  /** Days without a scan before an application counts as stale. */
+  staleThresholdDays: "app.stale_threshold_days",
 } as const;
 
 export interface VulnSettings {
@@ -54,7 +62,97 @@ export class SettingsService {
   private cache: { value: VulnSettings; expiresAt: number } | null = null;
   private static readonly CACHE_TTL_MS = 5_000;
 
-  constructor(private readonly deps: { db: Database }) {}
+  /**
+   * Cached separately from the vulnerability settings.
+   *
+   * The stale threshold is read by the applications list, the overview and the analytics
+   * report -- three of the busiest queries -- so it gets the same short TTL for the same
+   * reason. Separate entry rather than one combined object so a vulnerability toggle does
+   * not invalidate it, and vice versa.
+   */
+  private platformCache: { value: PlatformSettings; expiresAt: number } | null = null;
+
+  constructor(private readonly deps: { db: Database; config: Config }) {}
+
+  /**
+   * The stale threshold, falling back to the deployment's environment value.
+   *
+   * The fallback is the environment rather than a literal so that clearing the override
+   * returns to whatever the deployment chose, and an operator who never opens the settings
+   * page sees no change in behaviour from this feature existing.
+   */
+  async getPlatformSettings(): Promise<PlatformSettings> {
+    if (this.platformCache && this.platformCache.expiresAt > Date.now()) {
+      return this.platformCache.value;
+    }
+
+    const value: PlatformSettings = {
+      staleThresholdDays: this.deps.config.STALE_APP_THRESHOLD_DAYS,
+    };
+
+    const rows = await this.deps.db.execute<Row<{ key: string; value: unknown }>>(sql`
+      SELECT key, value FROM setting WHERE key = ${SETTING_KEYS.staleThresholdDays}
+    `);
+    for (const row of rowsOf(rows)) {
+      // Re-validated on read, not only on write. A row can predate a narrowing of the
+      // bounds, or be edited straight in the database, and an out-of-range interval reaches
+      // SQL as an interval literal.
+      if (
+        typeof row.value === "number" &&
+        Number.isInteger(row.value) &&
+        row.value >= STALE_THRESHOLD_MIN_DAYS &&
+        row.value <= STALE_THRESHOLD_MAX_DAYS
+      ) {
+        value.staleThresholdDays = row.value;
+      }
+    }
+
+    this.platformCache = { value, expiresAt: Date.now() + SettingsService.CACHE_TTL_MS };
+    return value;
+  }
+
+  /**
+   * Days as a SQL interval, for the queries that compare a scan date against it.
+   *
+   * Built here rather than at each call site so the three places that ask "is this stale"
+   * cannot disagree. Interpolated as a literal after `Math.trunc`, which is safe because the
+   * value is an integer validated on both write and read -- but the truncation is what makes
+   * that guarantee local rather than an assumption about callers.
+   */
+  async staleInterval(): Promise<SQL> {
+    const { staleThresholdDays } = await this.getPlatformSettings();
+    return sql.raw(`interval '${Math.trunc(staleThresholdDays)} days'`);
+  }
+
+  async updatePlatformSettings(
+    patch: { staleThresholdDays?: number | undefined },
+    actor: Actor | null,
+  ): Promise<{ before: PlatformSettings; after: PlatformSettings }> {
+    const before = await this.getPlatformSettings();
+
+    if (patch.staleThresholdDays !== undefined) {
+      await this.deps.db
+        .insert(setting)
+        .values({
+          key: SETTING_KEYS.staleThresholdDays,
+          value: patch.staleThresholdDays,
+          updatedByUserId: actor?.id ?? null,
+          updatedByEmail: actor?.email ?? null,
+        })
+        .onConflictDoUpdate({
+          target: setting.key,
+          set: {
+            value: patch.staleThresholdDays,
+            updatedAt: new Date(),
+            updatedByUserId: actor?.id ?? null,
+            updatedByEmail: actor?.email ?? null,
+          },
+        });
+    }
+
+    this.platformCache = null;
+    return { before, after: await this.getPlatformSettings() };
+  }
 
   async getVulnSettings(): Promise<VulnSettings> {
     if (this.cache && this.cache.expiresAt > Date.now()) return this.cache.value;
