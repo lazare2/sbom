@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Config } from "../../config.js";
@@ -54,14 +54,85 @@ export class GrypeScanner implements VulnerabilityScanner {
   // Environment
   // -------------------------------------------------------------------------
 
-  private env(): NodeJS.ProcessEnv {
+  /** Extensions a dropped-in certificate plausibly carries. */
+  private static readonly CA_EXTENSIONS = [".crt", ".pem", ".cer"];
+
+  /** Resolved once per process; `null` means none configured and none found. */
+  private caCert: string | null | undefined;
+
+  /**
+   * The CA certificate to hand grype, discovered if it was not named.
+   *
+   * An explicit GRYPE_DB_CA_CERT always wins. Otherwise GRYPE_DB_CA_DIR is scanned, so
+   * installing a corporate CA is one action -- put the file in the folder -- instead of
+   * three, each of which fails with the same opaque TLS error.
+   *
+   * Several files are bundled rather than one being picked. A Windows trust store typically
+   * holds a handful of certificates named for the organisation, only one of which signed the
+   * proxy, and choosing between them by eye is guesswork; Go reads a bundle and tries all of
+   * them. Bundling also means a chain -- root plus intermediate -- works by just dropping
+   * both files in.
+   */
+  private async resolveCaCert(): Promise<string | null> {
+    if (this.caCert !== undefined) return this.caCert;
+
+    if (this.config.GRYPE_DB_CA_CERT) {
+      this.caCert = this.config.GRYPE_DB_CA_CERT;
+      return this.caCert;
+    }
+
+    const dir = this.config.GRYPE_DB_CA_DIR;
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      // Absent directory is the normal case: no proxy, nothing mounted, nothing to do.
+      this.caCert = null;
+      return null;
+    }
+
+    const certs = names
+      .filter((n) => GrypeScanner.CA_EXTENSIONS.some((e) => n.toLowerCase().endsWith(e)))
+      .sort()
+      .map((n) => path.join(dir, n));
+
+    if (certs.length === 0) {
+      this.caCert = null;
+      return null;
+    }
+    if (certs.length === 1) {
+      this.caCert = certs[0] ?? null;
+      return this.caCert;
+    }
+
+    // Written beside the database rather than into the mount, which is read-only.
+    const bundle = path.join(path.resolve(this.config.GRYPE_DB_CACHE_DIR), "ca-bundle.pem");
+    const parts: string[] = [];
+    for (const file of certs) {
+      try {
+        parts.push((await readFile(file, "utf8")).trim());
+      } catch {
+        // One unreadable file must not discard the others.
+      }
+    }
+    if (parts.length === 0) {
+      this.caCert = null;
+      return null;
+    }
+    await mkdir(path.dirname(bundle), { recursive: true });
+    await writeFile(bundle, parts.join("\n") + "\n", "utf8");
+    this.caCert = bundle;
+    return bundle;
+  }
+
+  private env(caCert: string | null): NodeJS.ProcessEnv {
     return {
       ...process.env,
       GRYPE_DB_CACHE_DIR: path.resolve(this.config.GRYPE_DB_CACHE_DIR),
       GRYPE_DB_UPDATE_URL: this.config.GRYPE_DB_UPDATE_URL,
       GRYPE_DB_AUTO_UPDATE: "false",
       GRYPE_DB_VALIDATE_AGE: "false",
-      ...(this.config.GRYPE_DB_CA_CERT ? { GRYPE_DB_CA_CERT: this.config.GRYPE_DB_CA_CERT } : {}),
+      ...(caCert ? { GRYPE_DB_CA_CERT: caCert } : {}),
       // Keeps stdout parseable: grype writes progress to stderr, but a TTY-detected
       // interactive mode would add control characters.
       NO_COLOR: "1",
@@ -96,9 +167,11 @@ export class GrypeScanner implements VulnerabilityScanner {
       };
     }
 
+    const caCert = await this.resolveCaCert();
+
     return new Promise((resolve) => {
       const child = spawn(resolution.binary!.path, args, {
-        env: this.env(),
+        env: this.env(caCert),
         // Never a shell: arguments include filesystem paths, and a shell would make
         // any character in them meaningful.
         shell: false,

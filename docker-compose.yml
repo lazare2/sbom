@@ -26,7 +26,11 @@ services:
       # expose the database to the whole network — with the default password
       # above, to anyone on it. Local tools (psql, drizzle-kit, the smoke test)
       # reach it on localhost exactly as before.
-      - "127.0.0.1:5432:5432"
+      # Host port from .env, because Windows reserves scattered ranges for Hyper-V and
+      # WinNAT: 5432 can be unbindable on a machine where nothing is using it, and the
+      # error ("access permissions") does not say so. Changing it here meant editing this
+      # file again after every source update, and that edit is easy to forget.
+      - "127.0.0.1:${DB_HOST_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
@@ -88,7 +92,7 @@ services:
       # Loopback only: nginx in `web` proxies /api, so nothing outside this host
       # needs the API directly. Change to "3000:3000" to point CI at it without
       # going through nginx.
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${API_HOST_PORT:-3000}:3000"
     volumes:
       - sbom-blobs:/data/sboms
       # Allow ~4 GB: the database is 1.9 GB expanded, and a replacement briefly holds
@@ -116,7 +120,7 @@ services:
     depends_on:
       - api
     ports:
-      - "8080:80"
+      - "${SBOM_PORT:-8080}:80"
 
 volumes:
   db-data:

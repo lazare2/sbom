@@ -133,8 +133,28 @@ const envSchema = z
      */
     GRYPE_DB_UPDATE_URL: z.string().url().default("https://grype.anchore.io/databases"),
 
-    /** CA certificate for a mirror behind a TLS-inspecting proxy or a private CA. */
+    /**
+     * CA certificate for a mirror behind a TLS-inspecting proxy or a private CA.
+     *
+     * Usually unnecessary: leave it unset and drop the certificate into GRYPE_DB_CA_DIR
+     * instead, which is discovered automatically. Set this only to name one exact file.
+     */
     GRYPE_DB_CA_CERT: z.string().trim().optional().or(z.literal("").transform(() => undefined)),
+
+    /**
+     * Directory scanned for CA certificates when GRYPE_DB_CA_CERT is not set.
+     *
+     * Exists so installing a corporate CA is "drop the file in the folder" rather than
+     * "drop the file in the folder AND name it in an env file AND get the in-container path
+     * right". Every one of those steps was a place to get it wrong, and each failure looks
+     * identical from the UI: a TLS error that says nothing about which step was missed.
+     *
+     * Several certificates are concatenated into one bundle rather than one being chosen,
+     * because a corporate trust store commonly holds a handful with near-identical names and
+     * picking between them is guesswork the machine can avoid. Go accepts a bundle and tries
+     * all of them.
+     */
+    GRYPE_DB_CA_DIR: z.string().trim().default("/certs"),
 
     /**
      * Components per grype invocation.

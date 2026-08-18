@@ -74,8 +74,29 @@ function Invoke-Api {
     #>
     param([string[]]$CurlArgs)
 
-    $out = & curl.exe -s -w "`n$STATUS_MARKER%{http_code}" @CurlArgs
-    $text = ($out -join "`n")
+    <#
+      Retries on 429 rather than reporting it as a failed assertion.
+
+      The API allows 300 requests a minute and a full run comes close, so a suite run twice
+      in quick succession exhausts the budget somewhere in its tail. That surfaced as
+      "cleanup failed" with an empty list of leftovers -- a rate-limited GET returns an error
+      body with no `items`, and @($null) counts as one in PowerShell, so the check reported
+      stray data it could not name. Two misleading symptoms from one cause, neither of them
+      mentioning the limiter.
+
+      Handled here rather than at the call sites that happened to fail: the limiter applies
+      to every request, so which assertion trips it is a matter of timing. The API says how
+      long to wait, so this waits that long.
+    #>
+    for ($rlAttempt = 1; $rlAttempt -le 5; $rlAttempt++) {
+        $out = & curl.exe -s -w "`n$STATUS_MARKER%{http_code}" @CurlArgs
+        $text = ($out -join "`n")
+        if ($text -notmatch 'Rate limit exceeded') { break }
+        $rlWait = 5
+        if ($text -match 'retry in (\d+) second') { $rlWait = [int]$Matches[1] + 1 }
+        Write-Host "        rate limited; waiting $rlWait s (attempt $rlAttempt/5)" -ForegroundColor DarkGray
+        Start-Sleep -Seconds $rlWait
+    }
 
     $idx = $text.LastIndexOf($STATUS_MARKER)
     if ($idx -lt 0) {
@@ -2534,6 +2555,7 @@ try {
         $targets = @($r.Json.items | Where-Object { $_.name -like "smoke-test-app-*" -or $_.name -like "smoke-admin-app-*" })
         $ok = $true
         foreach ($t in $targets) {
+            # Invoke-Api absorbs 429 for every call site, including this one.
             $d = Invoke-Api @("-X", "DELETE", "$adminUrl/applications/$($t.id)", "-b", $readJar)
             if ($d.Status -ne 200) {
                 Write-Host "        could not delete $($t.name): $($d.Status) $($d.Body)" -ForegroundColor DarkYellow

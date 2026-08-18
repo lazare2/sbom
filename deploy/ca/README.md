@@ -1,10 +1,14 @@
 # Proxy / private CA certificates
 
-Drop your corporate root CA here as a PEM file, then point `GRYPE_DB_CA_CERT` at it:
+Drop your corporate root CA here as a PEM file. That is the whole procedure — it is found
+automatically and there is nothing to set in `.env`.
 
-```
-GRYPE_DB_CA_CERT=/certs/proxy-ca.crt
-```
+**Unsure which certificate?** Put them all in. Several files are concatenated into one
+bundle rather than one being chosen, because a Windows trust store commonly holds a handful
+named for the same organisation and only one of them signed the proxy. A root plus its
+intermediate works the same way: drop both in.
+
+Set `GRYPE_DB_CA_CERT` only if you want to name one exact file; it overrides discovery.
 
 This directory is bind-mounted read-only at `/certs` inside the API container. It exists so
 the mount always has a source: Compose cannot make a bind mount conditional, and a missing
