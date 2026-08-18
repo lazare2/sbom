@@ -48,3 +48,11 @@ playwright-report/
 test-results/
 # Reports rendered by the PDF endpoint while testing.
 estate-report.pdf
+
+# Certificates dropped in for a TLS-inspecting proxy. Not secrets -- a CA certificate is a
+# public key -- but they name internal infrastructure, and this repository is published, so
+# the default is not to carry someone's corporate root CA into it by accident. The folder
+# itself is tracked because the bind mount needs a source that always exists.
+deploy/ca/*
+!deploy/ca/.gitkeep
+!deploy/ca/README.md

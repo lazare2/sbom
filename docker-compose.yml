@@ -94,6 +94,19 @@ services:
       # Allow ~4 GB: the database is 1.9 GB expanded, and a replacement briefly holds
       # the old copy alongside the new archive and its expansion.
       - grype-db:/data/grype-db
+      # Read-only mount for a corporate / private CA, for GRYPE_DB_CA_CERT.
+      #
+      # A TLS-inspecting proxy re-signs every connection with its own authority, and grype
+      # trusts only the CAs it knows, so the download fails with "certificate signed by
+      # unknown authority" no matter how correct the proxy settings are. Pointing
+      # GRYPE_DB_CA_CERT at a path is not enough on its own -- the file has to exist inside
+      # the container, which is what this mount is for.
+      #
+      # The default source is a directory committed to the repository precisely so this
+      # mount always resolves: Compose cannot make a bind mount conditional, and a missing
+      # source is a hard startup failure rather than a skipped option. Empty by default,
+      # so it changes nothing until a certificate is put there.
+      - ${GRYPE_CA_DIR:-./deploy/ca}:/certs:ro
 
   web:
     build:
