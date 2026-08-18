@@ -10,6 +10,7 @@ import {
   type VulnScopeTotals,
 } from "@sbom/shared";
 import { formatNumber, formatRelative } from "../lib/format.ts";
+import { useClientSort } from "../lib/useSort.ts";
 import { SeverityBar } from "./Severity.tsx";
 import { Badge, Card, CardHeader, EmptyState, Mono, Table, TableWrap, Td, Th, Tr } from "./ui.tsx";
 
@@ -254,7 +255,7 @@ function UnfilteredReference({
   );
 }
 
-/** Top 10 vulnerable applications, ranked on one half of the split. */
+/** The worst applications by findings, sortable within that ranked set. */
 export function TopVulnerableApplicationsCard({ report }: { report: VulnerabilityReport }) {
   const rows = report.topVulnerableApplications;
   const rankedByBaseImage = rows[0]?.rankedBy === "os";
@@ -262,15 +263,53 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
     (acc, row) => Math.max(acc, (rankedByBaseImage ? row.baseImageFindings : row.findings) ?? 0),
     0,
   );
+  /*
+    The server sends its worst N by findings, not a window onto the estate, and sorting
+    reorders exactly those N rows. That distinction has to survive into the UI: sorted
+    ascending this table shows the *least vulnerable of the worst N*, which reads as "our
+    safest applications" and is the precise opposite of the truth. Hence the count in the
+    title and the note in the subtitle — the sort is honest only while its scope is visible.
+  */
+  const capNote =
+    rows.length > 0
+      ? ` Sorting reorders these ${rows.length} rows; it does not rank the whole estate.`
+      : "";
+  const sort = useClientSort(
+    rows,
+    {
+      application: "text",
+      findings: "number",
+      critical: "number",
+      high: "number",
+      fixable: "number",
+    } as const,
+    // Findings descending is the order the server ranked by, so the table opens exactly
+    // as it did before it became sortable.
+    { sortBy: "findings" },
+    (row, field) =>
+      field === "application"
+        ? row.name
+        : field === "findings"
+          ? // The ranked half, matching the server's ORDER BY. Null stays null rather than
+            // collapsing to 0 so an unscanned application sorts last in both directions
+            // instead of impersonating a clean one.
+            (rankedByBaseImage ? row.baseImageFindings : row.findings)
+          : field === "critical"
+            ? row.critical
+            : field === "high"
+              ? row.high
+              : row.fixable,
+    (row) => row.applicationId,
+  );
 
   return (
     <Card>
       <CardHeader
-        title="Most vulnerable applications"
+        title={`Vulnerable Applications${rows.length > 0 ? ` · top ${rows.length}` : ""}`}
         subtitle={
           rankedByBaseImage
-            ? "Ranked by base-image findings, because the filter excluded application dependencies. Every count on a row is base-image only."
-            : "Ranked by findings in their own dependencies. Base-image findings are shown alongside but do not affect the order — including them would rank base-image age instead."
+            ? `Ranked by base-image findings, because the filter excluded application dependencies. Every count on a row is base-image only.${capNote}`
+            : `Ranked by findings in their own dependencies. Base-image findings are shown alongside but do not affect the order — including them would rank base-image age instead.${capNote}`
         }
       />
       {rows.length === 0 ? (
@@ -288,26 +327,51 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
           <Table>
             <thead>
               <tr>
-                <Th>Application</Th>
+                <Th onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
+                  Application
+                </Th>
                 {/*
                   One column, not two. The two numbers are read as a pair — "38 of its own,
                   28 from the image" — and two separate columns invited them to be added
-                  together, which is the one thing the split exists to prevent.
+                  together, which is the one thing the split exists to prevent. Sorting it
+                  sorts the ranked half alone, for the same reason: a sort that silently
+                  used the sum would rank base-image age, which is what the split prevents.
                 */}
-                <Th width="170px">Findings (app / base image)</Th>
-                <Th align="right" width="70px">
+                <Th
+                  onSort={() => sort.toggle("findings")}
+                  sorted={sort.stateOf("findings")}
+                  width="170px"
+                >
+                  Findings (app / base image)
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("critical")}
+                  sorted={sort.stateOf("critical")}
+                  align="right"
+                  width="70px"
+                >
                   Crit
                 </Th>
-                <Th align="right" width="70px">
+                <Th
+                  onSort={() => sort.toggle("high")}
+                  sorted={sort.stateOf("high")}
+                  align="right"
+                  width="70px"
+                >
                   High
                 </Th>
-                <Th align="right" width="90px">
+                <Th
+                  onSort={() => sort.toggle("fixable")}
+                  sorted={sort.stateOf("fixable")}
+                  align="right"
+                  width="90px"
+                >
                   Fixable
                 </Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {sort.rows.map((row) => {
                 const ranked = (rankedByBaseImage ? row.baseImageFindings : row.findings) ?? 0;
                 return (
                   <Tr key={row.applicationId}>
@@ -380,20 +444,54 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
   );
 }
 
-/** Top 10 vulnerable packages in current use. */
+/** The worst packages in current use by advisory count, sortable within that ranked set. */
 export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityReport }) {
   const rows = report.topVulnerablePackages;
   const baseImageList = rows[0]?.baseImage === true;
+  /* Same capped-ranking caveat as the applications card above. */
+  const capNote =
+    rows.length > 0
+      ? ` Sorting reorders these ${rows.length} rows; it does not rank every package in use.`
+      : "";
+  const sort = useClientSort(
+    rows,
+    {
+      package: "text",
+      version: "text",
+      findings: "number",
+      critical: "number",
+      applications: "number",
+      fixedIn: "text",
+    } as const,
+    // Advisory count descending — the order the server ranked by.
+    { sortBy: "findings" },
+    (row, field) =>
+      field === "package"
+        ? row.name
+        : field === "version"
+          ? row.version
+          : field === "findings"
+            ? row.findings
+            : field === "critical"
+              ? row.critical
+              : field === "applications"
+                ? row.applications
+                : // Undefined when there is no published fix, which sorts last in both
+                  // directions — so this column answers "what can we actually fix" rather
+                  // than burying the fixable rows among the ones with nowhere to go.
+                  row.fixVersions[0],
+    (row) => row.componentId,
+  );
 
   return (
     <Card>
       <CardHeader
-        title="Most vulnerable packages in use"
+        title={`Vulnerable Packages${rows.length > 0 ? ` · top ${rows.length}` : ""}`}
         subtitle={`${
           baseImageList
             ? "Base-image packages present in some current build"
             : "Application dependencies present in some current build"
-        }, by number of distinct advisories against that exact version. The application count is the blast radius of fixing it.`}
+        }, by number of distinct advisories against that exact version. The application count is the blast radius of fixing it.${capNote}`}
       />
       {rows.length === 0 ? (
         <EmptyState
@@ -408,22 +506,43 @@ export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityRep
           <Table>
             <thead>
               <tr>
-                <Th>Package</Th>
-                <Th width="150px">Version</Th>
-                <Th align="right" width="100px">
+                <Th onSort={() => sort.toggle("package")} sorted={sort.stateOf("package")}>
+                  Package
+                </Th>
+                <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")} width="150px">
+                  Version
+                </Th>
+                <Th
+                  onSort={() => sort.toggle("findings")}
+                  sorted={sort.stateOf("findings")}
+                  align="right"
+                  width="100px"
+                >
                   Advisories
                 </Th>
-                <Th align="right" width="70px">
+                <Th
+                  onSort={() => sort.toggle("critical")}
+                  sorted={sort.stateOf("critical")}
+                  align="right"
+                  width="70px"
+                >
                   Crit
                 </Th>
-                <Th align="right" width="80px">
+                <Th
+                  onSort={() => sort.toggle("applications")}
+                  sorted={sort.stateOf("applications")}
+                  align="right"
+                  width="80px"
+                >
                   Apps
                 </Th>
-                <Th width="150px">Fixed in</Th>
+                <Th onSort={() => sort.toggle("fixedIn")} sorted={sort.stateOf("fixedIn")} width="150px">
+                  Fixed in
+                </Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {sort.rows.map((row) => (
                 <Tr key={row.componentId}>
                   <Td>
                     <Link

@@ -811,8 +811,15 @@ if (swept) {
   log("22e. overview and analytics carry the vulnerability sections");
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1200);
-  await expectText("Most vulnerable applications");
-  await expectText("Most vulnerable packages in use");
+  await expectText("Vulnerable Applications");
+  await expectText("Vulnerable Packages");
+  /*
+    The row count in the title. These tables are the server's worst N, and sorting reorders
+    only those N — so ascending shows the least vulnerable *of the worst N*. Without the cap
+    on screen that reads as "our safest applications", so the cap is a correctness assertion
+    rather than a cosmetic one.
+  */
+  await expectText("\u00b7 top ", "the row cap that stops an ascending sort reading as an estate ranking");
   // The combined total, then the split that explains it. All three have to be present:
   // the total alone would be a base-image-age figure wearing a dependency label.
   await expectText("vulnerability findings in total");
@@ -1043,18 +1050,40 @@ log("24. dark colour scheme");
   screen reader gets, so a passing check means the control is announced correctly too — and
   it does not break the next time the arrows are restyled.
 */
-async function driveSort(route, headerName, { expectRowsChange = true } = {}) {
+async function driveSort(route, headerName, { expectRowsChange = true, markerColumn = null } = {}) {
   await page.goto(`${BASE}${route}`, { waitUntil: "networkidle" });
   await page.locator("tbody tr").first().waitFor({ timeout: 15000 });
 
-  const header = page.getByRole("columnheader", { name: new RegExp(headerName, "i") }).first();
+  /*
+    The overview and analytics pages carry several tables at once, and they share column
+    names — "Package" and "Apps" each appear in two of them. Unscoped, the lookup would
+    take whichever header came first in the DOM and then compare row text from every table
+    on the page, so a sort that worked would look broken and a broken one could look fine.
+    `markerColumn` names a column unique to the intended table and scopes both to it.
+  */
+  const scope = markerColumn
+    ? page
+        .locator("table")
+        .filter({ has: page.getByRole("columnheader", { name: new RegExp(markerColumn, "i") }) })
+        .first()
+    : page;
+  const label = markerColumn ? `${route} [${markerColumn}]` : route;
+  if (markerColumn) {
+    if ((await scope.count()) === 0) {
+      problems.push(`no table on ${route} has a "${markerColumn}" column`);
+      return;
+    }
+    await scope.locator("tbody tr").first().waitFor({ timeout: 15000 });
+  }
+
+  const header = scope.getByRole("columnheader", { name: new RegExp(headerName, "i") }).first();
   const button = header.getByRole("button").first();
   if ((await button.count()) === 0) {
-    problems.push(`"${headerName}" on ${route} has no sort button`);
+    problems.push(`"${headerName}" on ${label} has no sort button`);
     return;
   }
 
-  const rowsNow = () => page.locator("tbody tr").evaluateAll((trs) => trs.map((tr) => tr.textContent).join("|"));
+  const rowsNow = () => scope.locator("tbody tr").evaluateAll((trs) => trs.map((tr) => tr.textContent).join("|"));
   const sortState = () => header.getAttribute("aria-sort");
 
   const before = await rowsNow();
@@ -1068,7 +1097,7 @@ async function driveSort(route, headerName, { expectRowsChange = true } = {}) {
   const afterFirst = await rowsNow();
 
   if (firstDir !== "ascending" && firstDir !== "descending") {
-    problems.push(`"${headerName}" on ${route} did not report a sort direction (aria-sort=${firstDir})`);
+    problems.push(`"${headerName}" on ${label} did not report a sort direction (aria-sort=${firstDir})`);
     return;
   }
 
@@ -1080,7 +1109,7 @@ async function driveSort(route, headerName, { expectRowsChange = true } = {}) {
   const afterSecond = await rowsNow();
 
   if (secondDir === firstDir) {
-    problems.push(`"${headerName}" on ${route} did not reverse on a second click (still ${secondDir})`);
+    problems.push(`"${headerName}" on ${label} did not reverse on a second click (still ${secondDir})`);
   }
   /*
     Row text must actually change between the two directions. This is the assertion that
@@ -1089,10 +1118,10 @@ async function driveSort(route, headerName, { expectRowsChange = true } = {}) {
     Skipped where the table is too short or too uniform for a reversal to be visible.
   */
   if (expectRowsChange && afterFirst === afterSecond && afterFirst.includes("|")) {
-    problems.push(`"${headerName}" on ${route} flipped its caret but did not reorder any rows`);
+    problems.push(`"${headerName}" on ${label} flipped its caret but did not reorder any rows`);
   }
   log(
-    `  OK   ${route} "${headerName}": ${initial ?? "none"} -> ${firstDir} -> ${secondDir}` +
+    `  OK   ${label} "${headerName}": ${initial ?? "none"} -> ${firstDir} -> ${secondDir}` +
       `${before === afterFirst ? " (rows unchanged on first click)" : ""}`,
   );
 }
@@ -1107,6 +1136,55 @@ await driveSort("/admin/users", "Identifier", { expectRowsChange: false });
 await driveSort("/admin/audit", "Action");
 await driveSort("/admin/tokens", "Name", { expectRowsChange: false });
 await driveSort("/analytics", "Ecosystem");
+
+/*
+  The two vulnerability rankings. Both are one shared component that the overview and the
+  analytics page each render, so the full click cycle runs here against the overview copy
+  and the analytics copy is checked for the controls themselves below — that pair catches a
+  page that stopped sharing the component without doubling the runtime.
+
+  "Application" and "Package" are text columns (first click ascending); "Fixable" and
+  "Advisories" are numeric (first click descending). Driving one of each proves the
+  type-aware first direction reaches these tables and not just the paginated ones.
+*/
+await driveSort("/", "Application", { markerColumn: "Findings \\(app / base image\\)" });
+/*
+  "Fixable" rather than "Crit" for the numeric case. Critical counts are 0 on every row of
+  the seeded estate, and reversing a uniform column legitimately cannot reorder anything —
+  equal values fall through to the tiebreaker, which stays ascending in both directions by
+  design. Asserting a reordering there would be a claim about the fixture, not the control.
+  Crit is still driven, for its caret and its announcement, with that assertion off.
+*/
+await driveSort("/", "Fixable", { markerColumn: "Findings \\(app / base image\\)" });
+await driveSort("/", "Crit", {
+  markerColumn: "Findings \\(app / base image\\)",
+  expectRowsChange: false,
+});
+await driveSort("/", "Advisories", { markerColumn: "Advisories" });
+await driveSort("/", "Package", { markerColumn: "Advisories" });
+
+// The analytics copy of the same two cards must expose the same controls.
+await page.goto(`${BASE}/analytics`, { waitUntil: "networkidle" });
+await page.waitForTimeout(2000);
+for (const [title, marker] of [
+  ["Vulnerable Applications", "Findings \\(app / base image\\)"],
+  ["Vulnerable Packages", "Advisories"],
+]) {
+  const table = page
+    .locator("table")
+    .filter({ has: page.getByRole("columnheader", { name: new RegExp(marker, "i") }) })
+    .first();
+  if ((await table.count()) === 0) {
+    log(`  note: ${title} has no rows on /analytics, so its headers cannot be checked`);
+    continue;
+  }
+  const buttons = await table.locator("thead button").count();
+  if (buttons === 0) {
+    problems.push(`${title} on /analytics renders no sort buttons`);
+  } else {
+    log(`  OK   /analytics ${title}: ${buttons} sortable headers`);
+  }
+}
 
 // The neutral state: a column nobody has clicked must announce itself as unsorted, or the
 // caret is decoration rather than state.

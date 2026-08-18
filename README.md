@@ -267,11 +267,21 @@ Natural direction comes from the column's type, declared once per table in
 dates open at the largest and newest. That is the click that answers the question the column
 is usually opened for.
 
-Two things are deliberately not sortable. The Analytics **Top 10** rankings and the
-`critical → low` severity breakdowns already carry their meaning in their order, and
-alphabetising a ranking destroys the thing it is showing. Free-text and composite cells —
-an audit entry's jsonb detail, a list of versions, a `name + version` tool cell — have no
-single value to order by.
+Two things are deliberately not sortable. The `critical → low` severity breakdowns already
+carry their meaning in their order, and reordering one destroys the thing it is showing.
+Free-text and composite cells — an audit entry's jsonb detail, a list of versions, a
+`name + version` tool cell — have no single value to order by.
+
+The **Vulnerable Applications** and **Vulnerable Packages** rankings sort, but they are a
+case worth stating plainly, because the obvious implementation is wrong. The server sends
+only its worst N rows, so sorting reorders those N and nothing else: ascending shows the
+least vulnerable **of the worst N**, which reads as "our safest applications" and is the
+opposite of the truth. Both titles therefore carry the row count — `Vulnerable Applications
+· top 10` — and both subtitles say outright that the sort does not rank the estate. The cap
+is part of the answer rather than decoration; without it on screen, one click turns a
+ranking into a claim it cannot support. Sorting the merged `38 / 28` findings column orders
+on the ranked half alone, for the same reason the column is merged: a sort on the sum would
+rank base-image age.
 
 Underneath, the split matters more than the arrows. A **paginated** table must sort
 server-side: reordering the 50 rows on screen while the other 4,000 stay put is a control
@@ -769,7 +779,7 @@ findings, 2,817 of them (99%) from base-image OS packages.**
 The dashboards show a combined total *and* the split, with the split given the visual
 weight — the combined figure is the one that gets quoted in a meeting, and on a typical
 estate it is mostly a statement about base-image age. **No ranking is ever computed on the
-combined figure**: "most vulnerable applications" ranks on application dependencies (or on
+combined figure**: **Vulnerable Applications** ranks on application dependencies (or on
 base image alone, if the filter excludes dependencies), because ranking on the sum would
 order applications by base-image age and bury the handful of findings a team actually chose
 and can act on. Each row shows both halves in one column — `38 / 28` — so the pair reads as
