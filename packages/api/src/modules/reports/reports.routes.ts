@@ -21,7 +21,26 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return reply.send(await reports.get(id));
+    const { run, delta } = await reports.get(id);
+    return reply.send({ run, delta });
+  });
+
+  /**
+   * The report as a PDF.
+   *
+   * A path ending in `.pdf` rather than content negotiation on the route above: this link
+   * gets pasted into a browser, forwarded, and saved to disk, and all three work better when
+   * the URL itself says what comes back.
+   */
+  fastify.get("/:id.pdf", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const { buffer, filename } = await reports.pdf(id);
+
+    return reply
+      .header("Content-Type", "application/pdf")
+      .header("Content-Disposition", `attachment; filename="${filename}"`)
+      .header("Content-Length", String(buffer.length))
+      .send(buffer);
   });
 
   /**

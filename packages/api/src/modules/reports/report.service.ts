@@ -8,9 +8,12 @@ import {
   type ReportSnapshot,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
+import type { BlobStore } from "../../services/blob-store/index.js";
 import { ConflictError, isPgError, NotFoundError, PG_UNIQUE_VIOLATION } from "../../lib/errors.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
 import { computeDelta } from "./delta.js";
+import { renderMonthlyReportPdf } from "./monthly-pdf.js";
+import { buildMonthlyView } from "./monthly-view.js";
 import { currentMonthPeriod, previousMonthPeriod, type ReportPeriod } from "./period.js";
 import type { SnapshotService } from "./snapshot.service.js";
 
@@ -38,9 +41,12 @@ export interface GenerateOptions {
   actor?: { id: string; email: string } | undefined;
 }
 
-/** A report plus the snapshot the renderer needs. The snapshot never crosses the wire. */
+/** A report plus the snapshots the renderer needs. Neither snapshot crosses the wire. */
 export interface LoadedReport extends ReportDetail {
   snapshot: ReportSnapshot;
+  /** The snapshot this was compared against, so the renderer can show per-application
+   * movement. Absent for the first report in the series. */
+  baselineSnapshot?: ReportSnapshot | undefined;
 }
 
 export interface GenerateResult extends LoadedReport {
@@ -75,6 +81,7 @@ export class ReportService {
   constructor(
     private readonly deps: {
       db: Database;
+      blobStore: BlobStore;
       snapshots: SnapshotService;
     },
   ) {}
@@ -135,6 +142,7 @@ export class ReportService {
       run: this.summaryOf(inserted, snapshot),
       delta,
       snapshot,
+      baselineSnapshot: baseline?.snapshot,
       alreadyExisted: false,
     };
   }
@@ -168,11 +176,44 @@ export class ReportService {
     return this.detailOf(run);
   }
 
-  /** The stored PDF's blob key, or null when this run has not been rendered. */
-  async pdfKeyOf(id: string): Promise<{ key: string | null; run: ReportRunSummary }> {
-    const run = await this.findById(id);
-    if (!run) throw new NotFoundError("Report");
-    return { key: run.pdf_blob_key, run: this.summaryOf(run, run.snapshot) };
+  /**
+   * The report as a PDF, rendered once and stored.
+   *
+   * Rendered from the stored snapshot rather than from a fresh query, so the file downloaded
+   * a year from now is the file that was emailed. Cached in the blob store because the
+   * emailed attachment and the downloaded copy must be the same bytes: re-rendering per
+   * request would produce documents that differ in their creation timestamp, which is
+   * exactly the kind of discrepancy that costs an afternoon when someone compares two copies.
+   */
+  async pdf(id: string): Promise<{ buffer: Buffer; filename: string; run: ReportRunSummary }> {
+    const loaded = await this.get(id);
+    const filename = `sbom-monthly-report-${loaded.run.periodLabel}.pdf`;
+
+    if (loaded.run.hasPdf) {
+      const key = (await this.findById(id))?.pdf_blob_key;
+      if (key) {
+        try {
+          return { buffer: await this.deps.blobStore.get(key), filename, run: loaded.run };
+        } catch {
+          // The row says it was stored and the store disagrees. Re-render rather than fail:
+          // the snapshot is the authority, and the blob is only a cache of it.
+        }
+      }
+    }
+
+    const view = buildMonthlyView({
+      run: loaded.run,
+      snapshot: loaded.snapshot,
+      delta: loaded.delta,
+      baseline: loaded.baselineSnapshot,
+    });
+    const buffer = await renderMonthlyReportPdf(view);
+
+    const key = `report/${loaded.run.periodLabel}/${loaded.run.id}.pdf`;
+    await this.deps.blobStore.put(key, buffer);
+    await this.attachPdf(loaded.run.id, key);
+
+    return { buffer, filename, run: { ...loaded.run, hasPdf: true } };
   }
 
   /**
@@ -199,10 +240,12 @@ export class ReportService {
   private async detailOf(run: StoredRun): Promise<LoadedReport> {
     const snapshot = run.snapshot;
     let delta: ReportDelta | null = null;
+    let baselineSnapshot: ReportSnapshot | undefined;
 
     if (run.baseline_run_id) {
       const baseline = await this.findById(run.baseline_run_id);
       if (baseline) {
+        baselineSnapshot = baseline.snapshot;
         const previous = baseline.baseline_run_id
           ? await this.findById(baseline.baseline_run_id)
           : null;
@@ -210,7 +253,7 @@ export class ReportService {
       }
     }
 
-    return { run: this.summaryOf(run, snapshot), delta, snapshot };
+    return { run: this.summaryOf(run, snapshot), delta, snapshot, baselineSnapshot };
   }
 
   private summaryOf(row: RunRow, snapshot: ReportSnapshot): ReportRunSummary {

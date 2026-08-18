@@ -144,7 +144,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const analytics = new AnalyticsService({ db, config, dashboard, settings, vulnReport });
 
   const snapshots = new SnapshotService({ db });
-  const reports = new ReportService({ db, snapshots });
+  const reports = new ReportService({ db, blobStore, snapshots });
 
   // Vulnerability scanning. The scanner is a port so the wiring tests can supply a
   // fake and never spawn grype.
