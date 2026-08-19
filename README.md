@@ -1231,9 +1231,16 @@ application name to image reference, and for each entry runs `docker pull`, then
 ```python
 IMAGES = {
     "checkout-web":   "registry.example.com/checkout/web:1.4.2",
-    "payments-api":   "registry.example.com/payments/api:3.0.1",
+    "payments-api":   "docker pull registry.example.com/payments/api:3.0.1",
 }
 ```
+
+The value can be a bare reference or the whole `docker pull ...` command, so a list
+pasted from a runbook works unedited. Flags survive and reach the pull —
+`docker pull --platform linux/amd64 nginx:1.27` does what it reads as — while the
+reference alone is what gets scanned and recorded on the build, because
+`--platform` describes how the image was fetched, not which image it is. The
+reference must be the last word, which is where docker wants it anyway.
 
 ```bash
 export SBOM_API_URL=https://sbom.example.com

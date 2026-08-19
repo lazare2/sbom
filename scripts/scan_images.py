@@ -9,6 +9,12 @@ platform to the image reference to scan:
         "checkout-web": "registry.example.com/checkout/web:1.4.2",
     }
 
+The value may be a bare reference as above, or the whole command as you would type
+it -- `docker pull registry.example.com/checkout/web:1.4.2`. Both are accepted, so
+a list pasted from a runbook works unedited. Any flags survive and are passed to
+the pull (`docker pull --platform linux/amd64 nginx:1.27` does what it says); the
+image reference itself must be the last word.
+
 Then:
 
     set SBOM_INGEST_TOKEN=<token from Admin -> Ingest tokens>
@@ -44,6 +50,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -57,14 +64,15 @@ from typing import Dict, List, Optional, Tuple
 # What to scan
 # ---------------------------------------------------------------------------
 # key   = application name on the SBOM platform (created on first upload)
-# value = image reference to pull and scan
+# value = the image to pull and scan, either as a bare reference or as the full
+#         `docker pull ...` command -- see parse_target() for what is accepted
 #
 # Prefer an explicit tag or a digest over `:latest`. The platform records this
 # reference on the scan, and a moving tag makes a build's provenance unreproducible
 # -- "we scanned nginx:latest" does not say what was actually scanned.
 IMAGES: Dict[str, str] = {
     "example-api": "nginx:1.27-alpine",
-    "example-worker": "redis:7.4-alpine",
+    "example-worker": "docker pull redis:7.4-alpine",
 }
 
 # ---------------------------------------------------------------------------
@@ -127,8 +135,62 @@ def run(cmd: List[str], timeout: int, capture_stdout: bool) -> bytes:
     return proc.stdout or b""
 
 
-def pull(image: str) -> None:
-    run([DOCKER_BIN, "pull", image], PULL_TIMEOUT_SECONDS, capture_stdout=True)
+def parse_target(value: str) -> Tuple[str, List[str]]:
+    """
+    Split a dictionary value into the image reference and any pull flags.
+
+    Both of these mean the same thing:
+
+        "nginx:1.27-alpine"
+        "docker pull nginx:1.27-alpine"
+
+    Accepting the command form is not a convenience for its own sake. Image lists
+    arrive pasted from runbooks, tickets and chat messages, where they are written
+    as the command someone ran; requiring each line to be stripped back to a bare
+    reference is an editing pass over forty entries that will occasionally take a
+    character with it.
+
+    Flags are preserved and handed to the pull, so `docker pull --platform
+    linux/amd64 nginx:1.27` does what it reads as. Only the bare reference is used
+    for the scan and recorded on the upload, because `--platform` describes how the
+    image was fetched, not which image it is.
+
+    The reference is taken to be the LAST word, which is where docker requires the
+    positional argument to sit anyway.
+    """
+    try:
+        tokens = shlex.split(value.strip())
+    except ValueError as err:
+        # Unbalanced quotes. Left to the caller to report against the entry.
+        raise StepError("cannot parse %r: %s" % (value, err))
+
+    if not tokens:
+        raise StepError("empty image reference")
+
+    # Strip a leading `docker pull` / `docker image pull`, however docker was spelled.
+    if tokens[0].lower().replace(".exe", "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1] == "docker":
+        tokens = tokens[1:]
+        if tokens[:1] == ["image"]:
+            tokens = tokens[1:]
+        if tokens[:1] == ["pull"]:
+            tokens = tokens[1:]
+        else:
+            raise StepError("expected `docker pull ...` in %r" % value)
+
+    if not tokens:
+        raise StepError("no image reference in %r" % value)
+
+    image = tokens[-1]
+    if image.startswith("-"):
+        # Otherwise a trailing flag would be pulled as though it were an image, and
+        # the error would come back from docker naming something the user never typed.
+        raise StepError("the image reference must come last in %r" % value)
+
+    return image, tokens[:-1]
+
+
+def pull(image: str, flags: List[str]) -> None:
+    run([DOCKER_BIN, "pull"] + flags + [image], PULL_TIMEOUT_SECONDS, capture_stdout=True)
 
 
 def resolve_digest(image: str) -> Optional[str]:
@@ -293,7 +355,7 @@ def preflight(skip_pull: bool) -> List[str]:
     if not IMAGES:
         problems.append("the IMAGES dictionary is empty -- add entries at the top of this file")
 
-    for name in IMAGES:
+    for name, value in IMAGES.items():
         # Checked here rather than left to a 400 from the server, because a blank
         # or control-character name is nearly always a copy-paste artefact and the
         # server's rejection arrives after a pull and a scan have already run.
@@ -301,6 +363,14 @@ def preflight(skip_pull: bool) -> List[str]:
             problems.append("an entry has a blank application name")
         elif any(ord(ch) < 32 for ch in name):
             problems.append("application name %r contains control characters" % name)
+
+        # Same reasoning applied to the value: an unparseable entry halfway down the
+        # dictionary should be reported now, not after thirty images have been
+        # pulled and scanned.
+        try:
+            parse_target(value)
+        except StepError as err:
+            problems.append("%s: %s" % (name, err))
     return problems
 
 
@@ -340,14 +410,17 @@ def main() -> int:
     failed: List[Tuple[str, str]] = []
     created: List[str] = []
 
-    for index, (app_name, image) in enumerate(targets.items(), start=1):
-        print("[%d/%d] %s  <-  %s" % (index, len(targets), app_name, image))
+    for index, (app_name, value) in enumerate(targets.items(), start=1):
+        print("[%d/%d] %s  <-  %s" % (index, len(targets), app_name, value))
         try:
+            # Both `nginx:1.27` and `docker pull nginx:1.27` are accepted, so the
+            # reference is extracted here rather than assumed to be the raw value.
+            image, pull_flags = parse_target(value)
             if args.no_pull:
                 print("      skipping pull")
             else:
-                print("      pulling")
-                pull(image)
+                print("      pulling %s" % image)
+                pull(image, pull_flags)
                 digest = resolve_digest(image)
                 if digest:
                     print("      digest %s" % digest)
