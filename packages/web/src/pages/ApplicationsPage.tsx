@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
-import type { ApplicationStatus, PlatformBreakdown } from "@sbom/shared";
+import type { ApplicationStatus, ApplicationSummary, PlatformBreakdown } from "@sbom/shared";
 import { applicationSort, sortDirections } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
 import {
@@ -8,8 +8,10 @@ import {
   useAttributeDefinitions,
   useAttributeValues,
   usePlatformBreakdown,
+  useVulnStatus,
 } from "../lib/queries.ts";
 import { osLabel, PlatformChips, runtimeLabel } from "../components/Platform.tsx";
+import { CriticalHighBadges } from "../components/Severity.tsx";
 import { formatDateTime, formatNumber, formatRelative, humanizeKey } from "../lib/format.ts";
 import { readBool, readEnum, readEnumList, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
@@ -142,6 +144,18 @@ export function ApplicationsPage() {
   // Filter options come from what actually exists in current builds, so the
   // dropdown never offers a distro nothing runs, nor omits one that something does.
   const platforms = usePlatformBreakdown();
+
+  /*
+    The findings column exists only while scanning is on. Hidden rather than shown empty:
+    a permanently blank column reads as a broken feature, whereas its absence matches a
+    platform that is deliberately inventory-only.
+
+    Strict `=== true` because this is undefined while the status request is in flight. An
+    optimistic `!== false` would render the column, then remove it a moment later and shift
+    every other column sideways as the answer arrives.
+  */
+  const vulnStatus = useVulnStatus();
+  const showFindings = vulnStatus.data?.enabled === true;
 
   function toggleStatus(status: ApplicationStatus) {
     const next = state.status.includes(status)
@@ -351,6 +365,16 @@ export function ApplicationsPage() {
                     >
                       Components
                     </Th>
+                    {showFindings ? (
+                      <Th
+                        onSort={() => sort.toggle("vulnFindings")}
+                        sorted={sort.stateOf("vulnFindings")}
+                        align="right"
+                        width="170px"
+                      >
+                        Findings
+                      </Th>
+                    ) : null}
                     <Th
                       onSort={() => sort.toggle("scanCount")}
                       sorted={sort.stateOf("scanCount")}
@@ -399,6 +423,11 @@ export function ApplicationsPage() {
                       <Td align="right" className="nums text-text-muted">
                         {formatNumber(app.latestComponentCount)}
                       </Td>
+                      {showFindings ? (
+                        <Td align="right">
+                          <FindingsCell app={app} />
+                        </Td>
+                      ) : null}
                       <Td align="right" className="nums text-text-muted">
                         {formatNumber(app.scanCount)}
                       </Td>
@@ -481,6 +510,59 @@ function runtimeFilterOptions(
     }
   }
   return options;
+}
+
+/**
+ * Findings of the application's current build: the total, then the split beneath it.
+ *
+ * Three states that are not zero, and keeping them apart is the entire point of this cell:
+ *
+ *   - never scanned            -> em dash. There is no build to assess.
+ *   - scanned, not yet matched -> "not assessed". Every scan ingested before scanning was
+ *                                 switched on is in this state, as is anything awaiting the
+ *                                 next sweep.
+ *   - matched, nothing found   -> "0", with "clean" beneath it. A real result.
+ *
+ * Rendering either of the first two as `0` would report a clean bill of health that nobody
+ * issued, against an estate nobody looked at. That is the worst thing this page could say, and
+ * it is one `?? 0` away at all times.
+ *
+ * The split is shown rather than the total alone because the total is not actionable on its
+ * own: base-image packages outnumber application dependencies by around a hundred to one, so
+ * two applications with identical totals can be a neglected lockfile and a stale base image,
+ * which are different problems with different owners.
+ */
+function FindingsCell({ app }: { app: ApplicationSummary }) {
+  const counts = app.vulnerabilities;
+
+  if (counts === null) {
+    return app.latestScanId === null ? (
+      <span className="text-text-faint">—</span>
+    ) : (
+      <span
+        className="text-xs text-text-faint"
+        title="This build has not been matched against the vulnerability database yet. This is not the same as having no findings."
+      >
+        not assessed
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <div className="flex items-center gap-1.5">
+        <span className="nums font-medium">{formatNumber(counts.total)}</span>
+        <CriticalHighBadges critical={counts.critical} high={counts.high} />
+      </div>
+      {counts.total === 0 ? (
+        <span className="text-[11px] text-text-faint">clean</span>
+      ) : (
+        <span className="nums text-[11px] text-text-faint">
+          {formatNumber(counts.app)} app · {formatNumber(counts.os)} image
+        </span>
+      )}
+    </div>
+  );
 }
 
 /** Severity is a known select attribute, so it gets meaningful colour. */

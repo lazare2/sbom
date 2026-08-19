@@ -58,6 +58,14 @@ export const applicationSort = defineSortTable(
     status: "text",
     platform: "text",
     componentCount: "number",
+    /**
+     * Combined findings of the current build, application dependencies plus base image.
+     *
+     * Sorts on the total rather than on either half because the column displays the total.
+     * Applications whose current build has not been matched against the database sort last
+     * in both directions — see `directionNullsLast` at the query site.
+     */
+    vulnFindings: "number",
     scanCount: "number",
     lastScanAt: "date",
     createdAt: "date",
@@ -109,6 +117,28 @@ export const listApplicationsQuerySchema = paginationQuerySchema.extend({
 }).merge(applicationSort.querySchema);
 export type ListApplicationsQuery = z.infer<typeof listApplicationsQuerySchema>;
 
+/**
+ * Vulnerability findings of an application's current build.
+ *
+ * Both halves are carried alongside the total because the ratio between them is the point.
+ * Measured on a realistic container SBOM, 2,817 of 2,845 findings came from base-image OS
+ * packages — so an application showing 2,829 with 12 from its own dependencies and one
+ * showing 2,829 with 800 from its own dependencies are entirely different problems wearing
+ * the same number, and only the split tells them apart.
+ *
+ * `critical` and `high` span both halves, matching `total`.
+ */
+export interface ApplicationVulnCounts {
+  /** `app + os`. */
+  total: number;
+  /** Findings in dependencies the application chose. The half a squad can act on. */
+  app: number;
+  /** Findings in base-image and runtime packages. Fixed by rebuilding, not by a lockfile. */
+  os: number;
+  critical: number;
+  high: number;
+}
+
 export interface ApplicationSummary {
   id: string;
   name: string;
@@ -118,6 +148,18 @@ export interface ApplicationSummary {
   lastScanAt: string | null;
   /** Component count of the latest scan; null when the app has never been scanned. */
   latestComponentCount: number | null;
+  /**
+   * Findings of the CURRENT build, or null when the number is not known.
+   *
+   * Null covers three situations that must never collapse into zero: vulnerability scanning
+   * is switched off, the application has never been scanned, or its latest scan has not yet
+   * been matched against the database. Zero means matched and clean — a far stronger claim,
+   * and the one this field must never make by accident.
+   *
+   * Callers distinguish "never scanned" from "not assessed" through `latestScanId`, which is
+   * null only in the former case.
+   */
+  vulnerabilities: ApplicationVulnCounts | null;
   scanCount: number;
   isStale: boolean;
   createdAt: string;

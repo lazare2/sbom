@@ -111,6 +111,35 @@ export function SeverityBar({
 }
 
 /** Inline "C 3 · H 11 · M 20" summary, for places a bar has no room. */
+/**
+ * Just the critical and high counts, for places too narrow for a full breakdown.
+ *
+ * Lives here rather than at the call site so the tones stay governed by `SEVERITY_TONE` —
+ * both are `danger`, which is deliberate: a reader scanning a column by colour should see one
+ * signal for "act on this", and the letter distinguishes which. Splitting them into two
+ * colours here would quietly contradict every other severity display in the app.
+ *
+ * A zero is omitted rather than shown as "0 critical". The row already carries the total, so
+ * an empty space means "none of these" without spending width to say it.
+ */
+export function CriticalHighBadges({ critical, high }: { critical: number; high: number }) {
+  if (critical === 0 && high === 0) return null;
+  return (
+    <span className="inline-flex gap-1">
+      {critical > 0 ? (
+        <Badge tone={SEVERITY_TONE.critical} title={`${critical} critical`}>
+          {critical}C
+        </Badge>
+      ) : null}
+      {high > 0 ? (
+        <Badge tone={SEVERITY_TONE.high} title={`${high} high`}>
+          {high}H
+        </Badge>
+      ) : null}
+    </span>
+  );
+}
+
 export function SeverityCountsInline({ counts }: { counts: SeverityCounts }) {
   const present = SEVERITY_ORDER.filter((k) => counts[k] > 0);
   if (present.length === 0) return <span className="text-text-faint">none</span>;

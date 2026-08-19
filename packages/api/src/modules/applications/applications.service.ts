@@ -3,6 +3,7 @@ import type {
   ApplicationDetail,
   ApplicationStatus,
   ApplicationSummary,
+  ApplicationVulnCounts,
   Attributes,
   ComponentRef,
   ListApplicationsQuery,
@@ -48,6 +49,13 @@ export class ApplicationsService {
   async list(query: ListApplicationsQuery): Promise<Paginated<ApplicationSummary>> {
     const { db } = this.deps;
     const staleInterval = await this.staleInterval();
+    /*
+      Read once per request, not per row. Findings are reported as null while scanning is off
+      even though the summary rows survive being switched off: those counts were produced by
+      a database of some unknown age, and presenting them as current after the feature was
+      disabled would be stating a fact the platform is no longer checking.
+    */
+    const vulnEnabled = await this.deps.settings.vulnScanningEnabled();
 
     const conditions: SQL[] = [];
 
@@ -139,16 +147,29 @@ export class ApplicationsService {
         a.created_at,
         s.component_count AS latest_component_count,
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
+        vs.app_findings, vs.os_findings,
+        vs.app_critical, vs.os_critical,
+        vs.app_high, vs.os_high,
         (a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${staleInterval}) AS is_stale,
         count(*) OVER () AS total
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
+      /*
+        The frozen per-scan summary, not a live join over findings. One primary-key lookup
+        per row against a table with one row per scan, where the alternative is joining
+        millions of scan_component rows to produce a number that is already computed.
+
+        LEFT because a summary row only exists once the scan has been matched against the
+        database. Its absence is the "not assessed" state and is preserved as null rather
+        than coalesced to zero.
+      */
+      LEFT JOIN scan_vuln_summary vs ON vs.scan_id = a.latest_scan_id
       ${where}
       ${orderByClause}
       LIMIT ${limit} OFFSET ${offset}
     `);
 
-    const items = rowsOf(rows).map(toApplicationSummary);
+    const items = rowsOf(rows).map((row) => toApplicationSummary(row, vulnEnabled));
     return paginate(items, totalFromRows(rowsOf(rows)), query);
   }
 
@@ -192,6 +213,21 @@ export class ApplicationsService {
         return orderBy([sql`s.os_pretty ${nulls}`, byName], sql`a.id`);
       case "componentCount":
         return orderBy([sql`s.component_count ${nulls}`, byName], sql`a.id`);
+      case "vulnFindings":
+        /*
+          The combined total, matching what the column displays.
+
+          NULLS LAST in both directions. An application whose current build has no summary row
+          has not been assessed, and ranking it either first or last on a numeric scale would
+          assert something the data does not support — so it sorts out of the way instead,
+          exactly as `lastScanAt` treats "never scanned".
+
+          Sorting on the sum does not use `scan_vuln_summary_rank_idx`, which is on
+          `app_findings` alone. That is acceptable here and nowhere else: this query is already
+          limited to one page of applications, of which there are hundreds rather than
+          millions. A ranking over the whole findings table must still use the index.
+        */
+        return orderBy([sql`(vs.app_findings + vs.os_findings) ${nulls}`, byName], sql`a.id`);
       case "scanCount":
         return orderBy([sql`a.scan_count ${dir_}`, byName], sql`a.id`);
       case "name":
@@ -217,6 +253,9 @@ export class ApplicationsService {
         a.updated_at,
         s.component_count AS latest_component_count,
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
+        vs.app_findings, vs.os_findings,
+        vs.app_critical, vs.os_critical,
+        vs.app_high, vs.os_high,
         (a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${staleInterval}) AS is_stale,
         COALESCE(
           (SELECT array_agg(al.alias_name ORDER BY al.alias_name)
@@ -225,6 +264,7 @@ export class ApplicationsService {
         ) AS aliases
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
+      LEFT JOIN scan_vuln_summary vs ON vs.scan_id = a.latest_scan_id
       WHERE a.id = ${id}::uuid
     `);
 
@@ -232,7 +272,7 @@ export class ApplicationsService {
     if (!row) throw new NotFoundError("Application");
 
     return {
-      ...toApplicationSummary(row),
+      ...toApplicationSummary(row, await this.deps.settings.vulnScanningEnabled()),
       aliases: row.aliases ?? [],
       updatedAt: new Date(row.updated_at).toISOString(),
     };
@@ -387,6 +427,17 @@ interface ApplicationListRow extends PlatformRow {
   scan_count: number | string;
   created_at: Date | string;
   latest_component_count: number | string | null;
+  /*
+    All six are null together when the current build has no summary row, which is the
+    "not assessed" state. Typed as `number | string` because the driver returns integers
+    as strings on some column types and every other count here is normalised the same way.
+  */
+  app_findings: number | string | null;
+  os_findings: number | string | null;
+  app_critical: number | string | null;
+  os_critical: number | string | null;
+  app_high: number | string | null;
+  os_high: number | string | null;
   is_stale: boolean;
   total?: number | string;
 }
@@ -405,7 +456,43 @@ function toIso(value: Date | string | null): string | null {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-function toApplicationSummary(row: ApplicationListRow): ApplicationSummary {
+/**
+ * Findings of the current build, or null when the number is not known.
+ *
+ * Exported for the unit tests, which is the only way to reach it: the query it belongs to
+ * needs a database, while the mapping from "no summary row" to "not assessed" is the part
+ * that would break silently and is pure.
+ *
+ * The three null branches are deliberately not distinguished in the payload. A reader does
+ * not act differently on "the sweep has not run yet" than on "scanning is off"; what matters
+ * is that neither is reported as zero, because zero is a clean bill of health.
+ */
+export function toVulnCounts(
+  row: Pick<
+    ApplicationListRow,
+    "app_findings" | "os_findings" | "app_critical" | "os_critical" | "app_high" | "os_high"
+  >,
+  vulnEnabled: boolean,
+): ApplicationVulnCounts | null {
+  if (!vulnEnabled) return null;
+  // The whole row is absent or present together, so one column decides it.
+  if (row.app_findings === null || row.app_findings === undefined) return null;
+
+  const app = Number(row.app_findings);
+  const os = Number(row.os_findings ?? 0);
+
+  return {
+    total: app + os,
+    app,
+    os,
+    // Spanning both halves, to match `total`. A critical in the base image is still a
+    // critical; which half it came from is what `app` and `os` are for.
+    critical: Number(row.app_critical ?? 0) + Number(row.os_critical ?? 0),
+    high: Number(row.app_high ?? 0) + Number(row.os_high ?? 0),
+  };
+}
+
+function toApplicationSummary(row: ApplicationListRow, vulnEnabled: boolean): ApplicationSummary {
   return {
     id: row.id,
     name: row.name,
@@ -418,6 +505,7 @@ function toApplicationSummary(row: ApplicationListRow): ApplicationSummary {
         ? null
         : Number(row.latest_component_count),
     scanCount: Number(row.scan_count),
+    vulnerabilities: toVulnCounts(row, vulnEnabled),
     isStale: row.is_stale === true,
     createdAt: toIso(row.created_at)!,
     // Null when the application has never been scanned. Distinct from a scan
