@@ -743,7 +743,7 @@ several applications at a stroke.
 | Current components | The latest build's dependencies |
 | Latest build changes | Removed / version-changed / added against the previous build |
 | No longer used | Everything ever shipped that the current build does not contain, each with the build it was last seen in |
-| Scan history | Every build that submitted an SBOM, plus **Upload SBOM** |
+| Scan history | Every build that submitted an SBOM, plus **Upload SBOM** and, for admins, per-build **Delete** |
 
 Any historical build opens its own page with that build's component list and
 provenance — commit, branch, image, Syft version, and the SBOM SHA-256, so a
@@ -758,6 +758,21 @@ tooltip names the uploader, and the build page shows *Uploaded by* where a CI sc
 shows its ingest token, along with the reason given. CI scans are not badged: the
 overwhelming default labelled on every row is noise, but a hand-uploaded build
 that looked identical to a pipeline's would misrepresent where the data came from.
+
+**Delete** appears on each history row for administrators, and on a build's own
+page. It is admin-only while upload is open to every signed-in user, and the
+asymmetry is deliberate: upload is append-only — a wrong SBOM is corrected by
+uploading the right one, with the wrong one still visible and attributed — whereas
+deletion destroys a record that diffs, the *No longer used* view and past reports
+point at, and nothing brings it back.
+
+Deleting the **current build is allowed**, and is the case the feature mostly
+exists for: an SBOM uploaded against the wrong application becomes its current
+state immediately, and the fix has to be able to reach it. The build before it is
+promoted, and the application's component list, findings and its contribution to
+every dashboard and analytics figure revert with it. The confirmation says which
+of those is about to happen — it reads differently for a current build, an older
+one, and an application's only build — because the history table cannot show it.
 Full contract in
 [`POST /api/v1/applications/:id/scans`](#post-apiv1applicationsidscans).
 
@@ -1252,6 +1267,7 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `POST /admin/applications/:id/confirm` | Resolve a pending application |
 | `POST /admin/applications/:id/merge` | Merge into another, optionally aliasing |
 | `POST/DELETE /admin/applications/:id/aliases` | Manage CI name aliases |
+| `DELETE /admin/scans/:id` | Remove one build from an application's history |
 | `GET/POST/PATCH/DELETE /admin/users[/:id]` | Account management |
 | `POST /admin/users/:id/reset-password` | Issue a new password, returned once |
 | `POST/PATCH/DELETE /admin/attribute-definitions[/:id]` | Attribute schema |

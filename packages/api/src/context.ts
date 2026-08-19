@@ -16,6 +16,7 @@ import { ComponentsService } from "./modules/components/components.service.js";
 import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
+import { ScansAdminService } from "./modules/scans/scans.admin.service.js";
 import { GroupsService } from "./modules/groups/groups.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
@@ -91,6 +92,7 @@ export interface AppContext {
   adminUsers: AdminUsersService;
   adminApplications: AdminApplicationsService;
   adminGroups: GroupsAdminService;
+  adminScans: ScansAdminService;
   attributeDefinitions: AttributeDefinitionsService;
 }
 
@@ -192,6 +194,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const adminUsers = new AdminUsersService({ db, sessions, audit });
   const adminApplications = new AdminApplicationsService({ db, audit, applications });
   const adminGroups = new GroupsAdminService({ db, audit, groups });
+  const adminScans = new ScansAdminService({ db, blobStore, audit });
   const attributeDefinitions = new AttributeDefinitionsService({ db, audit });
 
   return {
@@ -226,6 +229,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     adminUsers,
     adminApplications,
     adminGroups,
+    adminScans,
     attributeDefinitions,
   };
 }

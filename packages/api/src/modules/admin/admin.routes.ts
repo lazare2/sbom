@@ -53,6 +53,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     adminUsers,
     adminApplications,
     adminGroups,
+    adminScans,
     attributeDefinitions,
     audit,
     ingestTokens,
@@ -123,6 +124,29 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const result = await adminApplications.remove(id, actorOf(request));
     return reply.send(result);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scan history
+  // -------------------------------------------------------------------------
+
+  /**
+   * Remove one build from an application's history.
+   *
+   * Under `/admin` rather than beside the read-only `/scans` routes, and admin-only
+   * while manual upload is open to any signed-in user. Upload is append-only -- a
+   * wrong SBOM is corrected by uploading the right one -- whereas this destroys a
+   * record that diffs and past reports point at, and nothing brings it back.
+   *
+   * Deleting the current build is allowed and promotes the one before it, which is
+   * the case the endpoint mostly exists for: an SBOM uploaded against the wrong
+   * application becomes its current state immediately, and the fix has to be able
+   * to reach it. The response reports the promotion so the client knows the
+   * application's whole current-state view just changed.
+   */
+  fastify.delete("/scans/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    return reply.send(await adminScans.remove(id, actorOf(request)));
   });
 
   // -------------------------------------------------------------------------

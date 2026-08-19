@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { SortDirection } from "@sbom/shared";
+import type { ScanSummary, SortDirection } from "@sbom/shared";
 import { componentListSort, removedComponentSort, scanHistorySort } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
@@ -20,6 +20,8 @@ import { DiffView, LastSeen, PackageLink } from "../components/DiffView.tsx";
 import { PlatformChips } from "../components/Platform.tsx";
 import { ApplicationFormModal } from "./admin/ApplicationFormModal.tsx";
 import { UploadSbomModal } from "./UploadSbomModal.tsx";
+import { useDeleteScan } from "../lib/mutations.ts";
+import { DeleteScanModal } from "../components/DeleteScanModal.tsx";
 import {
   BreakdownTiles,
   DEFAULT_FINDINGS_FILTERS,
@@ -278,6 +280,7 @@ export function ApplicationDetailPage() {
         <HistoryTab
           applicationId={app.id}
           applicationName={app.name}
+          isAdmin={isAdmin}
           page={state.historyPage}
           sortBy={state.scanSortBy}
           sortDir={state.scanSortDir}
@@ -701,6 +704,7 @@ function VulnerabilitiesTab({
 function HistoryTab({
   applicationId,
   applicationName,
+  isAdmin,
   page,
   sortBy,
   sortDir,
@@ -708,6 +712,7 @@ function HistoryTab({
 }: {
   applicationId: string;
   applicationName: string;
+  isAdmin: boolean;
   page: number;
   sortBy: (typeof scanHistorySort)["fields"][number];
   sortDir: SortDirection;
@@ -716,6 +721,16 @@ function HistoryTab({
   const params = useMemo(() => ({ page, pageSize: 50, sortBy, sortDir }), [page, sortBy, sortDir]);
   const { data, isLoading, isFetching, error, refetch } = useApplicationScans(applicationId, params);
   const [uploading, setUploading] = useState(false);
+  /*
+    The build queued for deletion, held as the whole row rather than its id.
+
+    The confirmation has to name what it is about to destroy — the date, the build
+    number, how many components it recorded — and after the delete succeeds that row
+    is gone from the refetched list. Keeping a copy is what lets the dialog describe
+    the build rather than say "this scan".
+  */
+  const [deleteTarget, setDeleteTarget] = useState<ScanSummary | null>(null);
+  const deleteScan = useDeleteScan();
   const sort = useServerSort(
     scanHistorySort,
     { sortBy, sortDir },
@@ -732,7 +747,7 @@ function HistoryTab({
       <Card>
         <CardHeader
           title="Scan history"
-          subtitle="Every build that submitted an SBOM. Retained permanently — select a build to see the components it shipped."
+          subtitle="Every build that submitted an SBOM. Nothing is trimmed automatically — select a build to see the components it shipped."
           actions={
             <Button size="sm" variant="primary" onClick={() => setUploading(true)}>
               Upload SBOM
@@ -780,6 +795,9 @@ function HistoryTab({
                     <Th align="right" width="90px">
                       SBOM
                     </Th>
+                    {/* Unlabelled: a "Delete" heading over a column of buttons reads as
+                        an instruction rather than a description of what is below it. */}
+                    {isAdmin ? <Th width="80px" /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -836,6 +854,27 @@ function HistoryTab({
                       <Td align="right" className="nums text-text-faint">
                         {formatBytes(scan.sbomSizeBytes)}
                       </Td>
+                      {isAdmin ? (
+                        <Td align="right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              // Clears a failure left over from a previous attempt, so the
+                              // dialog does not open already showing someone else's error.
+                              deleteScan.reset();
+                              setDeleteTarget(scan);
+                            }}
+                            title={
+                              scan.isLatest
+                                ? "Delete this build. It is the application's current state, so the build before it becomes current."
+                                : "Delete this build from the history."
+                            }
+                          >
+                            Delete
+                          </Button>
+                        </Td>
+                      ) : null}
                     </Tr>
                   ))}
                 </tbody>
@@ -858,6 +897,22 @@ function HistoryTab({
         onClose={() => setUploading(false)}
         applicationId={applicationId}
         applicationName={applicationName}
+      />
+
+      <DeleteScanModal
+        scan={deleteTarget}
+        applicationName={applicationName}
+        isOnlyScan={deleteTarget !== null && (data?.total ?? 0) <= 1}
+        busy={deleteScan.isPending}
+        error={deleteScan.error}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          deleteScan.mutate(
+            { scanId: deleteTarget.id, applicationId },
+            { onSuccess: () => setDeleteTarget(null) },
+          );
+        }}
       />
     </>
   );

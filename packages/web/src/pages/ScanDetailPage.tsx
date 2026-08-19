@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { componentListSort } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
 import { useScan, useScanComponents } from "../lib/queries.ts";
@@ -7,6 +7,8 @@ import { formatBytes, formatDateTime, formatNumber, formatRelative } from "../li
 import { readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { PlatformChips } from "../components/Platform.tsx";
+import { DeleteScanModal } from "../components/DeleteScanModal.tsx";
+import { useDeleteScan } from "../lib/mutations.ts";
 import {
   BreakdownTiles,
   DEFAULT_FINDINGS_FILTERS,
@@ -68,6 +70,10 @@ const urlSpec = {
 export function ScanDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { state, setState } = useUrlState(urlSpec);
+  const { isAdmin } = useAuth();
+  const navigate = useNavigate();
+  const deleteScan = useDeleteScan();
+  const [deleting, setDeleting] = useState(false);
 
   const { data: scan, isLoading, error, refetch } = useScan(id);
 
@@ -168,8 +174,61 @@ export function ScanDetailPage() {
                 Download SBOM
               </Button>
             </a>
+            {/*
+              Last in the row, after the navigation and the download.
+
+              Offered here as well as in the history table because this is the page
+              where a bad build is actually identified — someone opens it, sees the
+              component list is wrong, and should not have to navigate back and find
+              the row again to act on that.
+            */}
+            {isAdmin ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  deleteScan.reset();
+                  setDeleting(true);
+                }}
+              >
+                Delete build
+              </Button>
+            ) : null}
           </>
         }
+      />
+
+      <DeleteScanModal
+        scan={deleting ? scan : null}
+        applicationName={scan.applicationName}
+        // The neighbour links are the page's own answer to "is there another build",
+        // so no extra request is needed to tell the only-scan case apart.
+        isOnlyScan={scan.previousScanId === null && scan.nextScanId === null}
+        busy={deleteScan.isPending}
+        error={deleteScan.error}
+        onClose={() => setDeleting(false)}
+        onConfirm={() => {
+          deleteScan.mutate(
+            { scanId: scan.id, applicationId: scan.applicationId },
+            {
+              /*
+                Navigating away is not optional here: this page is a view of the scan
+                that was just deleted, and its cache entry is dropped by the mutation.
+                Staying would re-request a scan that no longer exists and render the
+                404 as though something had gone wrong.
+
+                `replace` so the browser Back button does not lead straight back to
+                the dead URL.
+              */
+              onSuccess: (result) => {
+                setDeleting(false);
+                void navigate(`/applications/${result.applicationId}?tab=history`, {
+                  replace: true,
+                });
+              },
+            },
+          );
+        }}
       />
 
       <Card className="mb-4">

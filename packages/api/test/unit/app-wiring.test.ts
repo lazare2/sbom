@@ -187,6 +187,35 @@ describe("app wiring", () => {
     expect(withIngestToken.statusCode).toBe(401);
   });
 
+  it("guards scan deletion behind requireAdmin, and never the ingest token", async () => {
+    /*
+     * The mirror of the manual-upload guard above, and it matters more.
+     *
+     * Upload is append-only and open to any signed-in user; deletion destroys a build
+     * record permanently and is admin-only. Two ways that could go wrong are checked
+     * here because neither is visible by inspection: the route living under /api/v1/admin
+     * but outside the guarded scope, and the CI bearer token — which legitimately creates
+     * scans on the other endpoint — being accepted as authentication for removing them.
+     * A shared token held by every pipeline must never be able to erase history.
+     */
+    const scanId = "00000000-0000-4000-8000-000000000000";
+
+    const anonymous = await app.inject({ method: "DELETE", url: `/api/v1/admin/scans/${scanId}` });
+    expect(anonymous.statusCode).toBe(401);
+
+    const withIngestToken = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/admin/scans/${scanId}`,
+      headers: { authorization: "Bearer super-secret-ci-token" },
+    });
+    expect(withIngestToken.statusCode).toBe(401);
+
+    // And the read-only scan routes gained no delete of their own — those sit behind
+    // requireAuth, which would have made this reachable by every signed-in user.
+    const onReadScope = await app.inject({ method: "DELETE", url: `/api/v1/scans/${scanId}` });
+    expect(onReadScope.statusCode).toBe(404);
+  });
+
   it("guards every vulnerability route, admin and read alike", async () => {
     /*
      * Two distinct boundaries, both asserted here because they are easy to get wrong in

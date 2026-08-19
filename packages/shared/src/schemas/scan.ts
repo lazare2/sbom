@@ -178,3 +178,38 @@ export const listRemovedComponentsQuerySchema = paginationQuerySchema
   })
   .merge(removedComponentSort.querySchema);
 export type ListRemovedComponentsQuery = z.infer<typeof listRemovedComponentsQuerySchema>;
+
+// --- deletion ---------------------------------------------------------------
+
+/**
+ * The outcome of removing one scan from an application's history.
+ *
+ * Every field exists because the caller cannot infer it. A deletion here is not a
+ * row disappearing from a table: removing the current build promotes the one
+ * before it, which changes the application's component list, its findings, and
+ * its contribution to every dashboard figure. The UI has to be able to say which
+ * of those happened, and the audit trail has to record it.
+ */
+export interface DeleteScanResponse {
+  applicationId: string;
+  /** True when the deleted scan had been the application's current state. */
+  wasLatest: boolean;
+  /**
+   * The build promoted back to current, or null when the application now has no
+   * scans at all and has returned to "never scanned".
+   *
+   * Only meaningful when `wasLatest`; otherwise it is the unchanged current build.
+   */
+  currentScanId: string | null;
+  /** Scans left in this application's history. */
+  remainingScanCount: number;
+  /**
+   * Whether the raw CycloneDX document was removed along with the scan.
+   *
+   * False when another scan still holds a byte-identical SBOM — blobs are
+   * content-addressed and therefore shared, so a rebuild of unchanged code has
+   * the same key. Reported rather than assumed, because "the original upload is
+   * gone" is a different claim from "the scan record is gone".
+   */
+  rawSbomDeleted: boolean;
+}

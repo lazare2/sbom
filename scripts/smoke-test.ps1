@@ -599,6 +599,110 @@ try {
 
     # ======================================================================
     Write-Host ""
+    Write-Host "Scan deletion (DELETE /api/v1/admin/scans/:id)" -ForegroundColor Cyan
+
+    <#
+      The counterpart to manual upload, and the reverse of it in every way that
+      matters: upload is append-only and open to any signed-in user, deletion
+      destroys a retained build and is admin-only.
+
+      The section is written to leave the estate exactly as it found it. It posts one
+      throwaway build, which becomes the application's current state, then deletes it
+      and asserts the previous build came back with the right counters. Everything
+      after this point therefore sees the same application it would have seen without
+      this section -- while still exercising the case the endpoint exists for, which
+      is removing a build that is currently live.
+    #>
+
+    $delUrl = "$BaseUrl/api/v1/admin/scans"
+
+    Assert-That "requires an admin session" {
+        $r = Invoke-Api @("-X", "DELETE", "$delUrl/$($script:manual.scanId)")
+        $r.Status -eq 401
+    }
+
+    Assert-That "rejects a CI ingest token — a shared pipeline token must not erase history" {
+        # The token legitimately CREATES scans on /api/v1/scans. Accepting it here
+        # would let every pipeline holding it delete any build in the estate.
+        $r = Invoke-Api @("-X", "DELETE", "$delUrl/$($script:manual.scanId)", "-H", $auth)
+        Show-Body $r 401
+        $r.Status -eq 401
+    }
+
+    Assert-That "404s for a scan that does not exist" {
+        $r = Invoke-Api @("-X", "DELETE", "$delUrl/00000000-0000-4000-8000-000000000000", "-b", $script:platJar)
+        Show-Body $r 404
+        $r.Status -eq 404
+    }
+
+    # Snapshot of the state that must be restored by the delete below.
+    $beforeApp = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:ingest.applicationId)", "-b", $script:platJar)
+    $script:beforeLatest = $beforeApp.Json.latestScanId
+    $script:beforeCount = $beforeApp.Json.scanCount
+
+    Assert-That "a throwaway build becomes the application's current state" {
+        # Byte-identical to the CI fixture on purpose: it means the blob is shared,
+        # which is what makes the retention assertion below meaningful.
+        $r = Invoke-Api @("-X", "POST", $scansUrl, "-H", $auth,
+            "-F", "sbom=@$sbomPath", "-F", "app_name=$appName", "-F", "build_number=ci-to-be-deleted")
+        Show-Body $r 201
+        if ($r.Status -ne 201) { return $false }
+        $script:doomed = $r.Json
+        # Confirmed from the application rather than the ingest receipt: unlike the
+        # manual upload's response, the CI one carries no becameLatest flag.
+        $a = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:ingest.applicationId)", "-b", $script:platJar)
+        return $a.Json.latestScanId -eq $r.Json.scanId -and $a.Json.scanCount -eq ($script:beforeCount + 1)
+    }
+
+    Assert-That "deleting the current build promotes the one before it" {
+        $r = Invoke-Api @("-X", "DELETE", "$delUrl/$($script:doomed.scanId)", "-b", $script:platJar)
+        Show-Body $r 200
+        if ($r.Status -ne 200) { return $false }
+        return $r.Json.wasLatest -eq $true -and
+               $r.Json.currentScanId -eq $script:beforeLatest -and
+               $r.Json.remainingScanCount -eq $script:beforeCount
+    }
+
+    Assert-That "keeps the raw SBOM when another build holds identical bytes" {
+        # Blob keys are content-addressed, so several scans share one document.
+        # Deleting it unconditionally would take the original upload away from
+        # builds that still exist -- checked here rather than trusted, because the
+        # failure is silent until someone tries to download an old SBOM.
+        $r = Invoke-Api @("$BaseUrl/api/v1/scans/$($script:ingest.scanId)/raw", "-b", $script:platJar)
+        return $r.Status -eq 200
+    }
+
+    Assert-That "the deleted build is gone from the history and from its own URL" {
+        $gone = Invoke-Api @("$BaseUrl/api/v1/scans/$($script:doomed.scanId)", "-b", $script:platJar)
+        if ($gone.Status -ne 404) { Show-Body $gone 404; return $false }
+        $hist = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:ingest.applicationId)/scans?pageSize=100", "-b", $script:platJar)
+        if ($hist.Status -ne 200) { return $false }
+        $still = $hist.Json.items | Where-Object { $_.id -eq $script:doomed.scanId }
+        return $null -eq $still -and $hist.Json.total -eq $script:beforeCount
+    }
+
+    Assert-That "the application's denormalised counters were recomputed, not decremented" {
+        # scan_count, last_scan_at and latest_scan_id are three views of one table.
+        # A decrement would drift them apart; the endpoint re-derives all three.
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:ingest.applicationId)", "-b", $script:platJar)
+        if ($r.Status -ne 200) { return $false }
+        return $r.Json.latestScanId -eq $script:beforeLatest -and $r.Json.scanCount -eq $script:beforeCount
+    }
+
+    Assert-That "logged the deletion, with enough detail to identify the lost build" {
+        # The audit row is the only surviving evidence that the build existed, which
+        # is why it is written inside the same transaction as the delete.
+        $r = Invoke-Api @("$BaseUrl/api/v1/admin/audit-log?action=scan.delete&pageSize=10", "-b", $script:platJar)
+        if ($r.Status -ne 200) { return $false }
+        $entry = $r.Json.items | Where-Object { $_.targetId -eq $script:doomed.scanId } | Select-Object -First 1
+        if ($null -eq $entry) { return $false }
+        return $entry.actorEmail -eq $adminEmail -and
+               $entry.metadata.buildNumber -eq "ci-to-be-deleted" -and
+               $entry.metadata.wasLatest -eq $true
+    }
+
+    # ======================================================================
+    Write-Host ""
     Write-Host "Vulnerability scanning (Grype)" -ForegroundColor Cyan
 
     <#

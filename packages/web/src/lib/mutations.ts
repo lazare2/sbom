@@ -13,6 +13,7 @@ import type {
   CreateIngestTokenResponse,
   CreateSuppression,
   CreateUserRequest,
+  DeleteScanResponse,
   ManualUploadResponse,
   MergeApplicationRequest,
   MergeApplicationResponse,
@@ -98,6 +99,40 @@ export function useUploadSbom() {
       void invalidateApplications(qc);
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["analytics"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.application(result.applicationId) });
+    },
+  });
+}
+
+/**
+ * Deletes one build from an application's scan history.
+ *
+ * Invalidates as widely as the upload it undoes, and for the same reason: if the
+ * deleted scan was the application's current state, the build before it is now
+ * current, so the component list, the removed-packages view, the findings, every
+ * global package search that might have hit it, the dashboard counts and the
+ * analytics report all describe an estate that no longer exists.
+ *
+ * The deleted scan's own keys are the one exception, and excluding them is not
+ * tidiness. Invalidating them refetches them, and the page most likely to be open
+ * when this runs is that scan's detail page -- so the delete would answer itself
+ * with a pair of 404s and flash "scan not found" before the caller has navigated
+ * away. Those entries are left to expire instead; nothing can route back to them,
+ * because the detail page replaces its own history entry on the way out.
+ */
+export function useDeleteScan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { scanId: string; applicationId: string }) =>
+      api.delete<DeleteScanResponse>(`/admin/scans/${vars.scanId}`),
+    onSuccess: (result, vars) => {
+      void invalidateApplications(qc);
+      void qc.invalidateQueries({
+        queryKey: ["scans"],
+        predicate: (query) => !query.queryKey.includes(vars.scanId),
+      });
+      void qc.invalidateQueries({ queryKey: ["analytics"] });
+      void qc.invalidateQueries({ queryKey: ["vulnerabilities"] });
       void qc.invalidateQueries({ queryKey: queryKeys.application(result.applicationId) });
     },
   });
