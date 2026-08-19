@@ -7,6 +7,8 @@ import {
   type VulnScope,
 } from "@sbom/shared";
 import { readEnum } from "../lib/useUrlState.ts";
+import { useGroups } from "../lib/queries.ts";
+import { Select } from "./ui.tsx";
 
 /**
  * The dashboard vulnerability filter: which half of the split, and which severities.
@@ -25,6 +27,16 @@ import { readEnum } from "../lib/useUrlState.ts";
 export interface VulnFilterUrlState {
   scope: VulnScope;
   severity: DashboardSeverityBucket[];
+  /**
+   * Restricts every figure on the page to one group's applications, or "" for the estate.
+   *
+   * Reaches further than the other two, and that difference is the reason it is rendered as a
+   * dropdown rather than a chip row. Scope and severity describe *findings*, so they narrow
+   * only the vulnerability panels. A group describes *applications*, and every panel on these
+   * pages is an aggregate over applications — so it narrows coverage, churn and the platform
+   * mix as well. `VulnFilterBanner` says which of the two is in force.
+   */
+  group: string;
 }
 
 /**
@@ -44,15 +56,17 @@ export interface VulnFilterUrlState {
 export type VulnFilterParams = {
   scope: VulnScope;
   severity: string;
+  group: string;
 };
 
-export const VULN_FILTER_URL_DEFAULTS: VulnFilterParams = { scope: "all", severity: "" };
-export const VULN_FILTER_DEFAULTS: VulnFilterUrlState = { scope: "all", severity: [] };
+export const VULN_FILTER_URL_DEFAULTS: VulnFilterParams = { scope: "all", severity: "", group: "" };
+export const VULN_FILTER_DEFAULTS: VulnFilterUrlState = { scope: "all", severity: [], group: "" };
 
 export function readVulnFilterParams(params: URLSearchParams): VulnFilterParams {
   return {
     scope: readEnum(params, "scope", vulnScopes, "all"),
     severity: params.get("severity") ?? "",
+    group: params.get("group") ?? "",
   };
 }
 
@@ -76,11 +90,12 @@ export function toVulnFilter(raw: VulnFilterParams): VulnFilterUrlState {
     // Canonical order regardless of how the URL listed them, so two links selecting the
     // same buckets produce the same query key and hit the same cache entry.
     severity: dashboardSeverityBuckets.filter((bucket) => seen.has(bucket)),
+    group: raw.group,
   };
 }
 
 export function fromVulnFilter(filter: VulnFilterUrlState): VulnFilterParams {
-  return { scope: filter.scope, severity: filter.severity.join(",") };
+  return { scope: filter.scope, severity: filter.severity.join(","), group: filter.group };
 }
 
 /** Query parameters for the API and the PDF link. Omits anything inert. */
@@ -88,12 +103,13 @@ export function vulnFilterQuery(filter: VulnFilterUrlState): Record<string, stri
   const params: Record<string, string> = {};
   if (filter.scope !== "all") params.scope = filter.scope;
   if (filter.severity.length > 0) params.severity = filter.severity.join(",");
+  if (filter.group !== "") params.group = filter.group;
   return params;
 }
 
 /** True when the filter narrows anything — drives the "clear" affordance. */
 export function isVulnFilterActive(filter: VulnFilterUrlState): boolean {
-  return filter.scope !== "all" || filter.severity.length > 0;
+  return filter.scope !== "all" || filter.severity.length > 0 || filter.group !== "";
 }
 
 const BUCKET_TONE: Record<DashboardSeverityBucket, string> = {
@@ -158,9 +174,36 @@ export function VulnFilterControl({
   }
 
   const active = isVulnFilterActive(filter);
+  const groups = useGroups({ pageSize: 200 });
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      {/*
+        A dropdown rather than chips, and first in the row, because it is the only control here
+        that changes which applications the page describes. Chips would put it visually on a
+        par with scope and severity, which narrow findings within a fixed population.
+      */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <label
+          htmlFor="vuln-filter-group"
+          className="text-[11px] font-medium tracking-wide text-text-faint uppercase"
+        >
+          Group
+        </label>
+        <Select
+          id="vuln-filter-group"
+          value={filter.group}
+          onChange={(value) => onChange({ ...filter, group: value })}
+          options={[
+            { value: "", label: "Whole estate" },
+            ...(groups.data?.items ?? []).map((g) => ({
+              value: g.id,
+              label: `${g.name} (${g.applicationCount})`,
+            })),
+          ]}
+        />
+      </div>
+
       <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Package scope">
         <span className="text-[11px] font-medium tracking-wide text-text-faint uppercase">Scope</span>
         {vulnScopes.map((scope) => (
@@ -215,14 +258,30 @@ export function VulnFilterControl({
  * estate-wide when it covers four critical findings is the failure this whole section is
  * built to avoid.
  */
-export function VulnFilterBanner({ label }: { label: string | null }) {
+export function VulnFilterBanner({
+  label,
+  /**
+   * True when a group is selected.
+   *
+   * Changes what the banner claims, and the claim is the point of the banner. Without a group,
+   * inventory and coverage really are estate-wide while only the vulnerability panels narrow.
+   * With one, everything on the page narrows — and leaving the old sentence up would be an
+   * explicit, on-screen assurance that the coverage figure covers the whole estate when it
+   * covers four applications.
+   */
+  groupScoped = false,
+}: {
+  label: string | null;
+  groupScoped?: boolean;
+}) {
   if (label === null) return null;
   return (
     <div className="mb-3 rounded-lg border border-warn bg-warn-subtle px-3 py-2">
       <p className="text-xs font-medium text-warn">Filtered: {label}</p>
       <p className="mt-0.5 text-[11px] text-text-muted">
-        Every vulnerability figure below counts only matching findings. Inventory, coverage and
-        platform figures are unfiltered and describe the whole estate.
+        {groupScoped
+          ? "Every figure on this page — inventory, coverage, platform mix and vulnerabilities — describes only this group's applications."
+          : "Every vulnerability figure below counts only matching findings. Inventory, coverage and platform figures are unfiltered and describe the whole estate."}
       </p>
     </div>
   );

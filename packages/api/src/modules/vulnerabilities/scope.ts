@@ -62,3 +62,49 @@ export function severityBucketPredicate(buckets: readonly DashboardSeverityBucke
   if (buckets.length === 0) return sql`TRUE`;
   return sql`v.severity = ANY(${sql.param(severitiesForBuckets(buckets))}::text[])`;
 }
+
+/**
+ * Suppression exclusion, over `v` (vulnerability), `c` (component) and `a` (application).
+ *
+ * Lives here rather than beside any one query because it is the rule that decides whether an
+ * accepted risk is counted, and it is now asked by three independent readers: the sweep that
+ * freezes per-scan summaries, the dashboard's findings-side figures, and a group's distinct
+ * advisory count. Two hand-written copies is how a suppressed CVE ends up excluded from one
+ * panel and included in the one beside it — which reads as a bug in the suppression feature
+ * rather than in the query, and sends whoever investigates to the wrong file.
+ *
+ * Nullable columns widen the scope rather than narrow it: both ids null suppresses estate-
+ * wide, `component_id` limits it to one package version, `application_id` to one application.
+ */
+export const NOT_SUPPRESSED: SQL = sql`NOT EXISTS (
+  SELECT 1 FROM vulnerability_suppression sup
+  WHERE sup.vulnerability_id = v.id
+    AND (sup.expires_at IS NULL OR sup.expires_at > now())
+    AND (sup.component_id IS NULL OR sup.component_id = c.id)
+    AND (sup.application_id IS NULL OR sup.application_id = a.id)
+)`;
+
+/**
+ * Restricts an aggregate to the applications in one group, over the `application` alias given.
+ *
+ * `TRUE` for no group, which is the same trick `severityBucketPredicate` uses: an inert filter
+ * that is still a valid expression means every call site interpolates it unconditionally, and
+ * a site that forgot to is a compile error rather than a silently unscoped figure.
+ *
+ * EXISTS rather than a join, at every site, for a reason that bites specifically here. Several
+ * of these queries carry `count(*) OVER ()` for pagination or aggregate over `scan_component`;
+ * joining the membership table would multiply each application row by its group count and
+ * inflate both. Membership is also indexed from the application side
+ * (`application_group_member_application_idx`), so the EXISTS is a lookup rather than a scan.
+ *
+ * The alias is passed because these queries do not agree on one — the analytics estate query
+ * self-joins as `a2` — and hardcoding `a` would produce a predicate that silently referenced
+ * the wrong row.
+ */
+export function groupMemberPredicate(groupId: string | null | undefined, alias = "a"): SQL {
+  if (!groupId) return sql`TRUE`;
+  return sql`EXISTS (
+    SELECT 1 FROM application_group_member gm
+    WHERE gm.application_id = ${sql.raw(alias)}.id AND gm.group_id = ${groupId}::uuid
+  )`;
+}

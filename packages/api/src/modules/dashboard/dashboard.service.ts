@@ -11,6 +11,7 @@ import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
+import { groupMemberPredicate } from "../vulnerabilities/scope.js";
 
 /**
  * Estate-wide aggregates for the landing page.
@@ -101,8 +102,9 @@ export class DashboardService {
    * numbers legitimately sum to more than the application total for an image
    * carrying both Node and Python.
    */
-  async platforms(): Promise<PlatformBreakdown> {
+  async platforms(groupId: string | null = null): Promise<PlatformBreakdown> {
     const { db } = this.deps;
+    const inGroup = groupMemberPredicate(groupId);
 
     const osRows = await db.execute<Row<OsRow>>(sql`
       SELECT s.os_name AS name, s.os_version AS version, count(*)::int AS applications,
@@ -112,7 +114,7 @@ export class DashboardService {
              (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
-      WHERE a.status <> 'inactive'
+      WHERE a.status <> 'inactive' AND ${inGroup}
       GROUP BY s.os_name, s.os_version
       ORDER BY applications DESC, s.os_name ASC NULLS LAST, s.os_version ASC NULLS LAST
     `);
@@ -133,7 +135,7 @@ export class DashboardService {
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.runtimes, '[]'::jsonb)) AS r(value)
-      WHERE a.status <> 'inactive'
+      WHERE a.status <> 'inactive' AND ${inGroup}
       GROUP BY r.value ->> 'name', r.value ->> 'version'
       ORDER BY applications DESC, name ASC, version ASC NULLS LAST
     `);
@@ -142,7 +144,7 @@ export class DashboardService {
       SELECT count(*)::int AS count
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
-      WHERE a.status <> 'inactive'
+      WHERE a.status <> 'inactive' AND ${inGroup}
         AND s.os_name IS NULL
         AND COALESCE(jsonb_array_length(s.runtimes), 0) = 0
     `);
@@ -178,7 +180,8 @@ export class DashboardService {
   }
 
   /** Ecosystem mix across every application's current state. */
-  async ecosystems(): Promise<EcosystemBreakdownEntry[]> {
+  async ecosystems(groupId: string | null = null): Promise<EcosystemBreakdownEntry[]> {
+    const inGroup = groupMemberPredicate(groupId);
     const rows = await this.deps.db.execute<Row<EcosystemRow>>(sql`
       SELECT
         c.ecosystem,
@@ -191,6 +194,7 @@ export class DashboardService {
       -- would otherwise appear here as a phantom "generic" / "unknown"
       -- ecosystem that corresponds to no package manager anyone uses.
       JOIN component c ON c.id = sc.component_id AND c.kind = 'library'
+      WHERE ${inGroup}
       GROUP BY c.ecosystem
       ORDER BY components DESC, c.ecosystem ASC
     `);
@@ -212,7 +216,10 @@ export class DashboardService {
    * decommissioned services would inflate exactly the figure being used to
    * judge urgency.
    */
-  async topComponents(query: TopComponentsQuery): Promise<TopComponentEntry[]> {
+  async topComponents(
+    query: TopComponentsQuery & { groupId?: string | null },
+  ): Promise<TopComponentEntry[]> {
+    const inGroup = groupMemberPredicate(query.groupId ?? null);
     const rows = query.groupByName
       ? await this.deps.db.execute<Row<TopRow>>(sql`
           SELECT
@@ -229,6 +236,7 @@ export class DashboardService {
           -- alongside "log4j-core" would make this list useless for the
           -- blast-radius judgement it exists to support.
           JOIN component c ON c.id = sc.component_id AND c.kind = 'library'
+          WHERE ${inGroup}
           GROUP BY lower(c.name), c.ecosystem
           ORDER BY applications DESC, lower(min(c.name)) ASC
           LIMIT ${query.limit}
@@ -245,6 +253,7 @@ export class DashboardService {
           -- alongside "log4j-core" would make this list useless for the
           -- blast-radius judgement it exists to support.
           JOIN component c ON c.id = sc.component_id AND c.kind = 'library'
+          WHERE ${inGroup}
           GROUP BY c.id, c.name, c.version, c.ecosystem
           ORDER BY applications DESC, lower(c.name) ASC
           LIMIT ${query.limit}

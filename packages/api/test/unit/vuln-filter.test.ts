@@ -70,7 +70,14 @@ describe("severity buckets", () => {
 describe("normalizeVulnFilter", () => {
   it("is inert by default", () => {
     const filter = normalizeVulnFilter(vulnFilterQuerySchema.parse({}));
-    expect(filter).toEqual({ scope: "all", severities: [], active: false, label: null });
+    expect(filter).toEqual({
+      scope: "all",
+      severities: [],
+      group: null,
+      groupName: null,
+      active: false,
+      label: null,
+    });
   });
 
   it("collapses a full severity selection to none", () => {
@@ -159,5 +166,56 @@ describe("scopeIncludes", () => {
     // from counted-and-empty, at every level.
     expect(scopeIncludes("app", "os")).toBe(false);
     expect(scopeIncludes("os", "app")).toBe(false);
+  });
+});
+
+/**
+ * A group narrows *which applications* the page describes, where scope and severity narrow
+ * *which findings* within a fixed population. That difference is why the group also reaches
+ * the inventory panels, and why the banner has to say which of the two is in force.
+ *
+ * The name is resolved by the caller because this function is pure and shared with the client.
+ * The interesting case is therefore an id with no name behind it — a bookmark pointing at a
+ * deleted group — where a label that silently omitted the narrowing would present figures for
+ * a subset of the estate as though they covered all of it.
+ */
+describe("normalizeVulnFilter — group", () => {
+  const GROUP = "3f1c2b4a-5d6e-4f70-8192-a3b4c5d6e7f8";
+
+  it("is active on a group alone, with no other narrowing", () => {
+    const filter = normalizeVulnFilter(
+      vulnFilterQuerySchema.parse({ group: GROUP }),
+      "Checkout Platform",
+    );
+
+    expect(filter.group).toBe(GROUP);
+    expect(filter.active).toBe(true);
+    expect(filter.label).toBe("Group: Checkout Platform");
+  });
+
+  it("still reports the narrowing when the group name cannot be resolved", () => {
+    // A deleted group, or a hand-edited URL. The figures really are restricted to whatever
+    // membership survives, so the banner must not go quiet just because the name is gone.
+    const filter = normalizeVulnFilter(vulnFilterQuerySchema.parse({ group: GROUP }), null);
+
+    expect(filter.active).toBe(true);
+    expect(filter.label).toBe("Group: unknown");
+  });
+
+  it("puts the group first when combined with the other filters", () => {
+    // Read left to right: the population, then what is counted within it.
+    const filter = normalizeVulnFilter(
+      vulnFilterQuerySchema.parse({ group: GROUP, scope: "os", severity: "critical" }),
+      "Public Facing",
+    );
+
+    expect(filter.label).toBe("Group: Public Facing · Base image and runtimes · Critical");
+  });
+
+  it("stays inert when no group is given", () => {
+    // The estate-wide default has to remain the one that takes the fast aggregate path.
+    const filter = normalizeVulnFilter(vulnFilterQuerySchema.parse({}));
+    expect(filter.group).toBeNull();
+    expect(filter.active).toBe(false);
   });
 });

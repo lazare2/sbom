@@ -174,7 +174,10 @@ export function AnalyticsPage() {
         </div>
         {report.vulnerabilities ? (
           <>
-            <VulnFilterBanner label={report.vulnerabilities.filter.label} />
+            <VulnFilterBanner
+              label={report.vulnerabilities.filter.label}
+              groupScoped={report.vulnerabilities.filter.group !== null}
+            />
             <VulnBreakdownBlock report={report.vulnerabilities} />
             {/*
               Packages and advisories, not applications. Which application is worst is a

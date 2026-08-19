@@ -14,7 +14,13 @@ import {
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
-import { SCOPE_GROUP_EXPR, scopePredicate, severityBucketPredicate } from "./scope.js";
+import {
+  groupMemberPredicate,
+  NOT_SUPPRESSED,
+  SCOPE_GROUP_EXPR,
+  scopePredicate,
+  severityBucketPredicate,
+} from "./scope.js";
 
 /**
  * Estate-wide vulnerability posture, filtered.
@@ -66,21 +72,6 @@ import { SCOPE_GROUP_EXPR, scopePredicate, severityBucketPredicate } from "./sco
 /** Every severity, for the unfiltered reference figures. */
 const ALL_SEVERITIES: readonly VulnSeverity[] = vulnSeverities;
 
-/**
- * Suppression exclusion, matching the sweep's own.
- *
- * Assumes `v` (vulnerability), `c` (component) and `a` (application) are in scope. Copied
- * in shape from `refreshScanSummaries` deliberately: if these two ever disagreed, an
- * accepted risk would be excluded from the snapshot figures and included in the
- * findings-side ones, and the report would contradict itself within a single panel.
- */
-const NOT_SUPPRESSED: SQL = sql`NOT EXISTS (
-  SELECT 1 FROM vulnerability_suppression sup
-  WHERE sup.vulnerability_id = v.id
-    AND (sup.expires_at IS NULL OR sup.expires_at > now())
-    AND (sup.component_id IS NULL OR sup.component_id = c.id)
-    AND (sup.application_id IS NULL OR sup.application_id = a.id)
-)`;
 
 /**
  * Sums selected severities out of one half of the snapshot's jsonb breakdown.
@@ -190,6 +181,8 @@ export class VulnReportService {
     applicationsAffected: number;
   }> {
     const severities = severitiesForBuckets(filter.severities);
+    const groupIn = groupMemberPredicate(filter.group);
+
     /*
      * "Reached by the filter" means at least one finding in a selected severity, on a
      * selected side of the split. Summing only the in-scope halves is what makes the
@@ -208,13 +201,13 @@ export class VulnReportService {
         SELECT vs.*
         FROM scan_vuln_summary vs
         JOIN application a ON a.latest_scan_id = vs.scan_id
-        WHERE a.status <> 'inactive'
+        WHERE a.status <> 'inactive' AND ${groupIn}
       )
       SELECT
         (SELECT max(db_built_at) FROM current_summaries) AS db_built_at,
         (SELECT count(*) FROM current_summaries)::int AS apps_scanned,
         (SELECT count(*) FROM application a
-          WHERE a.status <> 'inactive' AND a.latest_scan_id IS NOT NULL
+          WHERE a.status <> 'inactive' AND ${groupIn} AND a.latest_scan_id IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM scan_vuln_summary vs WHERE vs.scan_id = a.latest_scan_id)
         )::int AS apps_pending,
         (SELECT count(*) FROM current_summaries vs WHERE (${inScope}) > 0)::int AS apps_affected
@@ -240,6 +233,8 @@ export class VulnReportService {
     unfiltered: { app: SeverityCounts; os: SeverityCounts };
   }> {
     const selected = new Set(severitiesForBuckets(filter.severities));
+    const groupIn = groupMemberPredicate(filter.group);
+
 
     const columns = (["app", "os"] as const).flatMap((group) =>
       ALL_SEVERITIES.map(
@@ -254,7 +249,7 @@ export class VulnReportService {
       SELECT ${sql.join(columns, sql`, `)}
       FROM scan_vuln_summary vs
       JOIN application a ON a.latest_scan_id = vs.scan_id
-      WHERE a.status <> 'inactive'
+      WHERE a.status <> 'inactive' AND ${groupIn}
     `);
 
     const row = rowsOf(rows)[0] ?? {};
@@ -286,6 +281,7 @@ export class VulnReportService {
   private async findingTotals(filter: VulnFilterState): Promise<
     Record<"app" | "os", { fixable: number; knownExploited: number; affectedPackages: number }>
   > {
+    const groupIn = groupMemberPredicate(filter.group);
     const rows = await this.deps.db.execute<
       Row<{
         scope_group: string;
@@ -305,7 +301,7 @@ export class VulnReportService {
       JOIN component c ON c.id = sc.component_id
       JOIN component_vulnerability cv ON cv.component_id = c.id
       JOIN vulnerability v ON v.id = cv.vulnerability_id
-      WHERE a.status <> 'inactive'
+      WHERE a.status <> 'inactive' AND ${groupIn}
         AND ${severityBucketPredicate(filter.severities)}
         AND ${NOT_SUPPRESSED}
       GROUP BY 1
@@ -341,7 +337,7 @@ export class VulnReportService {
   ): Promise<TopVulnerableApplication[]> {
     const rows =
       filter.severities.length === 0
-        ? await this.topApplicationsFromSnapshot(rankedScope, limit)
+        ? await this.topApplicationsFromSnapshot(rankedScope, limit, filter.group)
         : await this.topApplicationsFromFindings(filter, rankedScope, limit);
 
     return rows.map((row) => ({
@@ -368,7 +364,15 @@ export class VulnReportService {
   private async topApplicationsFromSnapshot(
     rankedScope: "app" | "os",
     limit: number,
+    /*
+      Passed separately because this variant takes no filter: it is the fast path chosen
+      precisely when no severity filter is set. The group restriction is not a severity
+      filter and must narrow this path too, or selecting a group would leave the ranking
+      showing the whole estate while every other card on the page was scoped.
+    */
+    groupId: string | null,
   ): Promise<TopApplicationRow[]> {
+    const groupIn = groupMemberPredicate(groupId);
     // Column set for the ranked half. The snapshot is symmetric, so this is a choice of
     // prefix rather than two separate queries.
     const ranked =
@@ -401,7 +405,7 @@ export class VulnReportService {
         ${ranked.packages} AS ranked_packages
       FROM scan_vuln_summary vs
       JOIN application a ON a.latest_scan_id = vs.scan_id
-      WHERE a.status <> 'inactive' AND ${ranked.findings} > 0
+      WHERE a.status <> 'inactive' AND ${groupIn} AND ${ranked.findings} > 0
       ORDER BY ${ranked.findings} DESC, ${ranked.critical} DESC, a.name ASC
       LIMIT ${limit}
     `);
@@ -413,6 +417,7 @@ export class VulnReportService {
     rankedScope: "app" | "os",
     limit: number,
   ): Promise<TopApplicationRow[]> {
+    const groupIn = groupMemberPredicate(filter.group);
     const rows = await this.deps.db.execute<Row<TopApplicationRow>>(sql`
       WITH matched AS (
         SELECT
@@ -425,7 +430,7 @@ export class VulnReportService {
         JOIN component c ON c.id = sc.component_id
         JOIN component_vulnerability cv ON cv.component_id = c.id
         JOIN vulnerability v ON v.id = cv.vulnerability_id
-        WHERE a.status <> 'inactive'
+        WHERE a.status <> 'inactive' AND ${groupIn}
           AND ${severityBucketPredicate(filter.severities)}
           AND ${NOT_SUPPRESSED}
       )
@@ -461,6 +466,7 @@ export class VulnReportService {
     rankedScope: "app" | "os",
     limit: number,
   ): Promise<TopVulnerablePackage[]> {
+    const groupIn = groupMemberPredicate(filter.group);
     const rows = await this.deps.db.execute<
       Row<{
         component_id: number | string;
@@ -498,7 +504,7 @@ export class VulnReportService {
       JOIN scan_vuln_summary vs ON vs.scan_id = sc.scan_id
       JOIN application a ON a.latest_scan_id = sc.scan_id
       LEFT JOIN LATERAL unnest(cv.fix_versions) AS fv ON TRUE
-      WHERE a.status <> 'inactive'
+      WHERE a.status <> 'inactive' AND ${groupIn}
         AND ${scopePredicate(rankedScope)}
         AND ${severityBucketPredicate(filter.severities)}
         AND ${NOT_SUPPRESSED}
@@ -538,6 +544,7 @@ export class VulnReportService {
     filter: VulnFilterState,
   ): Promise<NonNullable<VulnerabilityReport["baseImageExposure"]>> {
     const severities = severitiesForBuckets(filter.severities);
+    const groupIn = groupMemberPredicate(filter.group);
     const selected = jsonbSeveritySum("os", severities);
     const critical = jsonbSeveritySum("os", severities.includes("critical") ? ["critical"] : []);
     const high = jsonbSeveritySum("os", severities.includes("high") ? ["high"] : []);
@@ -561,7 +568,7 @@ export class VulnReportService {
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
       JOIN scan_vuln_summary vs ON vs.scan_id = s.id
-      WHERE a.status <> 'inactive'
+      WHERE a.status <> 'inactive' AND ${groupIn}
       GROUP BY s.os_name, s.os_version
       HAVING COALESCE(sum(${selected}), 0) > 0
       ORDER BY findings DESC, applications DESC

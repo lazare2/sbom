@@ -4,6 +4,7 @@ import {
   attributeDefinitionSchema,
   confirmApplicationRequestSchema,
   createApplicationRequestSchema,
+  createGroupRequestSchema,
   createIngestTokenRequestSchema,
   createUserRequestSchema,
   idParamSchema,
@@ -11,6 +12,8 @@ import {
   listUsersQuerySchema,
   mergeApplicationRequestSchema,
   resetUserPasswordRequestSchema,
+  setGroupMembersRequestSchema,
+  updateGroupRequestSchema,
   updateApplicationRequestSchema,
   updateAttributeDefinitionSchema,
   updateUserRequestSchema,
@@ -46,8 +49,15 @@ const aliasBodySchema = z.object({
  * `preHandler` is protected only if the author remembered.
  */
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
-  const { adminUsers, adminApplications, attributeDefinitions, audit, ingestTokens, settings } =
-    fastify.ctx;
+  const {
+    adminUsers,
+    adminApplications,
+    adminGroups,
+    attributeDefinitions,
+    audit,
+    ingestTokens,
+    settings,
+  } = fastify.ctx;
 
   fastify.addHook("preHandler", fastify.requireAdmin);
 
@@ -113,6 +123,40 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const result = await adminApplications.remove(id, actorOf(request));
     return reply.send(result);
+  });
+
+  // -------------------------------------------------------------------------
+  // Groups
+  // -------------------------------------------------------------------------
+
+  fastify.post("/groups", async (request, reply) => {
+    const body = parseOrThrow(createGroupRequestSchema, request.body);
+    return reply.status(201).send({ group: await adminGroups.create(body, actorOf(request)) });
+  });
+
+  fastify.patch("/groups/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(updateGroupRequestSchema, request.body);
+    return reply.send({ group: await adminGroups.update(id, body, actorOf(request)) });
+  });
+
+  /**
+   * Replaces the whole membership rather than adding or removing one at a time.
+   *
+   * A PUT because it is idempotent and the body is the complete resulting set — sending the
+   * same list twice leaves the group in the same state, which is what makes a retry after a
+   * dropped response safe.
+   */
+  fastify.put("/groups/:id/members", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setGroupMembersRequestSchema, request.body);
+    return reply.send({ group: await adminGroups.setMembers(id, body, actorOf(request)) });
+  });
+
+  /** Deletes the group only. The applications in it are untouched. */
+  fastify.delete("/groups/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    return reply.send(await adminGroups.remove(id, actorOf(request)));
   });
 
   // --- pending-confirmation resolution ---------------------------------------

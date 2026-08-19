@@ -9,6 +9,8 @@ import { EmptyState, Card } from "./components/ui.tsx";
 import { AnalyticsPage } from "./pages/AnalyticsPage.tsx";
 import { ApplicationDetailPage } from "./pages/ApplicationDetailPage.tsx";
 import { ApplicationsPage } from "./pages/ApplicationsPage.tsx";
+import { GroupsPage } from "./pages/GroupsPage.tsx";
+import { GroupDetailPage } from "./pages/GroupDetailPage.tsx";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage.tsx";
 import { ComponentSearchPage } from "./pages/ComponentSearchPage.tsx";
 import { DashboardPage } from "./pages/DashboardPage.tsx";
@@ -16,6 +18,7 @@ import { LoginPage } from "./pages/LoginPage.tsx";
 import { ScanDetailPage } from "./pages/ScanDetailPage.tsx";
 import { ScanDiffPage } from "./pages/ScanDiffPage.tsx";
 import { AdminApplicationsPage } from "./pages/admin/AdminApplicationsPage.tsx";
+import { AdminGroupsPage } from "./pages/admin/AdminGroupsPage.tsx";
 import { AdminAttributesPage } from "./pages/admin/AdminAttributesPage.tsx";
 import { AdminAuditPage } from "./pages/admin/AdminAuditPage.tsx";
 import { AdminLayout } from "./pages/admin/AdminLayout.tsx";
@@ -74,6 +77,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/" element={<DashboardPage />} />
               <Route path="/applications" element={<ApplicationsPage />} />
               <Route path="/applications/:id" element={<ApplicationDetailPage />} />
+              <Route path="/groups" element={<GroupsPage />} />
+              <Route path="/groups/:id" element={<GroupDetailPage />} />
               <Route path="/applications/:id/diff" element={<ScanDiffPage />} />
               <Route path="/scans/:id" element={<ScanDetailPage />} />
               <Route path="/search" element={<ComponentSearchPage />} />
@@ -109,6 +114,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route index element={<Navigate to="/admin/applications" replace />} />
                 <Route path="applications" element={<AdminApplicationsPage />} />
                 <Route path="pending" element={<AdminPendingPage />} />
+                <Route path="groups" element={<AdminGroupsPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
                 <Route path="attributes" element={<AdminAttributesPage />} />
                 <Route path="tokens" element={<AdminTokensPage />} />

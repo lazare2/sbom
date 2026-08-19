@@ -26,16 +26,28 @@ import { renderReportPdf } from "../reports/pdf.js";
  * the request, and the PDF prints what it was narrowed by.
  */
 export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
-  const { analytics } = fastify.ctx;
+  const { analytics , groups } = fastify.ctx;
 
   fastify.addHook("preHandler", fastify.requireAuth);
+
+  /**
+   * Resolves the filter, looking up the selected group's name.
+   *
+   * The lookup happens here rather than inside `normalizeVulnFilter` because that function is
+   * pure and shared with the client. One extra query only when a group is actually selected.
+   */
+  async function resolveFilter(rawQuery: unknown) {
+    const query = parseOrThrow(vulnFilterQuerySchema, rawQuery, "Query");
+    const groupName = query.group ? await groups.nameById(query.group) : null;
+    return normalizeVulnFilter(query, groupName);
+  }
 
   fastify.get("/report", async (request, reply) => {
     const query = parseOrThrow(analyticsQuerySchema, request.query, "Query");
     const report = await analytics.report({
       periodDays: query.periodDays,
       generatedBy: getUser(request).email,
-      vulnFilter: normalizeVulnFilter(parseOrThrow(vulnFilterQuerySchema, request.query, "Query")),
+      vulnFilter: await resolveFilter(request.query),
     });
     return reply.send(report);
   });
@@ -66,7 +78,7 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
     const report = await analytics.report({
       periodDays: query.periodDays,
       generatedBy: getUser(request).email,
-      vulnFilter: normalizeVulnFilter(parseOrThrow(vulnFilterQuerySchema, request.query, "Query")),
+      vulnFilter: await resolveFilter(request.query),
     });
 
     const pdf = await renderReportPdf(report);

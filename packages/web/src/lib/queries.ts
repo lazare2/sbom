@@ -4,6 +4,8 @@ import type {
   AdvisorySummary,
   AnalyticsReport,
   ApplicationDetail,
+  ApplicationGroupDetail,
+  ApplicationGroupSummary,
   ApplicationSummary,
   AttributeDefinition,
   AuditLogEntry,
@@ -13,6 +15,7 @@ import type {
   ComponentSuggestion,
   DashboardStats,
   EcosystemBreakdownEntry,
+  GroupAdvisory,
   IngestTokenSummary,
   NameMatchMode,
   Paginated,
@@ -47,6 +50,10 @@ export const queryKeys = {
   me: ["auth", "me"] as const,
   attributeDefinitions: ["attribute-definitions"] as const,
   applications: (params: Record<string, unknown>) => ["applications", "list", params] as const,
+  groups: (params: Record<string, unknown>) => ["groups", "list", params] as const,
+  group: (id: string) => ["groups", "detail", id] as const,
+  groupAdvisories: (id: string, params: Record<string, unknown>) =>
+    ["groups", id, "advisories", params] as const,
   application: (id: string) => ["applications", "detail", id] as const,
   applicationComponents: (id: string, params: Record<string, unknown>) =>
     ["applications", id, "components", params] as const,
@@ -156,6 +163,39 @@ export function useApplications(params: Record<string, unknown>) {
     queryFn: () => api.get<Paginated<ApplicationSummary>>(`/applications${toQueryString(params)}`),
     // Keeps the previous page visible while the next one loads, so paging and
     // filtering don't flash an empty table.
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * Every group, for the list page and for the filter dropdowns that offer them.
+ *
+ * A larger page size than the tables use, because the common caller is a `<select>` that has
+ * to contain every option to be correct — a paginated dropdown silently omitting the group
+ * someone is looking for is worse than a long one.
+ */
+export function useGroups(params: Record<string, unknown> = { pageSize: 200 }) {
+  return useQuery({
+    queryKey: queryKeys.groups(params),
+    queryFn: () => api.get<Paginated<ApplicationGroupSummary>>(`/groups${toQueryString(params)}`),
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useGroup(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.group(id ?? ""),
+    queryFn: () => api.get<{ group: ApplicationGroupDetail }>(`/groups/${id}`),
+    enabled: Boolean(id),
+    select: (data) => data.group,
+  });
+}
+
+export function useGroupAdvisories(id: string | undefined, params: Record<string, unknown>) {
+  return useQuery({
+    queryKey: queryKeys.groupAdvisories(id ?? "", params),
+    queryFn: () => api.get<Paginated<GroupAdvisory>>(`/groups/${id}/advisories${toQueryString(params)}`),
+    enabled: Boolean(id),
     placeholderData: (previous) => previous,
   });
 }

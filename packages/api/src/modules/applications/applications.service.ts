@@ -125,6 +125,17 @@ export class ApplicationsService {
       conditions.push(sql`s.runtimes @> ${JSON.stringify(probe)}::jsonb`);
     }
 
+    /*
+      Membership filter. EXISTS rather than a join so an application in two of the selected
+      group's overlapping sets still appears once — a join would emit it per matching row.
+    */
+    if (query.group) {
+      conditions.push(sql`EXISTS (
+        SELECT 1 FROM application_group_member gm
+        WHERE gm.application_id = a.id AND gm.group_id = ${query.group}::uuid
+      )`);
+    }
+
     if (query.staleOnly) {
       conditions.push(sql`a.last_scan_at IS NOT NULL AND a.last_scan_at < now() - ${staleInterval}`);
     }
@@ -146,6 +157,18 @@ export class ApplicationsService {
         a.scan_count,
         a.created_at,
         s.component_count AS latest_component_count,
+        /*
+          Group chips. A correlated aggregate rather than a join, for the same reason as the
+          filter above: joining would multiply the row by its group count and break both the
+          window-function total and the page size.
+        */
+        COALESCE(
+          (SELECT json_agg(json_build_object('id', g.id, 'name', g.name) ORDER BY lower(g.name))
+           FROM application_group_member gm
+           JOIN application_group g ON g.id = gm.group_id
+           WHERE gm.application_id = a.id),
+          '[]'::json
+        ) AS groups,
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
         vs.app_findings, vs.os_findings,
         vs.app_critical, vs.os_critical,
@@ -252,6 +275,18 @@ export class ApplicationsService {
         a.created_at,
         a.updated_at,
         s.component_count AS latest_component_count,
+        /*
+          Group chips. A correlated aggregate rather than a join, for the same reason as the
+          filter above: joining would multiply the row by its group count and break both the
+          window-function total and the page size.
+        */
+        COALESCE(
+          (SELECT json_agg(json_build_object('id', g.id, 'name', g.name) ORDER BY lower(g.name))
+           FROM application_group_member gm
+           JOIN application_group g ON g.id = gm.group_id
+           WHERE gm.application_id = a.id),
+          '[]'::json
+        ) AS groups,
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
         vs.app_findings, vs.os_findings,
         vs.app_critical, vs.os_critical,
@@ -427,6 +462,8 @@ interface ApplicationListRow extends PlatformRow {
   scan_count: number | string;
   created_at: Date | string;
   latest_component_count: number | string | null;
+  /** Always an array — the aggregate coalesces to `[]` rather than null for an ungrouped app. */
+  groups: Array<{ id: string; name: string }> | null;
   /*
     All six are null together when the current build has no summary row, which is the
     "not assessed" state. Typed as `number | string` because the driver returns integers
@@ -506,6 +543,7 @@ function toApplicationSummary(row: ApplicationListRow, vulnEnabled: boolean): Ap
         : Number(row.latest_component_count),
     scanCount: Number(row.scan_count),
     vulnerabilities: toVulnCounts(row, vulnEnabled),
+    groups: row.groups ?? [],
     isStale: row.is_stale === true,
     createdAt: toIso(row.created_at)!,
     // Null when the application has never been scanned. Distinct from a scan

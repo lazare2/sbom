@@ -1,6 +1,9 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type {
   ApplicationDetail,
+  ApplicationGroupDetail,
+  CreateGroupRequest,
+  UpdateGroupRequest,
   AttributeDefinition,
   AttributeDefinitionInput,
   BulkSearchBody,
@@ -500,5 +503,69 @@ export function useChangePassword() {
       // cosmetic.
       void qc.invalidateQueries({ queryKey: queryKeys.me });
     },
+  });
+}
+
+// --- application groups -----------------------------------------------------
+
+/**
+ * Group writes invalidate applications and the dashboard as well as groups.
+ *
+ * Not over-cautious. A group's membership decides which applications carry which chips, what
+ * the `?group=` filter returns, and — because the dashboard and analytics accept a group
+ * scope — what every aggregate on those pages describes. Invalidating only `["groups"]` would
+ * leave a stale scoped dashboard on screen showing figures for a membership that no longer
+ * exists, which is the one failure mode this feature can produce that looks like data rather
+ * than like a bug.
+ */
+function invalidateGroups(qc: QueryClient): Promise<unknown> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["groups"] }),
+    qc.invalidateQueries({ queryKey: ["applications"] }),
+    qc.invalidateQueries({ queryKey: ["dashboard"] }),
+    qc.invalidateQueries({ queryKey: ["analytics"] }),
+    qc.invalidateQueries({ queryKey: ["admin", "audit-log"] }),
+  ]);
+}
+
+export function useCreateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateGroupRequest) =>
+      api.post<{ group: ApplicationGroupDetail }>("/admin/groups", body),
+    onSuccess: () => invalidateGroups(qc),
+  });
+}
+
+export function useUpdateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: UpdateGroupRequest & { id: string }) =>
+      api.patch<{ group: ApplicationGroupDetail }>(`/admin/groups/${id}`, body),
+    onSuccess: () => invalidateGroups(qc),
+  });
+}
+
+/**
+ * Replaces the whole membership, matching the endpoint.
+ *
+ * The caller sends the complete resulting set rather than a delta, so a retry after a dropped
+ * response leaves the group in the same state instead of applying an addition twice.
+ */
+export function useSetGroupMembers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, applicationIds }: { id: string; applicationIds: string[] }) =>
+      api.put<{ group: ApplicationGroupDetail }>(`/admin/groups/${id}/members`, { applicationIds }),
+    onSuccess: () => invalidateGroups(qc),
+  });
+}
+
+export function useDeleteGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete<{ deleted: true; memberCount: number }>(`/admin/groups/${id}`),
+    onSuccess: () => invalidateGroups(qc),
   });
 }

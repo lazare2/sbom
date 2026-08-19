@@ -199,6 +199,81 @@ export const applicationAlias = pgTable(
 );
 
 /**
+ * A named set of applications, for the questions that span several of them.
+ *
+ * Distinct from `application.attributes`, which is the other way to label an application
+ * and cannot do this job: an attribute holds one value per key, so an application has one
+ * squad and cannot have three. Membership here is many-to-many in both directions, which is
+ * the whole point — an application belongs to its product *and* to "public facing" *and* to
+ * "PCI scope" at the same time.
+ *
+ * Two quite different uses share this one table, deliberately:
+ *
+ *   - A label. "Public facing" is a trait many unrelated applications happen to have, and
+ *     the question is which ones — the answer is a list.
+ *   - A composite. Eight images that together are one product, deployed as eight
+ *     applications because that is how they are built. The question is how exposed the
+ *     product is — the answer is one number.
+ *
+ * Storing them separately would duplicate the table, the membership table, the admin screens
+ * and the filter for no gain: the difference between the two is entirely in how a reader
+ * aggregates them, not in what is stored.
+ */
+export const applicationGroup = pgTable(
+  "application_group",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** Free text shown on the group's page. What this group is for, in the owner's words. */
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Case-insensitive, matching how application names are treated: "Public Facing" and
+    // "public facing" are one group, and letting both exist would split its membership in
+    // two while looking like a single group in every list.
+    uniqueIndex("application_group_name_lower_uniq").on(sql`lower(${t.name})`),
+  ],
+);
+
+/**
+ * Membership. Rows are created and removed by an admin, never by ingest.
+ *
+ * A CI pipeline could plausibly declare its own groups, and that was considered: it would be
+ * self-maintaining, since the pipeline knows what product it belongs to. It is not done
+ * because any holder of an ingest token could then create a group, and a typo would silently
+ * become a real one — "checkuot" alongside "checkout", each with part of the membership and
+ * nothing on screen to say they are the same thing.
+ */
+export const applicationGroupMember = pgTable(
+  "application_group_member",
+  {
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => applicationGroup.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => application.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /*
+      The composite key is the uniqueness guarantee as well as the index: adding an
+      application to a group it is already in must be a no-op rather than a second row, or
+      "affects 6 of 8 members" would start counting the same member twice.
+    */
+    primaryKey({ name: "application_group_member_pkey", columns: [t.groupId, t.applicationId] }),
+    /*
+      The reverse direction. The primary key serves "which applications are in this group";
+      this serves "which groups is this application in", which the applications list asks
+      once per row to render its chips.
+    */
+    index("application_group_member_application_idx").on(t.applicationId),
+  ],
+);
+
+/**
  * Describes the attribute keys the UI renders and validates against. Seeded
  * with squad / owner / severity; an admin can add more without a migration.
  */
@@ -1004,6 +1079,8 @@ export type SessionRow = typeof session.$inferSelect;
 export type ApplicationRow = typeof application.$inferSelect;
 export type NewApplicationRow = typeof application.$inferInsert;
 export type ApplicationAliasRow = typeof applicationAlias.$inferSelect;
+export type ApplicationGroupRow = typeof applicationGroup.$inferSelect;
+export type ApplicationGroupMemberRow = typeof applicationGroupMember.$inferSelect;
 export type AttributeDefinitionRow = typeof attributeDefinition.$inferSelect;
 export type ScanRow = typeof scan.$inferSelect;
 export type NewScanRow = typeof scan.$inferInsert;

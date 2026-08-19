@@ -222,7 +222,10 @@ export function DashboardPage() {
               onChange={(next) => setState(fromVulnFilter(next))}
             />
           </div>
-          <VulnFilterBanner label={vulns.data.filter.label} />
+          <VulnFilterBanner
+            label={vulns.data.filter.label}
+            groupScoped={vulns.data.filter.group !== null}
+          />
           <VulnBreakdownBlock report={vulns.data} />
           {/*
             Applications only. The package and advisory rankings answer "what should we fix

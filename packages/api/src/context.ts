@@ -15,6 +15,8 @@ import { BulkSearchService } from "./modules/components/bulk-search.service.js";
 import { ComponentsService } from "./modules/components/components.service.js";
 import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
+import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
+import { GroupsService } from "./modules/groups/groups.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
 import { Mailer } from "./modules/reports/mailer.js";
@@ -50,6 +52,8 @@ export interface AppContext {
   ingestTokens: IngestTokenService;
   ingestion: IngestionService;
   applications: ApplicationsService;
+  /** Reads over named sets of applications. Counts distinct advisories, not summed findings. */
+  groups: GroupsService;
   scans: ScansService;
   components: ComponentsService;
   bulkSearch: BulkSearchService;
@@ -86,6 +90,7 @@ export interface AppContext {
   audit: AuditService;
   adminUsers: AdminUsersService;
   adminApplications: AdminApplicationsService;
+  adminGroups: GroupsAdminService;
   attributeDefinitions: AttributeDefinitionsService;
 }
 
@@ -133,6 +138,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   // disagree about which applications are stale.
   const settings = new SettingsService({ db, config });
   const applications = new ApplicationsService({ db, config, settings });
+  const groups = new GroupsService({ db, settings });
   const scans = new ScansService({ db, blobStore });
   const components = new ComponentsService({ db });
   const bulkSearch = new BulkSearchService({ db });
@@ -185,6 +191,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const audit = new AuditService({ db });
   const adminUsers = new AdminUsersService({ db, sessions, audit });
   const adminApplications = new AdminApplicationsService({ db, audit, applications });
+  const adminGroups = new GroupsAdminService({ db, audit, groups });
   const attributeDefinitions = new AttributeDefinitionsService({ db, audit });
 
   return {
@@ -198,6 +205,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     ingestTokens,
     ingestion,
     applications,
+    groups,
     scans,
     components,
     bulkSearch,
@@ -217,6 +225,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     audit,
     adminUsers,
     adminApplications,
+    adminGroups,
     attributeDefinitions,
   };
 }

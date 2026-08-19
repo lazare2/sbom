@@ -6,6 +6,7 @@ export * from "./schemas/sort.js";
 export * from "./schemas/auth.js";
 export * from "./schemas/user.js";
 export * from "./schemas/application.js";
+export * from "./schemas/group.js";
 export * from "./schemas/scan.js";
 export * from "./schemas/component.js";
 export * from "./schemas/ingest.js";

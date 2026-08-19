@@ -10,6 +10,7 @@ import { sha256Hex } from "./lib/crypto.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
 import { analyticsRoutes } from "./modules/analytics/analytics.routes.js";
 import { applicationRoutes } from "./modules/applications/applications.routes.js";
+import { groupRoutes } from "./modules/groups/groups.routes.js";
 import { attributeRoutes } from "./modules/attributes/attributes.routes.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { componentRoutes } from "./modules/components/components.routes.js";
@@ -132,6 +133,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       // write, so it lives in its own scope under the same prefix rather than in
       // the read-only applications plugin.
       await api.register(manualUploadRoutes, { prefix: "/applications" });
+      await api.register(groupRoutes, { prefix: "/groups" });
       await api.register(scanRoutes, { prefix: "/scans" });
       await api.register(componentRoutes, { prefix: "/components" });
       await api.register(attributeRoutes, { prefix: "/attribute-definitions" });

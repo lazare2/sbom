@@ -6,6 +6,7 @@ import { Badge, Button } from "./ui.tsx";
 const NAV = [
   { to: "/", label: "Overview", end: true },
   { to: "/applications", label: "Applications", end: false },
+  { to: "/groups", label: "Groups", end: false },
   { to: "/search", label: "Package search", end: false },
   { to: "/analytics", label: "Analytics", end: false },
 ];

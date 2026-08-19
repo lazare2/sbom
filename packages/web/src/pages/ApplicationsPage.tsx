@@ -6,6 +6,7 @@ import { useServerSort } from "../lib/useSort.ts";
 import {
   useApplications,
   useAttributeDefinitions,
+  useGroups,
   useAttributeValues,
   usePlatformBreakdown,
   useVulnStatus,
@@ -54,6 +55,8 @@ const DEFAULTS = {
   squad: "",
   owner: "",
   severity: "",
+  /** Group membership filter, by id. See the note on `group` in the shared query schema. */
+  group: "",
   /**
    * Platform filters, matched against each application's CURRENT build. Held as
    * one combined string per axis (`alpine|3.20`) so a single select can offer
@@ -77,6 +80,7 @@ const urlSpec = {
     squad: readString(params, "squad"),
     owner: readString(params, "owner"),
     severity: readString(params, "severity"),
+    group: readString(params, "group"),
     // Accepts either `?os=alpine` (from a chip link elsewhere in the app) or
     // `?os=alpine|3.20` (from the select). Both have to work, because the chips
     // on the detail pages deliberately link to the looser form.
@@ -124,6 +128,7 @@ export function ApplicationsPage() {
       squad: state.squad || undefined,
       owner: state.owner || undefined,
       severity: state.severity || undefined,
+      group: state.group || undefined,
       os: os.name,
       osVersion: os.version,
       runtime: runtime.name,
@@ -144,6 +149,11 @@ export function ApplicationsPage() {
   // Filter options come from what actually exists in current builds, so the
   // dropdown never offers a distro nothing runs, nor omits one that something does.
   const platforms = usePlatformBreakdown();
+  /*
+    Every group, not a page of them: this feeds a <select>, and a paginated dropdown that
+    silently omits the group someone is looking for is worse than a long one.
+  */
+  const groups = useGroups({ pageSize: 200 });
 
   /*
     The findings column exists only while scanning is on. Hidden rather than shown empty:
@@ -193,6 +203,7 @@ export function ApplicationsPage() {
     state.squad !== "" ||
     state.owner !== "" ||
     state.severity !== "" ||
+    state.group !== "" ||
     state.os !== "" ||
     state.runtime !== "" ||
     state.staleOnly ||
@@ -259,6 +270,29 @@ export function ApplicationsPage() {
               options={[
                 { value: "", label: "Any" },
                 ...(severities.data ?? []).map((v) => ({ value: v, label: v })),
+              ]}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="f-group" className="mb-1 block text-[11px] font-medium text-text-muted">
+              Group
+            </label>
+            <Select
+              id="f-group"
+              value={state.group}
+              onChange={(v) => setState({ group: v, page: 1 })}
+              /*
+                Options carry the member count so an empty group is visibly empty before it is
+                selected — otherwise picking one returns no rows and reads as a broken filter
+                rather than as a group nobody has filled in yet.
+              */
+              options={[
+                { value: "", label: "Any" },
+                ...(groups.data?.items ?? []).map((g) => ({
+                  value: g.id,
+                  label: `${g.name} (${g.applicationCount})`,
+                })),
               ]}
             />
           </div>
@@ -398,6 +432,28 @@ export function ApplicationsPage() {
                         >
                           {app.name}
                         </Link>
+                        {app.groups.length > 0 ? (
+                          <div className="mt-0.5 flex flex-wrap gap-1">
+                            {app.groups.map((g) => (
+                              /*
+                                Clicking a chip filters this list to that group rather than
+                                opening it. The reader is already looking at applications, and
+                                "show me the rest of these" is the next question far more often
+                                than "take me to the group's own page" — which the Groups nav
+                                item and the group name on the detail page both still offer.
+                              */
+                              <button
+                                key={g.id}
+                                type="button"
+                                onClick={() => setState({ group: g.id, page: 1 })}
+                                title={`Show only applications in ${g.name}`}
+                                className="rounded bg-neutral-subtle px-1.5 py-0.5 text-[11px] text-text-muted hover:text-accent"
+                              >
+                                {g.name}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                       </Td>
                       <Td>
                         <div className="flex flex-wrap items-center gap-1">

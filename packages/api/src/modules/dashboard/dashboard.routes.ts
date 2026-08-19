@@ -7,9 +7,21 @@ import { parseOrThrow } from "../../lib/validate.js";
  * matching the access model for the rest of the read API.
  */
 export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
-  const { dashboard, analytics, settings } = fastify.ctx;
+  const { dashboard, analytics, settings , groups } = fastify.ctx;
 
   fastify.addHook("preHandler", fastify.requireAuth);
+
+  /**
+   * Resolves the filter, looking up the selected group's name.
+   *
+   * The lookup happens here rather than inside `normalizeVulnFilter` because that function is
+   * pure and shared with the client. One extra query only when a group is actually selected.
+   */
+  async function resolveFilter(rawQuery: unknown) {
+    const query = parseOrThrow(vulnFilterQuerySchema, rawQuery, "Query");
+    const groupName = query.group ? await groups.nameById(query.group) : null;
+    return normalizeVulnFilter(query, groupName);
+  }
 
   /**
    * Vulnerability posture for the overview page.
@@ -33,7 +45,7 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
     if (!(await settings.vulnScanningEnabled())) {
       return reply.send({ vulnerabilities: null });
     }
-    const filter = normalizeVulnFilter(parseOrThrow(vulnFilterQuerySchema, request.query, "Query"));
+    const filter = await resolveFilter(request.query);
     return reply.send({ vulnerabilities: await analytics.vulnerabilities(filter, 10) });
   });
 

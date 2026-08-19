@@ -19,6 +19,7 @@ import { rowsOf, toIso, type Row } from "../applications/applications.service.js
 import type { DashboardService } from "../dashboard/dashboard.service.js";
 import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 import type { SettingsService } from "../settings/settings.service.js";
+import { groupMemberPredicate } from "../vulnerabilities/scope.js";
 import type { VulnReportService } from "../vulnerabilities/vuln-report.service.js";
 
 /**
@@ -79,6 +80,16 @@ export class AnalyticsService {
   }): Promise<AnalyticsReport> {
     const limit = args.limit ?? 10;
     const vulnFilter = args.vulnFilter ?? INERT_VULN_FILTER;
+    /*
+      The group is the one part of the filter that reaches the inventory sections.
+
+      Severity and scope describe findings, which is why they narrow only the vulnerability
+      half — the note on `vulnFilter` above says so. A group describes *applications*, and
+      every section here is an aggregate over applications, so leaving churn, coverage and
+      the platform mix estate-wide while the vulnerability cards showed one product would
+      put two different populations on one page under one heading.
+    */
+    const groupId = vulnFilter.group;
     const generatedAt = new Date();
     const periodStart = new Date(generatedAt.getTime() - args.periodDays * 86_400_000);
 
@@ -94,16 +105,16 @@ export class AnalyticsService {
       ecosystems,
       platforms,
     ] = await Promise.all([
-      this.totals(periodStart),
-      this.coverage(limit),
-      this.deps.dashboard.topComponents({ limit, groupByName: false }),
-      this.topProjects(limit),
-      this.fragmentation(limit),
-      this.newPackages(periodStart, limit),
-      this.velocity(periodStart),
-      this.activity(periodStart, args.periodDays),
-      this.deps.dashboard.ecosystems(),
-      this.deps.dashboard.platforms(),
+      this.totals(periodStart, groupId),
+      this.coverage(limit, groupId),
+      this.deps.dashboard.topComponents({ limit, groupByName: false, groupId }),
+      this.topProjects(limit, groupId),
+      this.fragmentation(limit, groupId),
+      this.newPackages(periodStart, limit, groupId),
+      this.velocity(periodStart, groupId),
+      this.activity(periodStart, args.periodDays, groupId),
+      this.deps.dashboard.ecosystems(groupId),
+      this.deps.dashboard.platforms(groupId),
     ]);
 
     /*
@@ -155,20 +166,34 @@ export class AnalyticsService {
 
 
   /** Whole-estate counters. Deliberately identical to the dashboard's, plus the window. */
-  async totals(periodStart: Date): Promise<EstateTotals> {
+  async totals(periodStart: Date, groupId: string | null = null): Promise<EstateTotals> {
+    const inGroup = groupMemberPredicate(groupId);
     const rows = await this.deps.db.execute<Row<TotalsRow>>(sql`
       SELECT
-        (SELECT count(*) FROM application)::int AS app_total,
-        (SELECT count(*) FROM application WHERE status = 'active')::int AS app_active,
-        (SELECT count(*) FROM application WHERE status = 'inactive')::int AS app_inactive,
-        (SELECT count(*) FROM application WHERE status = 'pending_confirmation')::int AS app_pending,
-        (SELECT count(*) FROM scan)::int AS scan_total,
-        (SELECT count(*) FROM scan WHERE created_at >= ${periodStart})::int AS scan_period,
-        (SELECT max(created_at) FROM scan) AS scan_latest_at,
-        (SELECT count(*) FROM component)::int AS component_total,
+        (SELECT count(*) FROM application a WHERE ${inGroup})::int AS app_total,
+        (SELECT count(*) FROM application a WHERE status = 'active' AND ${inGroup})::int AS app_active,
+        (SELECT count(*) FROM application a WHERE status = 'inactive' AND ${inGroup})::int AS app_inactive,
+        (SELECT count(*) FROM application a WHERE status = 'pending_confirmation' AND ${inGroup})::int AS app_pending,
+        (SELECT count(*) FROM scan s JOIN application a ON a.id = s.application_id
+          WHERE ${inGroup})::int AS scan_total,
+        (SELECT count(*) FROM scan s JOIN application a ON a.id = s.application_id
+          WHERE s.created_at >= ${periodStart} AND ${inGroup})::int AS scan_period,
+        (SELECT max(s.created_at) FROM scan s JOIN application a ON a.id = s.application_id
+          WHERE ${inGroup}) AS scan_latest_at,
+        /*
+          Distinct packages anywhere in the group's history, not estate-wide. The component
+          table is a global dedup table with no application of its own, so it has to be
+          reached through the scans that reference it -- counting it directly would report
+          the whole estate's package total under a group's heading.
+        */
         (SELECT count(DISTINCT sc.component_id)
            FROM scan_component sc
-           JOIN application a ON a.latest_scan_id = sc.scan_id)::int AS component_current
+           JOIN application a ON a.id = sc.application_id
+          WHERE ${inGroup})::int AS component_total,
+        (SELECT count(DISTINCT sc.component_id)
+           FROM scan_component sc
+           JOIN application a ON a.latest_scan_id = sc.scan_id
+          WHERE ${inGroup})::int AS component_current
     `);
 
     const r = rowsOf(rows)[0];
@@ -195,15 +220,16 @@ export class AnalyticsService {
    * active with no scan at all, which belongs in neither bucket, and computing
    * one from the other would quietly absorb those into "covered".
    */
-  async coverage(limit: number): Promise<CoverageReport> {
+  async coverage(limit: number, groupId: string | null = null): Promise<CoverageReport> {
+    const inGroup = groupMemberPredicate(groupId);
     const { db, config } = this.deps;
     const staleInterval = await this.deps.settings.staleInterval();
 
     const summaryRows = await db.execute<Row<CoverageSummaryRow>>(sql`
       SELECT
-        (SELECT count(*) FROM application WHERE status = 'active')::int AS eligible,
-        (SELECT count(*) FROM application
-          WHERE status = 'active'
+        (SELECT count(*) FROM application a WHERE status = 'active' AND ${inGroup})::int AS eligible,
+        (SELECT count(*) FROM application a
+          WHERE status = 'active' AND ${inGroup}
             AND last_scan_at IS NOT NULL
             AND last_scan_at >= now() - ${staleInterval})::int AS covered,
         (SELECT count(*) FROM application
@@ -229,7 +255,7 @@ export class AnalyticsService {
           ELSE floor(extract(epoch FROM (now() - a.last_scan_at)) / 86400)::int
         END AS days_since_scan
       FROM application a
-      WHERE a.status = 'active'
+      WHERE a.status = 'active' AND ${inGroup}
         AND (a.last_scan_at IS NULL OR a.last_scan_at < now() - ${staleInterval})
       ORDER BY a.last_scan_at ASC NULLS FIRST, a.name ASC
       LIMIT ${limit}
@@ -267,7 +293,8 @@ export class AnalyticsService {
    * and the recent-scans list already show, and a report that disagrees with the
    * screen about an application's package count is a bug report waiting to happen.
    */
-  async topProjects(limit: number): Promise<TopProjectEntry[]> {
+  async topProjects(limit: number, groupId: string | null = null): Promise<TopProjectEntry[]> {
+    const inGroup = groupMemberPredicate(groupId);
     const rows = await this.deps.db.execute<Row<TopProjectRow>>(sql`
       SELECT
         a.id,
@@ -277,7 +304,7 @@ export class AnalyticsService {
         s.os_name, s.os_version, s.os_pretty, s.runtimes
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
-      WHERE a.status <> 'inactive'
+      WHERE a.status <> 'inactive' AND ${inGroup}
       ORDER BY s.component_count DESC, a.name ASC
       LIMIT ${limit}
     `);
@@ -298,12 +325,14 @@ export class AnalyticsService {
    * group-by-name mode, so `React` and `react` are one package rather than two
    * single-version rows that never surface here.
    */
-  async fragmentation(limit: number): Promise<FragmentationEntry[]> {
+  async fragmentation(limit: number, groupId: string | null = null): Promise<FragmentationEntry[]> {
+    const inGroup = groupMemberPredicate(groupId);
     const rows = await this.deps.db.execute<Row<FragmentationRow>>(sql`
       WITH current_components AS (
         SELECT DISTINCT sc.component_id, sc.application_id
         FROM scan_component sc
         JOIN application a ON a.latest_scan_id = sc.scan_id AND a.status <> 'inactive'
+        WHERE ${inGroup}
       )
       SELECT
         min(c.name) AS name,
@@ -347,12 +376,21 @@ export class AnalyticsService {
    * the aggregate to packages that are actually still deployed, which is what
    * keeps it from being a full aggregate over the largest table in the schema.
    */
-  async newPackages(periodStart: Date, limit: number): Promise<NewPackageEntry[]> {
+  async newPackages(
+    periodStart: Date,
+    limit: number,
+    groupId: string | null = null,
+  ): Promise<NewPackageEntry[]> {
+    const inGroup = groupMemberPredicate(groupId);
+    // The self-join below compares against a second application row, so it needs its own
+    // predicate bound to that alias rather than a reused one silently pointing at `a`.
+    const inGroup2 = groupMemberPredicate(groupId, "a2");
     const rows = await this.deps.db.execute<Row<NewPackageRow>>(sql`
       WITH current_components AS (
         SELECT DISTINCT sc.component_id
         FROM scan_component sc
         JOIN application a ON a.latest_scan_id = sc.scan_id AND a.status <> 'inactive'
+        WHERE ${inGroup}
       ),
       first_seen AS (
         SELECT sc.component_id, min(sc.created_at) AS first_seen_at
@@ -366,6 +404,7 @@ export class AnalyticsService {
         (SELECT count(DISTINCT sc2.application_id)::int
            FROM scan_component sc2
            JOIN application a2 ON a2.latest_scan_id = sc2.scan_id AND a2.status <> 'inactive'
+             AND ${inGroup2}
           WHERE sc2.component_id = c.id) AS applications
       FROM first_seen fs
       JOIN component c ON c.id = fs.component_id AND c.kind = 'library'
@@ -401,7 +440,8 @@ export class AnalyticsService {
    *     separately. Their entire package list would otherwise land in `added`,
    *     and one newly onboarded service would dominate the estate's churn.
    */
-  async velocity(periodStart: Date): Promise<VelocitySummary> {
+  async velocity(periodStart: Date, groupId: string | null = null): Promise<VelocitySummary> {
+    const inGroup = groupMemberPredicate(groupId);
     const rows = await this.deps.db.execute<Row<VelocityRow>>(sql`
       WITH baseline AS (
         -- Each application's last build strictly before the window.
@@ -413,7 +453,7 @@ export class AnalyticsService {
       current_builds AS (
         SELECT a.id AS application_id, a.latest_scan_id AS scan_id
         FROM application a
-        WHERE a.status <> 'inactive' AND a.latest_scan_id IS NOT NULL
+        WHERE a.status <> 'inactive' AND ${inGroup} AND a.latest_scan_id IS NOT NULL
       ),
       /*
        * Applications with a build on both sides. The scan_id inequality drops
@@ -501,7 +541,12 @@ export class AnalyticsService {
    * line that silently omits the weeks nothing happened draws a flat estate as a
    * busy one.
    */
-  async activity(periodStart: Date, periodDays: number): Promise<ActivityBucket[]> {
+  async activity(
+    periodStart: Date,
+    periodDays: number,
+    groupId: string | null = null,
+  ): Promise<ActivityBucket[]> {
+    const inGroup = groupMemberPredicate(groupId);
     // Daily for windows a reader can still take in as bars, weekly beyond that.
     // Interpolated into the SQL rather than bound, because `date_trunc` and
     // `generate_series` need literals — hence the fixed strings, not the input.
@@ -534,6 +579,15 @@ export class AnalyticsService {
          */
         ON s.created_at >= greatest(b.bucket_start, ${periodStart})
        AND s.created_at < b.bucket_start + ${step}
+       /*
+         In the join condition, not a WHERE. A WHERE would filter out the rows the LEFT JOIN
+         produced for empty buckets, turning a week with no scans into a missing bar rather
+         than a zero one -- and the chart would silently change shape rather than show a gap.
+       */
+       AND EXISTS (
+         SELECT 1 FROM application a
+         WHERE a.id = s.application_id AND ${inGroup}
+       )
       GROUP BY b.bucket_start
       ORDER BY b.bucket_start ASC
     `);

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { applicationStatusSchema, attributeTypeSchema } from "../enums.js";
 import { paginationQuerySchema, uuidSchema } from "./common.js";
 import { defineSortTable } from "./sort.js";
+import type { GroupRef } from "./group.js";
 import type { ScanPlatform } from "./scan.js";
 
 /**
@@ -110,6 +111,13 @@ export const listApplicationsQuerySchema = paginationQuerySchema.extend({
   /** Canonical runtime name, e.g. `node`. Combine with `runtimeVersion` to pin one. */
   runtime: z.string().trim().max(64).optional(),
   runtimeVersion: z.string().trim().max(64).optional(),
+  /**
+   * Only applications in this group.
+   *
+   * By id rather than name: a group can be renamed, and a bookmarked filter that silently
+   * stops matching is worse than one that 404s.
+   */
+  group: uuidSchema.optional(),
   /** Only applications whose latest scan is older than the stale threshold. */
   staleOnly: z.coerce.boolean().optional(),
   /** Which attribute `sortBy=attribute` means. Ignored for every other sort field. */
@@ -160,6 +168,13 @@ export interface ApplicationSummary {
    * null only in the former case.
    */
   vulnerabilities: ApplicationVulnCounts | null;
+  /**
+   * Every group this application belongs to, name-sorted.
+   *
+   * An array because membership is many-to-many — this is exactly what the single-valued
+   * `attributes` cannot express, and the reason groups exist alongside them.
+   */
+  groups: GroupRef[];
   scanCount: number;
   isStale: boolean;
   createdAt: string;

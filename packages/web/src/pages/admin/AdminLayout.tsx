@@ -5,6 +5,7 @@ import { PageHeader } from "../../components/ui.tsx";
 const TABS = [
   { to: "/admin/applications", label: "Applications" },
   { to: "/admin/pending", label: "Awaiting confirmation", badge: "pending" as const },
+  { to: "/admin/groups", label: "Groups" },
   { to: "/admin/users", label: "Users" },
   { to: "/admin/attributes", label: "Attributes" },
   { to: "/admin/tokens", label: "CI tokens" },
