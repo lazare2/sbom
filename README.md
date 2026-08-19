@@ -1256,6 +1256,7 @@ It needs Python 3.8+, `docker`, and `syft` on PATH.
 | `--only NAME` | Process one entry. Repeatable |
 | `--no-pull` | Scan the local copy instead of pulling |
 | `--dry-run` | Pull and scan, but upload nothing |
+| `--no-proxy` | Ignore `HTTP_PROXY`/`HTTPS_PROXY` when uploading |
 | `--branch`, `--build-number` | Recorded on every scan in the run |
 
 The results are ordinary scans, indistinguishable from a pipeline's: current-build
@@ -1272,8 +1273,20 @@ after a first run. Names match case-insensitively, so `Checkout-Web` and
 
 One image failing does not stop the rest; the run reports what failed and exits
 non-zero, so a scheduled invocation is visibly broken rather than quietly
-half-done. Only 5xx and connection errors are retried — a 4xx means the request
+half-done. Only 5xx and transport errors are retried — a 4xx means the request
 itself is wrong and will be wrong again.
+
+**If an upload dies with the connection closed and no reply**, the API is rarely
+the culprit: it accepts up to `INGEST_MAX_SBOM_BYTES` (64 MB by default) and
+answers an oversized body with a 413. Silence means something in between hung up
+instead — a reverse proxy's `client_max_body_size` (the bundled nginx sets `1g`,
+but a proxy in front of it may not), or a corporate proxy. The script names any
+proxy it is using in its header line, and `--no-proxy` bypasses it. To tell the
+script apart from the network path, post the same file by hand:
+
+```bash
+curl -f -H "Authorization: Bearer $SBOM_INGEST_TOKEN"   -F sbom=@sbom.json -F app_name=my-service   "$SBOM_API_URL/api/v1/scans"
+```
 
 ---
 

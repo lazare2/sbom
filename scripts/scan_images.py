@@ -48,6 +48,7 @@ machine with no pip access. Needs Python 3.8+, `docker`, and `syft` on PATH.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import shlex
@@ -97,6 +98,20 @@ UPLOAD_TIMEOUT_SECONDS = 300
 
 class StepError(Exception):
     """A step failed for one image. Reported and skipped; the run continues."""
+
+
+# Set in main(). urllib routes through HTTP_PROXY/HTTPS_PROXY automatically, which
+# is usually right on a corporate machine and occasionally the thing breaking the
+# upload -- `--no-proxy` swaps in an opener that ignores them.
+OPENER = None  # type: Optional[urllib.request.OpenerDirector]
+
+
+def open_url(request: urllib.request.Request, timeout: int):
+    # OpenerDirector exposes `.open`, the module exposes `.urlopen`. They are not
+    # interchangeable, so the two cases are spelled out rather than collapsed.
+    if OPENER is not None:
+        return OPENER.open(request, timeout=timeout)
+    return urllib.request.urlopen(request, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +310,9 @@ def upload(app_name: str, image: str, sbom: bytes, extra: Dict[str, str]) -> dic
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=UPLOAD_TIMEOUT_SECONDS) as response:
+            with open_url(request, UPLOAD_TIMEOUT_SECONDS) as response:
                 return json.loads(response.read().decode("utf-8"))
+
         except urllib.error.HTTPError as err:
             detail = describe_http_error(err)
             if err.code >= 500 and attempt < attempts:
@@ -304,14 +320,72 @@ def upload(app_name: str, image: str, sbom: bytes, extra: Dict[str, str]) -> dic
                 time.sleep(2 * attempt)
                 continue
             raise StepError(detail)
+
+        # URLError first: it subclasses OSError, so the broader clause below would
+        # otherwise swallow it and lose its `reason`.
         except urllib.error.URLError as err:
+            detail = "cannot reach %s: %s" % (API_URL, err.reason)
             if attempt < attempts:
-                print("      cannot reach %s: %s -- retrying (%d/%d)" % (API_URL, err.reason, attempt, attempts))
+                print("      %s -- retrying (%d/%d)" % (detail, attempt, attempts))
                 time.sleep(2 * attempt)
                 continue
-            raise StepError("cannot reach %s: %s" % (API_URL, err.reason))
+            raise StepError(detail)
+
+        except (http.client.HTTPException, OSError) as err:
+            """
+            Errors raised while READING the response rather than while sending.
+
+            urllib wraps only the send half in URLError; anything that goes wrong
+            once the request is on the wire -- most commonly RemoteDisconnected,
+            which subclasses ConnectionResetError and BadStatusLine but not
+            URLError -- comes back raw. Catching just URLError therefore let this
+            exact failure escape the loop and abort the whole run, which is the
+            opposite of the per-image isolation the rest of this script provides.
+            """
+            detail = describe_transport_error(err)
+            if attempt < attempts:
+                print("      %s -- retrying (%d/%d)" % (detail, attempt, attempts))
+                time.sleep(2 * attempt)
+                continue
+            raise StepError(detail)
 
     raise StepError("upload failed after %d attempts" % attempts)
+
+
+def describe_transport_error(err: Exception) -> str:
+    """
+    Explain a connection that died mid-request.
+
+    The characteristic one is a reply that never arrives at all. The API itself
+    accepts up to INGEST_MAX_SBOM_BYTES (64 MB by default) and answers an oversized
+    body with a 413, so silence almost always means something in between closed the
+    connection instead of answering -- a reverse proxy or corporate proxy refusing
+    the body on size. Naming those here saves an afternoon: the symptom points at
+    the API, and the cause is one hop short of it.
+    """
+    if isinstance(err, (http.client.RemoteDisconnected, ConnectionResetError, ConnectionAbortedError)):
+        hint = (
+            "the connection closed without a reply. The API answers an oversized body with "
+            "413, so this usually means something between here and it rejected the upload: "
+            "check client_max_body_size on the reverse proxy (the bundled nginx allows 1g)"
+        )
+        proxy = active_proxy()
+        if proxy:
+            hint += ", and note requests are going through %s -- try --no-proxy" % proxy
+        return "%s: %s" % (type(err).__name__, hint)
+    return "%s: %s" % (type(err).__name__, err)
+
+
+def active_proxy() -> Optional[str]:
+    """Whichever proxy urllib would use for this API URL, if any."""
+    if OPENER is not None:
+        return None
+    scheme = "https" if API_URL.startswith("https://") else "http"
+    for name in (scheme + "_proxy", (scheme + "_proxy").upper()):
+        value = os.environ.get(name)
+        if value:
+            return "%s=%s" % (name, value)
+    return None
 
 
 def describe_http_error(err: urllib.error.HTTPError) -> str:
@@ -382,9 +456,15 @@ def main() -> int:
                         help="scan the local copy without pulling first")
     parser.add_argument("--dry-run", action="store_true",
                         help="pull and scan, but do not upload")
+    parser.add_argument("--no-proxy", action="store_true",
+                        help="ignore HTTP_PROXY/HTTPS_PROXY when uploading")
     parser.add_argument("--branch", help="record a branch on every scan")
     parser.add_argument("--build-number", help="record a build number on every scan")
     args = parser.parse_args()
+
+    if args.no_proxy:
+        global OPENER
+        OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     problems = preflight(args.no_pull)
     if problems:
@@ -404,7 +484,13 @@ def main() -> int:
 
     extra = {"branch": args.branch or "", "build_number": args.build_number or ""}
 
-    print("%s -> %d image(s)%s\n" % (API_URL, len(targets), "  [dry run]" if args.dry_run else ""))
+    print("%s -> %d image(s)%s" % (API_URL, len(targets), "  [dry run]" if args.dry_run else ""))
+    # Printed up front rather than only inside an error: a proxy quietly interposing
+    # itself is the kind of thing nobody thinks to check until it is named.
+    proxy = active_proxy()
+    if proxy:
+        print("via proxy %s" % proxy)
+    print("")
 
     succeeded: List[str] = []
     failed: List[Tuple[str, str]] = []
@@ -456,6 +542,16 @@ def main() -> int:
             # One bad image must not cost the other thirty-nine their scan.
             print("      FAILED: %s" % err)
             failed.append((app_name, str(err)))
+
+        except Exception as err:  # noqa: BLE001
+            # A bare `except Exception` because the narrower alternative was already
+            # tried and was wrong: an unforeseen exception type escaping this loop
+            # aborts a forty-image run at image three and discards the thirty-seven
+            # that would have succeeded. Whatever it is, it concerns one image. The
+            # type name is printed so an unexpected failure stays diagnosable rather
+            # than merely survived.
+            print("      FAILED (unexpected): %s: %s" % (type(err).__name__, err))
+            failed.append((app_name, "%s: %s" % (type(err).__name__, err)))
 
         print("")
 
