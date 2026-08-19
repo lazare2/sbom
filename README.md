@@ -1221,6 +1221,53 @@ Only SHA-256 hashes are stored. A leaked token can write a scan under any
 application name; named tokens exist so the blast radius can be scoped and
 rotated per environment.
 
+### `scripts/scan_images.py` — scanning images without a pipeline
+
+For images that no pipeline builds: a vendor appliance, a base image tracked on
+its own, an application whose CI is not wired up yet. It holds a dictionary of
+application name to image reference, and for each entry runs `docker pull`, then
+`syft`, then posts the SBOM to `POST /api/v1/scans`.
+
+```python
+IMAGES = {
+    "checkout-web":   "registry.example.com/checkout/web:1.4.2",
+    "payments-api":   "registry.example.com/payments/api:3.0.1",
+}
+```
+
+```bash
+export SBOM_API_URL=https://sbom.example.com
+export SBOM_INGEST_TOKEN=<from Admin -> Ingest tokens>
+python scripts/scan_images.py
+```
+
+Standard library only — no `pip install` — so it runs on a locked-down machine.
+It needs Python 3.8+, `docker`, and `syft` on PATH.
+
+| Flag | Effect |
+|---|---|
+| `--only NAME` | Process one entry. Repeatable |
+| `--no-pull` | Scan the local copy instead of pulling |
+| `--dry-run` | Pull and scan, but upload nothing |
+| `--branch`, `--build-number` | Recorded on every scan in the run |
+
+The results are ordinary scans, indistinguishable from a pipeline's: current-build
+components, a diff against the previous run, vulnerability findings, and inclusion
+in the dashboard and reports. Re-running is the intended usage — each run adds a
+build, and the CI endpoint accepts an unchanged SBOM without complaint, so an image
+that has not moved records another build rather than failing.
+
+**A key that names no existing application creates one**, as `pending_confirmation`
+in Admin → Pending. That is how onboarding is meant to work, but it also means a
+typo makes a second application instead of an error — worth checking that queue
+after a first run. Names match case-insensitively, so `Checkout-Web` and
+`checkout-web` are one application.
+
+One image failing does not stop the rest; the run reports what failed and exits
+non-zero, so a scheduled invocation is visibly broken rather than quietly
+half-done. Only 5xx and connection errors are retried — a 4xx means the request
+itself is wrong and will be wrong again.
+
 ---
 
 ## The rest of the API
