@@ -22,6 +22,10 @@ import type {
   PlatformBreakdown,
   RemovedComponent,
   SavedPackageList,
+  MaliciousFinding,
+  MaliciousFindingDetail,
+  MaliciousStatus,
+  MaliciousSummary,
   ScanDiff,
   ScanSummary,
   SessionUser,
@@ -68,6 +72,10 @@ export const queryKeys = {
   componentEcosystems: ["components", "ecosystems"] as const,
   componentVersions: (name: string) => ["components", "versions", name] as const,
   recentScans: (limit: number) => ["scans", "recent", limit] as const,
+  maliciousStatus: ["malicious", "status"] as const,
+  maliciousList: (params: Record<string, unknown>) => ["malicious", "list", params] as const,
+  maliciousFinding: (id: string) => ["malicious", "detail", id] as const,
+  dashboardMalicious: ["dashboard", "malicious"] as const,
   applicationDiff: (id: string, params: Record<string, unknown>) =>
     ["applications", id, "diff", params] as const,
   applicationRemoved: (id: string, params: Record<string, unknown>) =>
@@ -714,3 +722,60 @@ export function useScanVulnerabilities(
 
 export type MeResponse = { user: SessionUser };
 export type { UseQueryOptions };
+
+
+// --- malicious packages ------------------------------------------------------
+
+/**
+ * Feature state. Answers in every condition, including switched off.
+ *
+ * Kept fresh for a minute, like the vulnerability status it mirrors: the nav entry and the
+ * dashboard alert both key off it, and an admin enabling detection should see the UI appear
+ * without a reload.
+ */
+export function useMaliciousStatus() {
+  return useQuery({
+    queryKey: queryKeys.maliciousStatus,
+    queryFn: () => api.get<MaliciousStatus>("/malicious-status"),
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * The findings list.
+ *
+ * `enabled` is threaded through rather than always fetching, because the endpoint answers
+ * 409 while detection is off and a rejected request on every page load would fill the console
+ * with errors that are not errors.
+ */
+export function useMaliciousFindings(params: Record<string, unknown>, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.maliciousList(params),
+    queryFn: () => api.get<Paginated<MaliciousFinding>>(`/malicious${toQueryString(params)}`),
+    enabled,
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useMaliciousFinding(id: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.maliciousFinding(id ?? ""),
+    queryFn: () => api.get<{ finding: MaliciousFindingDetail }>(`/malicious/${encodeURIComponent(id!)}`),
+    select: (data) => data.finding,
+    enabled: Boolean(id) && enabled,
+  });
+}
+
+/**
+ * The dashboard block.
+ *
+ * `null` is a real answer here and must survive to the renderer: it means detection is off or
+ * no feed has been installed, which is a different thing from an estate with nothing wrong.
+ */
+export function useDashboardMalicious() {
+  return useQuery({
+    queryKey: queryKeys.dashboardMalicious,
+    queryFn: () => api.get<{ malicious: MaliciousSummary | null }>("/dashboard/malicious"),
+    select: (data) => data.malicious,
+  });
+}

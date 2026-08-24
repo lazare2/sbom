@@ -216,6 +216,48 @@ describe("app wiring", () => {
     expect(onReadScope.statusCode).toBe(404);
   });
 
+  it("guards the malicious-package routes, and keeps the status route separate", async () => {
+    /*
+     * Two boundaries, easy to get wrong in opposite directions.
+     *
+     * The findings and admin routes expose or change estate data, so neither may be reachable
+     * anonymously. The split between them is the other half: the findings route refuses with
+     * 409 while detection is off -- so an unchecked estate can never render as a clean one --
+     * while the status route stays answerable so the UI can tell "off" from "broken". A status
+     * route that inherited the refusal would leave the SPA unable to explain either.
+     */
+    for (const url of ["/api/v1/malicious", "/api/v1/malicious-status"]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode, url).toBe(401);
+    }
+
+    for (const url of [
+      "/api/v1/admin/malicious/settings",
+      "/api/v1/admin/malicious/history",
+    ]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode, url).toBe(401);
+    }
+
+    const refresh = await app.inject({ method: "POST", url: "/api/v1/admin/malicious/update" });
+    expect(refresh.statusCode).toBe(401);
+
+    const ack = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/malicious/acknowledgements",
+      payload: { maliciousPackageId: "MAL-2024-1", state: "remediated", note: "no" },
+    });
+    expect(ack.statusCode).toBe(401);
+
+    // A CI ingest token creates scans; it must not be able to read or clear malware findings.
+    const withToken = await app.inject({
+      method: "GET",
+      url: "/api/v1/malicious",
+      headers: { authorization: "Bearer super-secret-ci-token" },
+    });
+    expect(withToken.statusCode).toBe(401);
+  });
+
   it("guards every vulnerability route, admin and read alike", async () => {
     /*
      * Two distinct boundaries, both asserted here because they are easy to get wrong in

@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
-import { useVulnStatus } from "../lib/queries.ts";
+import { useMaliciousStatus, useVulnStatus } from "../lib/queries.ts";
 import { Badge, Button } from "./ui.tsx";
 
 const NAV = [
@@ -20,12 +20,20 @@ const NAV = [
  */
 const VULN_NAV = { to: "/vulnerabilities", label: "Vulnerabilities", end: false };
 
+/** Shown only when detection is enabled, on the same reasoning as the vulnerability entry. */
+const MALICIOUS_NAV = { to: "/malicious", label: "Malicious packages", end: false };
+
 export function Layout() {
   const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   // Cached for a minute by the query, so this does not add a request per navigation.
   const { data: vulnStatus } = useVulnStatus();
-  const navItems = vulnStatus?.enabled ? [...NAV, VULN_NAV] : NAV;
+  const { data: maliciousStatus } = useMaliciousStatus();
+  const navItems = [
+    ...NAV,
+    ...(vulnStatus?.enabled ? [VULN_NAV] : []),
+    ...(maliciousStatus?.enabled ? [MALICIOUS_NAV] : []),
+  ];
 
   async function handleLogout() {
     await logout();

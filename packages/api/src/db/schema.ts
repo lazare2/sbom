@@ -21,6 +21,10 @@ import type {
   AttributeType,
   AuthProviderName,
   FixState,
+  MaliciousAckState,
+  MaliciousFeedOutcome,
+  MaliciousFeedTrigger,
+  MaliciousMatchMode,
   ScanSource,
   ScanVulnStatus,
   SeverityCounts,
@@ -513,6 +517,20 @@ export const component = pgTable(
     vulnScannedAt: timestamp("vuln_scanned_at", { withTimezone: true }),
     /** `built` timestamp of the grype DB that produced this component's findings. */
     vulnDbBuiltAt: timestamp("vuln_db_built_at", { withTimezone: true }),
+
+    /**
+     * The same derived-work-queue pattern as the two columns above, for malicious-package
+     * matching, and deliberately a separate pair rather than a reuse of them.
+     *
+     * The two checks answer to different feeds on different schedules -- Grype's database is
+     * gigabytes and refreshed daily, the malicious feed is tens of megabytes and can refresh
+     * hourly -- and either may be switched off while the other runs. Sharing one watermark
+     * would make enabling one silently re-queue every component for the other, and would make
+     * "not assessed for malware" indistinguishable from "not assessed for vulnerabilities".
+     */
+    malScannedAt: timestamp("mal_scanned_at", { withTimezone: true }),
+    /** `feed_built_at` of the malicious-package feed this component was matched against. */
+    malFeedBuiltAt: timestamp("mal_feed_built_at", { withTimezone: true }),
   },
   (t) => [
     // Must be UNIQUE: ingest dedupes via
@@ -1070,6 +1088,249 @@ export const vulnDbUpdate = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Malicious packages
+// ---------------------------------------------------------------------------
+
+/**
+ * Packages that exist to attack whoever installs them.
+ *
+ * A separate table from the vulnerability table, and separate for reasons that are not
+ * tidiness:
+ *
+ *  1. There is no severity. Malware is not CVSS 9.1; it is binary. Filing these as
+ *     `critical` would inflate every severity aggregate on the platform and quietly change
+ *     what "2,847 findings" has always meant.
+ *  2. The remediation is different in kind. A CVE is fixed by upgrading. This is fixed by
+ *     removing the package AND rotating every credential that was readable from the machine
+ *     that installed it, because the payload ran at install time -- in a postinstall or a
+ *     setup.py -- long before anyone read a report.
+ *  3. Suppression does not transfer. Suppressions exist so an admin can accept a risk;
+ *     nobody should be able to accept a backdoor, which is why acknowledgements live in
+ *     their own table with their own vocabulary.
+ *
+ * Sourced from the OpenSSF malicious-packages feed (Apache-2.0), which is the pooled output
+ * of GitHub, Amazon Inspector, Checkmarx, Datadog and others in OSV format. Every row keeps
+ * its upstream id, reporters and reference URL, because telling somebody they have malware
+ * sets off an incident and they are entitled to check the claim before they start.
+ */
+export const maliciousPackage = pgTable(
+  "malicious_package",
+  {
+    /** The OSV id, e.g. MAL-2024-1677. Upstream's, never minted here. */
+    id: text("id").primaryKey(),
+    /**
+     * Normalised to the purl type the platform already stores on components, so PyPI
+     * becomes pypi and crates.io becomes cargo.
+     *
+     * Translated on the way in rather than at match time: doing it per query would put a
+     * function call on the join key and lose the index, and would spread the mapping across
+     * every caller instead of keeping it in the one place that parses the feed.
+     */
+    ecosystem: text("ecosystem").notNull(),
+    /** The package name as published, for display. */
+    packageName: text("package_name").notNull(),
+    /**
+     * The name reduced to its ecosystem's canonical form, and the actual join key.
+     *
+     * PyPI treats Foo.Bar, foo-bar and foo_bar as one project (PEP 503); npm and RubyGems
+     * are case-insensitive in practice; Maven and Go are not. Without this, a report filed
+     * under one spelling silently fails to match an SBOM using another -- and a missed
+     * malicious package is a failure nobody ever sees.
+     */
+    normalizedName: text("normalized_name").notNull(),
+    summary: text("summary"),
+    /** Upstream's write-up, usually describing exactly what the payload does. */
+    details: text("details"),
+    matchMode: text("match_mode").$type<MaliciousMatchMode>().notNull(),
+    /**
+     * Exact affected versions, for exact_versions.
+     *
+     * Empty for all_versions, where the package is malicious in its entirety and listing
+     * versions would imply the others are safe.
+     */
+    affectedVersions: text("affected_versions").array().notNull().default([]),
+    /**
+     * Raw OSV range events, for version_range.
+     *
+     * Kept as JSON rather than parsed into columns because under one percent of reports use
+     * ranges, and the shapes vary -- introduced alone, introduced with fixed, introduced
+     * with last_affected. Normalising a rare case into columns would cost more than it saves.
+     */
+    versionRanges: jsonb("version_ranges").$type<MaliciousVersionRange[]>(),
+    /** Other ids for the same report, typically a GHSA. */
+    aliases: text("aliases").array().notNull().default([]),
+    /** Which upstream reporters contributed, e.g. ghsa-malware, amazon-inspector. */
+    sources: text("sources").array().notNull().default([]),
+    referenceUrl: text("reference_url"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    modifiedAt: timestamp("modified_at", { withTimezone: true }),
+    /**
+     * Set when upstream retracted the report.
+     *
+     * Retained rather than deleted, and this is load-bearing. A withdrawn report must stop
+     * producing findings, but somebody may already have acted on it -- torn down a service,
+     * rotated a fleet of keys -- and deleting the row would leave their audit trail pointing
+     * at nothing. Roughly 350 of the feed's reports are withdrawn at any time.
+     */
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /*
+      The match path. Every sweep looks packages up by exactly this pair, and the table is a
+      quarter of a million rows against an estate that may hold millions of components.
+    */
+    index("malicious_package_match_idx").on(t.ecosystem, t.normalizedName),
+    /* Partial: withdrawn reports are a rounding error and are excluded from every match. */
+    index("malicious_package_live_idx")
+      .on(t.ecosystem, t.normalizedName)
+      .where(sql`withdrawn_at IS NULL`),
+    index("malicious_package_published_idx").on(t.publishedAt.desc()),
+  ],
+);
+
+/** One OSV range: an introduced bound with an optional upper bound. */
+export interface MaliciousVersionRange {
+  type: string;
+  introduced: string | null;
+  fixed: string | null;
+  lastAffected: string | null;
+}
+
+/**
+ * The findings table: which package in the estate is which malicious report.
+ *
+ * Keyed on component_id for the same reason the vulnerability findings are, and the payoff
+ * is larger here. Because a component row is shared by every scan that ever contained it,
+ * one match answers "is this in our current build" AND "was this ever in any build we
+ * shipped" -- and for malware the second question is the important one. The payload ran when
+ * the package was installed, so a package that left the tree three months ago still means
+ * the runner that built it was compromised that day. A tool reporting only current builds
+ * would call that estate clean, which is the one answer this table must never produce.
+ */
+export const componentMalicious = pgTable(
+  "component_malicious",
+  {
+    componentId: bigint("component_id", { mode: "number" })
+      .notNull()
+      .references(() => component.id, { onDelete: "cascade" }),
+    maliciousPackageId: text("malicious_package_id")
+      .notNull()
+      .references(() => maliciousPackage.id, { onDelete: "cascade" }),
+    /** Which of the report's three shapes produced this match, for explaining it on screen. */
+    matchMode: text("match_mode").$type<MaliciousMatchMode>().notNull(),
+    matchedAt: timestamp("matched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "component_malicious_pkey", columns: [t.componentId, t.maliciousPackageId] }),
+    /* Serves "which components does this report hit", the blast-radius direction. */
+    index("component_malicious_package_idx").on(t.maliciousPackageId),
+  ],
+);
+
+/**
+ * What somebody decided about a finding, and why.
+ *
+ * application_id is nullable and the null means "everywhere": a false-positive report should
+ * be dismissable once rather than once per affected application, while remediation is
+ * genuinely per-application because the credentials to rotate belong to a particular pipeline.
+ *
+ * The note is mandatory. An acknowledgement with no reason is indistinguishable from someone
+ * clearing a red banner to make it stop, and six months later nobody can tell which it was.
+ */
+export const maliciousAcknowledgement = pgTable(
+  "malicious_acknowledgement",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    maliciousPackageId: text("malicious_package_id")
+      .notNull()
+      .references(() => maliciousPackage.id, { onDelete: "cascade" }),
+    /** Null means the acknowledgement covers every application. */
+    applicationId: uuid("application_id").references(() => application.id, { onDelete: "cascade" }),
+    state: text("state").$type<MaliciousAckState>().notNull(),
+    note: text("note").notNull(),
+    acknowledgedByUserId: uuid("acknowledged_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    /** Denormalised so the decision survives deletion of the account that made it. */
+    acknowledgedByEmail: text("acknowledged_by_email"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /*
+      Two partial indexes rather than one over both columns, because Postgres treats NULLs as
+      distinct in a unique index: a plain UNIQUE(package, application) would happily accept
+      twenty estate-wide acknowledgements of the same report, and the UI would show whichever
+      one the planner returned first.
+    */
+    uniqueIndex("malicious_ack_app_uniq")
+      .on(t.maliciousPackageId, t.applicationId)
+      .where(sql`application_id IS NOT NULL`),
+    uniqueIndex("malicious_ack_global_uniq")
+      .on(t.maliciousPackageId)
+      .where(sql`application_id IS NULL`),
+    index("malicious_ack_application_idx").on(t.applicationId),
+  ],
+);
+
+/**
+ * History of feed refreshes, successful or not.
+ *
+ * The same reasoning as the vulnerability database's update history: an air-gapped
+ * deployment needs to show an administrator why its feed is three weeks old, with the URL
+ * that could not be reached, rather than leaving them to infer it from an absence of findings.
+ */
+export const maliciousFeedUpdate = pgTable(
+  "malicious_feed_update",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    trigger: text("trigger").$type<MaliciousFeedTrigger>().notNull(),
+    outcome: text("outcome").$type<MaliciousFeedOutcome>(),
+    message: text("message"),
+    sourceUrl: text("source_url"),
+    /** When the fetched snapshot was built, and the watermark components are matched against. */
+    feedBuiltAt: timestamp("feed_built_at", { withTimezone: true }),
+    /** Reports in the snapshot, and how many were new, changed or retracted. */
+    reportsTotal: integer("reports_total"),
+    reportsChanged: integer("reports_changed"),
+    reportsWithdrawn: integer("reports_withdrawn"),
+    actorUserId: uuid("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email"),
+  },
+  (t) => [index("malicious_feed_update_started_idx").on(t.startedAt.desc())],
+);
+
+/**
+ * Findings already announced by email, so an alert is sent once rather than every sweep.
+ *
+ * A row per report and application rather than per report: a package spreading to a second
+ * application is news even when the report itself is not, and suppressing that would mean
+ * the alert for the wider blast radius never arrives.
+ */
+export const maliciousAlertSent = pgTable(
+  "malicious_alert_sent",
+  {
+    maliciousPackageId: text("malicious_package_id")
+      .notNull()
+      .references(() => maliciousPackage.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => application.id, { onDelete: "cascade" }),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({
+      name: "malicious_alert_sent_pkey",
+      columns: [t.maliciousPackageId, t.applicationId],
+    }),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Inferred row types
 // ---------------------------------------------------------------------------
 
@@ -1099,3 +1360,8 @@ export type ScanVulnSummaryRow = typeof scanVulnSummary.$inferSelect;
 export type VulnerabilitySuppressionRow = typeof vulnerabilitySuppression.$inferSelect;
 export type SettingRow = typeof setting.$inferSelect;
 export type VulnDbUpdateRow = typeof vulnDbUpdate.$inferSelect;
+export type MaliciousPackageRow = typeof maliciousPackage.$inferSelect;
+export type NewMaliciousPackageRow = typeof maliciousPackage.$inferInsert;
+export type ComponentMaliciousRow = typeof componentMalicious.$inferSelect;
+export type MaliciousAcknowledgementRow = typeof maliciousAcknowledgement.$inferSelect;
+export type MaliciousFeedUpdateRow = typeof maliciousFeedUpdate.$inferSelect;

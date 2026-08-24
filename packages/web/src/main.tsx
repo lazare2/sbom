@@ -6,6 +6,7 @@ import { AuthProvider } from "./auth/AuthProvider.tsx";
 import { RequireAdmin, RequireAuth } from "./auth/RequireAuth.tsx";
 import { Layout } from "./components/Layout.tsx";
 import { EmptyState, Card } from "./components/ui.tsx";
+import { MaliciousPage } from "./pages/MaliciousPage.tsx";
 import { AnalyticsPage } from "./pages/AnalyticsPage.tsx";
 import { ApplicationDetailPage } from "./pages/ApplicationDetailPage.tsx";
 import { ApplicationsPage } from "./pages/ApplicationsPage.tsx";
@@ -28,6 +29,7 @@ import { AdminReportsPage } from "./pages/admin/AdminReportsPage.tsx";
 import { AdminTokensPage } from "./pages/admin/AdminTokensPage.tsx";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage.tsx";
 import { AdminVulnerabilitiesPage } from "./pages/admin/AdminVulnerabilitiesPage.tsx";
+import { AdminMaliciousPage } from "./pages/admin/AdminMaliciousPage.tsx";
 import { AdvisoryDetailPage, VulnerabilitiesPage } from "./pages/VulnerabilitiesPage.tsx";
 import { UnauthenticatedError } from "./lib/api.ts";
 import "./index.css";
@@ -95,6 +97,7 @@ createRoot(document.getElementById("root")!).render(
               */}
               <Route path="/vulnerabilities" element={<VulnerabilitiesPage />} />
               <Route path="/vulnerabilities/:vulnerabilityId" element={<AdvisoryDetailPage />} />
+              <Route path="/malicious" element={<MaliciousPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/change-password" element={<ChangePasswordPage />} />
 
@@ -127,6 +130,7 @@ createRoot(document.getElementById("root")!).render(
                 */}
                 <Route path="settings" element={<Navigate to="/admin/configuration" replace />} />
                 <Route path="vulnerabilities" element={<AdminVulnerabilitiesPage />} />
+                <Route path="malicious" element={<AdminMaliciousPage />} />
                 <Route path="audit" element={<AdminAuditPage />} />
               </Route>
 

@@ -71,6 +71,13 @@
       "when": 1787137963211,
       "tag": "0009_application_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787558908384,
+      "tag": "0010_malicious_packages",
+      "breakpoints": true
     }
   ]
 }

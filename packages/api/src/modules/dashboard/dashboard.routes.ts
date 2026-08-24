@@ -49,6 +49,17 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.send({ vulnerabilities: await analytics.vulnerabilities(filter, 10) });
   });
 
+  /**
+   * Malicious packages across the estate, or null.
+   *
+   * Null whenever detection is off or no feed has been installed -- never a block of zeros.
+   * A zeroed panel here would read as "no malicious packages found", which is the strongest
+   * and most dangerous claim this platform could make without having looked.
+   */
+  fastify.get("/malicious", async (_request, reply) => {
+    return reply.send({ malicious: await fastify.ctx.malicious.summary() });
+  });
+
   fastify.get("/stats", async (_request, reply) => {
     return reply.send(await dashboard.stats());
   });

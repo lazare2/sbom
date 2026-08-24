@@ -24,7 +24,7 @@ import { IngestTokenService } from "./ingest-token.service.js";
  * because nobody pre-registered the repo.
  */
 export async function ingestionRoutes(fastify: FastifyInstance): Promise<void> {
-  const { ingestTokens, ingestion, config, vulnWorker } = fastify.ctx;
+  const { ingestTokens, ingestion, config, vulnWorker, maliciousWorker } = fastify.ctx;
 
   fastify.post(
     "/scans",
@@ -139,6 +139,13 @@ export async function ingestionRoutes(fastify: FastifyInstance): Promise<void> {
        * never turned it on.
        */
       vulnWorker.requestSweepAfterIngest();
+      /*
+       * Checked on the same trigger, and this one matters more than the vulnerability sweep.
+       * A malicious release is usually pulled from its registry within a day of discovery, so
+       * the build that just installed one is exactly the case worth catching now rather than
+       * at the next scheduled pass. Both are fire-and-forget: the receipt does not wait.
+       */
+      maliciousWorker.requestSweepAfterIngest();
 
       return reply.status(201).send(result);
     },

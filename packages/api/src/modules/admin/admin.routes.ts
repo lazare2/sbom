@@ -4,16 +4,19 @@ import {
   attributeDefinitionSchema,
   confirmApplicationRequestSchema,
   createApplicationRequestSchema,
+  acknowledgeMaliciousRequestSchema,
   createGroupRequestSchema,
   createIngestTokenRequestSchema,
   createUserRequestSchema,
   idParamSchema,
   listAuditLogQuerySchema,
+  listMaliciousHistoryQuerySchema,
   listUsersQuerySchema,
   mergeApplicationRequestSchema,
   resetUserPasswordRequestSchema,
   setGroupMembersRequestSchema,
   updateGroupRequestSchema,
+  updateMaliciousSettingsSchema,
   updateApplicationRequestSchema,
   updateAttributeDefinitionSchema,
   updateUserRequestSchema,
@@ -54,6 +57,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     adminApplications,
     adminGroups,
     adminScans,
+    adminMalicious,
+    malicious,
+    maliciousFeed,
     attributeDefinitions,
     audit,
     ingestTokens,
@@ -124,6 +130,58 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const result = await adminApplications.remove(id, actorOf(request));
     return reply.send(result);
+  });
+
+  // -------------------------------------------------------------------------
+  // Malicious packages
+  // -------------------------------------------------------------------------
+
+  /*
+    Settings and status are readable here as well as on the public status route, because the
+    admin page needs the feed's attempt history and its recipient list -- neither of which
+    belongs in a payload every signed-in user can fetch.
+  */
+  fastify.get("/malicious/settings", async (_request, reply) => {
+    return reply.send({
+      settings: await adminMalicious.getSettings(),
+      status: await malicious.status(),
+    });
+  });
+
+  fastify.patch("/malicious/settings", async (request, reply) => {
+    const body = parseOrThrow(updateMaliciousSettingsSchema, request.body);
+    return reply.send({ settings: await adminMalicious.updateSettings(body, actorOf(request)) });
+  });
+
+  fastify.get("/malicious/history", async (request, reply) => {
+    const { limit } = parseOrThrow(listMaliciousHistoryQuerySchema, request.query, "Query");
+    return reply.send({ attempts: await maliciousFeed.history(limit) });
+  });
+
+  /**
+   * Fetch the feed now.
+   *
+   * 200 with an outcome rather than a failure status when the feed cannot be reached. An
+   * air-gapped deployment reaches this path every time, and a 5xx would make a normal
+   * condition look like a broken server -- the outcome and the URL that failed are what the
+   * administrator actually needs.
+   */
+  fastify.post("/malicious/update", async (request, reply) => {
+    return reply.send(await adminMalicious.updateFeed(actorOf(request)));
+  });
+
+  /** Record a decision about a finding. Never hides it; the row stays and gains a label. */
+  fastify.post("/malicious/acknowledgements", async (request, reply) => {
+    const body = parseOrThrow(acknowledgeMaliciousRequestSchema, request.body);
+    return reply
+      .status(201)
+      .send({ acknowledgement: await adminMalicious.acknowledge(body, actorOf(request)) });
+  });
+
+  fastify.delete("/malicious/acknowledgements/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    await adminMalicious.removeAcknowledgement(id, actorOf(request));
+    return reply.status(204).send();
   });
 
   // -------------------------------------------------------------------------

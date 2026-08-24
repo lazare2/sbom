@@ -10,6 +10,7 @@ const TABS = [
   { to: "/admin/attributes", label: "Attributes" },
   { to: "/admin/tokens", label: "CI tokens" },
   { to: "/admin/vulnerabilities", label: "Vulnerability scanning" },
+  { to: "/admin/malicious", label: "Malicious packages" },
   { to: "/admin/reports", label: "Monthly report" },
   { to: "/admin/configuration", label: "Configuration" },
   { to: "/admin/audit", label: "Audit log" },

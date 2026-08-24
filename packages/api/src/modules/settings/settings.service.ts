@@ -7,6 +7,9 @@ import {
   STALE_THRESHOLD_MIN_DAYS,
   VULN_DB_INTERVAL_DEFAULT_HOURS,
   updateReportSettingsSchema,
+  updateMaliciousSettingsSchema,
+  MALICIOUS_DEFAULT_FEED_URL,
+  type MaliciousSettings,
   type PlatformSettings,
   type ReportSettings,
 } from "@sbom/shared";
@@ -42,6 +45,15 @@ export const SETTING_KEYS = {
   staleThresholdDays: "app.stale_threshold_days",
   /** Monthly report delivery, stored as one JSON object. */
   reportDelivery: "report.delivery",
+  /**
+   * Malicious-package detection, stored as one JSON object.
+   *
+   * Its own key rather than fields on the vulnerability settings, because the two features
+   * are independently switchable on purpose: an estate may want the malicious feed -- small,
+   * fast, no scanner binary -- while leaving Grype off entirely, and one combined object
+   * would make disabling either of them rewrite the other's configuration.
+   */
+  maliciousDetection: "malicious.detection",
 } as const;
 
 /**
@@ -62,6 +74,22 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   sendHour: 9,
   subjectTemplate: DEFAULT_REPORT_SUBJECT,
   bodyTemplate: DEFAULT_REPORT_BODY,
+};
+
+/**
+ * Where malicious-package detection starts on a fresh install.
+ *
+ * Off, like vulnerability scanning, and for a stronger reason: enabling it downloads a
+ * 40 MB archive from the public internet, which is not something a platform should do on
+ * first boot without somebody asking for it. Alerts are off separately, so switching
+ * detection on cannot start mailing people before recipients have been chosen.
+ */
+export const DEFAULT_MALICIOUS_SETTINGS: MaliciousSettings = {
+  enabled: false,
+  intervalHours: 6,
+  feedUrl: MALICIOUS_DEFAULT_FEED_URL,
+  alertsEnabled: false,
+  alertRecipients: [],
 };
 
 export interface VulnSettings {
@@ -113,6 +141,14 @@ export class SettingsService {
    * report once a month.
    */
   private reportCache: { value: ReportSettings; expiresAt: number } | null = null;
+
+  /**
+   * Malicious-detection settings, cached like the rest.
+   *
+   * Read by the findings endpoints on every request that could render a finding, so it gets
+   * the same short TTL as the vulnerability flag for the same reason.
+   */
+  private maliciousCache: { value: MaliciousSettings; expiresAt: number } | null = null;
 
   constructor(private readonly deps: { db: Database; config: Config }) {}
 
@@ -383,4 +419,74 @@ export class SettingsService {
   invalidate(): void {
     this.cache = null;
   }
+
+  /**
+   * Malicious-package detection settings.
+   *
+   * Re-validated on read against the write schema, exactly as the report settings are and for
+   * the same reason: `feedUrl` decides where the server opens an outbound connection and
+   * `alertRecipients` decides who receives mail, so neither may be settable by writing a bad
+   * row straight into the table.
+   *
+   * A field that fails validation falls back to its default instead of throwing, because an
+   * admin page that cannot open is a worse failure than a setting that reverted.
+   */
+  async getMaliciousSettings(): Promise<MaliciousSettings> {
+    if (this.maliciousCache && this.maliciousCache.expiresAt > Date.now()) {
+      return this.maliciousCache.value;
+    }
+
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${SETTING_KEYS.maliciousDetection}
+    `);
+
+    const stored = rowsOf(rows)[0]?.value;
+    // Deliberately not annotated as MaliciousSettings: the field-by-field merge below
+    // indexes it by string, which the declared interface has no signature for.
+    const value = { ...DEFAULT_MALICIOUS_SETTINGS };
+
+    if (stored && typeof stored === "object") {
+      for (const [key, fieldSchema] of Object.entries(updateMaliciousSettingsSchema.innerType().shape)) {
+        const candidate = (stored as Record<string, unknown>)[key];
+        if (candidate === undefined) continue;
+        const field = fieldSchema.safeParse(candidate);
+        if (field.success) (value as Record<string, unknown>)[key] = field.data;
+      }
+    }
+
+    this.maliciousCache = { value, expiresAt: Date.now() + SettingsService.CACHE_TTL_MS };
+    return value;
+  }
+
+  async updateMaliciousSettings(
+    patch: Partial<MaliciousSettings>,
+    actor: Actor | null,
+  ): Promise<{ before: MaliciousSettings; after: MaliciousSettings }> {
+    const before = await this.getMaliciousSettings();
+    // Merged rather than replaced, so a PATCH that changes the interval cannot silently
+    // clear a recipient list somebody else configured.
+    const merged: MaliciousSettings = { ...before, ...patch };
+
+    await this.deps.db
+      .insert(setting)
+      .values({
+        key: SETTING_KEYS.maliciousDetection,
+        value: merged,
+        updatedByUserId: actor?.id ?? null,
+        updatedByEmail: actor?.email ?? null,
+      })
+      .onConflictDoUpdate({
+        target: setting.key,
+        set: {
+          value: merged,
+          updatedAt: new Date(),
+          updatedByUserId: actor?.id ?? null,
+          updatedByEmail: actor?.email ?? null,
+        },
+      });
+
+    this.maliciousCache = null;
+    return { before, after: await this.getMaliciousSettings() };
+  }
+
 }

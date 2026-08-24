@@ -703,6 +703,202 @@ try {
 
     # ======================================================================
     Write-Host ""
+    Write-Host "Malicious package detection" -ForegroundColor Cyan
+
+    <#
+      Detection may legitimately be switched off, and may be on with no feed downloaded --
+      an air-gapped host reaches the second state permanently. So this section asserts the
+      CONTRACTS that must hold in every state, and only exercises findings when a feed is
+      actually installed, saying so in grey when it skips.
+
+      The contract that matters most is the one asserted first: with detection off, the
+      findings endpoint must REFUSE rather than return an empty list. An empty list is a
+      claim -- "we looked and found nothing" -- and it is the one claim this state cannot
+      support.
+    #>
+
+    $malAdmin = "$BaseUrl/api/v1/admin/malicious"
+    # Defined locally: the auth section further down declares its own, and this section runs first.
+    $malJsonCt = "Content-Type: application/json"
+
+    Assert-That "malicious admin routes require an admin session" {
+        foreach ($u in @("$malAdmin/settings", "$malAdmin/history")) {
+            $r = Invoke-Api @($u)
+            if ($r.Status -ne 401) { Show-Body $r 401; return $false }
+        }
+        $r = Invoke-Api @("-X", "POST", "$malAdmin/update")
+        return $r.Status -eq 401
+    }
+
+    Assert-That "malicious read routes require a session" {
+        foreach ($u in @("$BaseUrl/api/v1/malicious", "$BaseUrl/api/v1/malicious-status")) {
+            $r = Invoke-Api @($u)
+            if ($r.Status -ne 401) { Show-Body $r 401; return $false }
+        }
+        return $true
+    }
+
+    Assert-That "a CI ingest token cannot read malware findings" {
+        # The token legitimately creates scans. It must not open a window onto what those
+        # scans revealed, nor onto anything that can clear a finding.
+        $r = Invoke-Api @("$BaseUrl/api/v1/malicious", "-H", $auth)
+        Show-Body $r 401
+        return $r.Status -eq 401
+    }
+
+    # Remember the operator's setting so this section leaves it exactly as it found it.
+    $malSettings = Invoke-Api @("$malAdmin/settings", "-b", $script:platJar)
+    $script:malWasEnabled = $malSettings.Json.settings.enabled
+    $script:malFeedBuiltAt = $malSettings.Json.status.feedBuiltAt
+
+    Assert-That "the status endpoint answers whether or not detection is enabled" {
+        # The endpoint that lets the UI tell "switched off" from "broken". If this ever
+        # refuses, a disabled deployment renders as a failure the user cannot act on.
+        $r = Invoke-Api @("$BaseUrl/api/v1/malicious-status", "-b", $script:platJar)
+        Show-Body $r 200
+        if ($r.Status -ne 200) { return $false }
+        return $null -ne $r.Json.enabled
+    }
+
+    Assert-That "with detection off, findings REFUSE rather than return an empty list" {
+        $off = New-JsonFile -Name "mal-off.json" -Data @{ enabled = $false }
+        $null = Invoke-Api @("-X", "PATCH", "$malAdmin/settings", "-H", $malJsonCt,
+            "--data-binary", "@$off", "-b", $script:platJar)
+
+        $r = Invoke-Api @("$BaseUrl/api/v1/malicious", "-b", $script:platJar)
+        Show-Body $r 409
+        if ($r.Status -ne 409) { return $false }
+        # A named code, so the client must handle the difference explicitly.
+        return $r.Json.error.code -eq "malicious_detection_disabled"
+    }
+
+    Assert-That "the dashboard block is null while disabled, never a block of zeros" {
+        # Zeroes here would render as "no malicious packages found", which is a far stronger
+        # claim than the truth and the one this platform must never make by accident.
+        $r = Invoke-Api @("$BaseUrl/api/v1/dashboard/malicious", "-b", $script:platJar)
+        Show-Body $r 200
+        if ($r.Status -ne 200) { return $false }
+        return $null -eq $r.Json.malicious
+    }
+
+    Assert-That "the status endpoint stays readable while disabled" {
+        $r = Invoke-Api @("$BaseUrl/api/v1/malicious-status", "-b", $script:platJar)
+        return $r.Status -eq 200 -and $r.Json.enabled -eq $false
+    }
+
+    Assert-That "enabling detection is recorded on the audit trail" {
+        $on = New-JsonFile -Name "mal-on.json" -Data @{ enabled = $true }
+        $r = Invoke-Api @("-X", "PATCH", "$malAdmin/settings", "-H", $malJsonCt,
+            "--data-binary", "@$on", "-b", $script:platJar)
+        Show-Body $r 200
+        if ($r.Status -ne 200) { return $false }
+        if ($r.Json.settings.enabled -ne $true) { return $false }
+
+        $a = Invoke-Api @("$BaseUrl/api/v1/admin/audit-log?action=malicious.settings_update&pageSize=5",
+            "-b", $script:platJar)
+        $entry = $a.Json.items | Select-Object -First 1
+        # Counts, never addresses: the trail must show the recipient list changed without
+        # becoming a second copy of people's email addresses.
+        return $null -ne $entry -and $null -ne $entry.metadata.alertRecipientCount
+    }
+
+    Assert-That "email alerts are off by default, so enabling detection mails nobody" {
+        $r = Invoke-Api @("$malAdmin/settings", "-b", $script:platJar)
+        return $r.Json.settings.alertsEnabled -eq $false
+    }
+
+    Assert-That "the feed history is readable and records every attempt" {
+        $r = Invoke-Api @("$malAdmin/history?limit=5", "-b", $script:platJar)
+        Show-Body $r 200
+        return $r.Status -eq 200 -and $null -ne $r.Json.attempts
+    }
+
+    if ($null -eq $script:malFeedBuiltAt) {
+        Write-Host "      SKIP  findings assertions - no malicious feed has been downloaded" -ForegroundColor DarkGray
+    }
+    else {
+        Assert-That "findings are listable once a feed is installed" {
+            $r = Invoke-Api @("$BaseUrl/api/v1/malicious?pageSize=20", "-b", $script:platJar)
+            Show-Body $r 200
+            if ($r.Status -ne 200) { return $false }
+            return $null -ne $r.Json.items -and $null -ne $r.Json.total
+        }
+
+        Assert-That "every finding reports current AND historical reach" {
+            <#
+              The property the whole feature rests on. `affectedApplications` counts every
+              application that ever shipped the package and does not shrink when it is removed,
+              because the payload already ran on the machines that built it. A finding that
+              reported only current builds would tell somebody who deleted the package last
+              week that they were clean.
+            #>
+            $r = Invoke-Api @("$BaseUrl/api/v1/malicious?pageSize=20", "-b", $script:platJar)
+            if ($r.Status -ne 200) { return $false }
+            if ($r.Json.total -eq 0) {
+                Write-Host "      (no malicious packages in this estate - shape checked only)" -ForegroundColor DarkGray
+                return $true
+            }
+            foreach ($f in $r.Json.items) {
+                if ($null -eq $f.currentApplications -or $null -eq $f.affectedApplications) { return $false }
+                # Current is a subset of ever, always.
+                if ($f.currentApplications -gt $f.affectedApplications) { return $false }
+                # Provenance travels with the claim, so an incident can be checked before it starts.
+                if ($null -eq $f.sources) { return $false }
+            }
+            return $true
+        }
+
+        Assert-That "the presence filter narrows without corrupting the other count" {
+            $all = Invoke-Api @("$BaseUrl/api/v1/malicious?presence=all&pageSize=100", "-b", $script:platJar)
+            $cur = Invoke-Api @("$BaseUrl/api/v1/malicious?presence=current&pageSize=100", "-b", $script:platJar)
+            $his = Invoke-Api @("$BaseUrl/api/v1/malicious?presence=historical&pageSize=100", "-b", $script:platJar)
+            if ($all.Status -ne 200 -or $cur.Status -ne 200 -or $his.Status -ne 200) { return $false }
+            # The two halves partition the whole: a package is either in some current build or
+            # it is not, and every finding must appear in exactly one of them.
+            return ($cur.Json.total + $his.Json.total) -eq $all.Json.total
+        }
+
+        Assert-That "the dashboard summary agrees with the findings list" {
+            $dash = Invoke-Api @("$BaseUrl/api/v1/dashboard/malicious", "-b", $script:platJar)
+            if ($dash.Status -ne 200) { return $false }
+            if ($null -eq $dash.Json.malicious) { return $false }
+            $cur = Invoke-Api @("$BaseUrl/api/v1/malicious?presence=current&pageSize=1", "-b", $script:platJar)
+            return $dash.Json.malicious.currentPackages -eq $cur.Json.total
+        }
+
+        Assert-That "an acknowledgement requires a note" {
+            # Without one, an acknowledgement cannot be told apart from someone clearing a red
+            # banner to make it stop - which is the whole thing the note exists to prevent.
+            $p = New-JsonFile -Name "mal-ack-bad.json" -Data @{
+                maliciousPackageId = "MAL-0000-000000"; state = "remediated"; note = ""
+            }
+            $r = Invoke-Api @("-X", "POST", "$malAdmin/acknowledgements", "-H", $malJsonCt,
+                "--data-binary", "@$p", "-b", $script:platJar)
+            return $r.Status -eq 400
+        }
+
+        Assert-That "acknowledging an unknown report is a clean 404" {
+            $p = New-JsonFile -Name "mal-ack-404.json" -Data @{
+                maliciousPackageId = "MAL-0000-000000"; state = "remediated"; note = "n/a"
+            }
+            $r = Invoke-Api @("-X", "POST", "$malAdmin/acknowledgements", "-H", $malJsonCt,
+                "--data-binary", "@$p", "-b", $script:platJar)
+            Show-Body $r 404
+            return $r.Status -eq 404
+        }
+    }
+
+    Assert-That "detection is restored to the state this run found it in" {
+        # The suite must not leave a feature switched on that the operator had switched off,
+        # nor the reverse.
+        $restore = New-JsonFile -Name "mal-restore.json" -Data @{ enabled = [bool]$script:malWasEnabled }
+        $r = Invoke-Api @("-X", "PATCH", "$malAdmin/settings", "-H", $malJsonCt,
+            "--data-binary", "@$restore", "-b", $script:platJar)
+        return $r.Status -eq 200 -and $r.Json.settings.enabled -eq [bool]$script:malWasEnabled
+    }
+
+    # ======================================================================
+    Write-Host ""
     Write-Host "Vulnerability scanning (Grype)" -ForegroundColor Cyan
 
     <#

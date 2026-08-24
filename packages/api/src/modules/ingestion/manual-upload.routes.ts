@@ -35,7 +35,7 @@ import { getUser } from "../../plugins/auth.plugin.js";
  * scope-wide in the same way every other guard in this codebase is.
  */
 export async function manualUploadRoutes(fastify: FastifyInstance): Promise<void> {
-  const { ingestion, audit, config, vulnWorker } = fastify.ctx;
+  const { ingestion, audit, config, vulnWorker, maliciousWorker } = fastify.ctx;
 
   /*
    * `requireAuth`, not `requireAdmin`.
@@ -167,6 +167,7 @@ export async function manualUploadRoutes(fastify: FastifyInstance): Promise<void
       // Same asynchronous treatment as the CI path — a manual upload is a normal scan
       // in this respect too, and the receipt should not wait on Grype.
       vulnWorker.requestSweepAfterIngest();
+      maliciousWorker.requestSweepAfterIngest();
 
       return reply.status(201).send(result);
     },

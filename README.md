@@ -1095,6 +1095,97 @@ expansion during a replacement.
 
 ---
 
+## Malicious packages
+
+A different problem from vulnerabilities, and treated as one throughout. A CVE is a flaw in a
+package you chose deliberately, fixed by upgrading. A malicious package **is** the attack:
+
+| | CVE | Malicious package |
+|---|---|---|
+| What is wrong | A legitimate package has a flaw | The package exists to attack you |
+| Fix | Upgrade | Remove it, **then rotate every credential the installing machine could read** |
+| Severity | CVSS 0–10 | Binary. There is no medium malware |
+| When the harm happens | When the vulnerable path runs | **At install time**, before anyone looked |
+
+That last row drives everything else. `npm install` runs `postinstall`; `pip install` runs
+`setup.py`. The payload executed on developer laptops and CI runners before the package was ever
+reported, so removing it does not undo the damage — the credentials on those machines are gone.
+
+### Current *and* historical, always
+
+Registries delete malicious packages once they are found; npm replaces them with a stub literally
+described as a "security holding package". So the registry no longer proves you ever had it, and
+neither does a lockfile whose version has moved on. **The retained scan history is the only
+surviving record**, and this feature is built around that.
+
+Every finding therefore carries two counts that are never collapsed:
+
+- **In current builds** — what can be removed today by rebuilding.
+- **Ever shipped** — every application that has ever contained it, in any retained build. This
+  number does not fall when the package is removed, because the payload already ran. It is the set
+  of pipelines whose secrets must be rotated.
+
+A finding with **0 current and 4 ever** is not a clean result. It is four pipelines that nobody has
+cleaned up, and a tool reporting only current builds would call that estate healthy.
+
+### The feed
+
+[OpenSSF `malicious-packages`](https://github.com/ossf/malicious-packages) — Apache-2.0, no account
+and no API key, pooled from GitHub, Amazon Inspector, Checkmarx, Datadog and others in OSV format.
+Roughly **236,000 reports**, overwhelmingly npm and PyPI, in a single ~41 MB archive.
+
+Chosen over querying OSV.dev per package (one request per component, unusable at estate scale) and
+over OSV's bulk archives, whose npm bundle is 220 MB because it carries every advisory rather than
+only the malicious ones.
+
+Matching needs no scanner binary and no multi-gigabyte database — it is a name lookup and a version
+test — so it refreshes every 6 hours by default and re-checks the whole component set in seconds.
+That speed is the point: a malicious release is usually pulled from its registry within a day, so a
+check that waited for a nightly scan would frequently be looking after the fact.
+
+Reports specify versions three ways, and all three are matched exactly:
+
+| Shape | Share of feed | Meaning |
+|---|---|---|
+| Every version | 89.7% | A typosquat or dependency-confusion stub. The **name** is the signal |
+| Explicit versions | 13.6% | A real package whose maintainer account was compromised. Only those releases |
+| Version range | 0.7% | Compared; when versions cannot be ordered the match is **reported**, not dropped |
+
+Withdrawn reports stop producing findings immediately — roughly 350 are retracted at any time — but
+the row is retained, because somebody may already have acted on it.
+
+### Acknowledging a finding
+
+Findings are never hidden. An admin records a decision — *investigating*, *remediated*, *not
+affected*, *false positive* — with a **mandatory note**, and the finding stays on the list carrying
+that label. There is deliberately no "accept the risk": that is a reasonable thing to say about a
+medium CVE in a library nobody calls, and not about a package whose purpose is to exfiltrate
+credentials.
+
+### Alerts
+
+Off by default. When enabled, an email goes to a configured list as soon as a finding appears, once
+per package per application — a package reaching a *second* application is news; the same pair
+re-detected every sweep is not. It reuses the SMTP relay configured for the monthly report, with its
+own recipient list, because the people who want a management summary monthly are rarely the people
+who should be interrupted for this.
+
+### What this is not
+
+**Not heuristic.** There is no install-script analysis, obfuscation scoring or typosquat
+edit-distance. One false "this looks malicious" against an internal package would destroy trust in
+the whole feature, and the tuning never ends. Everything here is a named report from a public
+database, with its reporters and a link to the original, so a claim can be checked before anyone
+starts revoking keys.
+
+**Not proof of safety.** These feeds are reactive. A package published in the last few hours may not
+be reported yet, so an empty result renders as *"no known malicious packages, as of ‹feed date›"* —
+never as a clean bill of health.
+
+**Not a build gate.** Ingest never rejects a scan because of what is in it.
+
+---
+
 ## Ingestion API
 
 ### `POST /api/v1/scans`
@@ -1324,6 +1415,10 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `GET /vulnerabilities/:id` | One advisory's blast radius: applications and the packages carrying it |
 | `GET /applications/:id/vulnerabilities` | Findings for an application's current build, with the app/base-image split |
 | `GET /scans/:id/vulnerabilities` | Findings for one build, evaluated against today's database |
+| `GET /malicious` | Malicious-package findings. **409** `malicious_detection_disabled` when off |
+| `GET /malicious/:id` | One report, with every application it ever reached |
+| `GET /malicious-status` | Feature state. Readable in every condition, including disabled |
+| `GET /dashboard/malicious` | Estate summary. `null` when off or no feed installed |
 | `GET /dashboard/vulnerabilities` | Estate posture for the overview. `null` when disabled. `?scope=app\|os\|all&severity=critical,high,…` |
 
 ### Admin
@@ -1335,6 +1430,10 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `POST /admin/applications/:id/merge` | Merge into another, optionally aliasing |
 | `POST/DELETE /admin/applications/:id/aliases` | Manage CI name aliases |
 | `DELETE /admin/scans/:id` | Remove one build from an application's history |
+| `GET/PATCH /admin/malicious/settings` | Enable detection, interval, feed URL, alert recipients |
+| `POST /admin/malicious/update` | Fetch the feed now. 200 with `unreachable` when offline |
+| `GET /admin/malicious/history` | Feed refresh attempts, successful or not |
+| `POST/DELETE /admin/malicious/acknowledgements[/:id]` | Record or withdraw a decision |
 | `GET/POST/PATCH/DELETE /admin/users[/:id]` | Account management |
 | `POST /admin/users/:id/reset-password` | Issue a new password, returned once |
 | `POST/PATCH/DELETE /admin/attribute-definitions[/:id]` | Attribute schema |

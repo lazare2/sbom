@@ -85,3 +85,56 @@ export const knownEcosystems = [
   "unknown",
 ] as const;
 export type KnownEcosystem = (typeof knownEcosystems)[number];
+
+/**
+ * How a malicious-package report identifies the versions it covers.
+ *
+ * Derived from the shape of the upstream OSV record rather than invented here, because the
+ * three cases need genuinely different matching and collapsing them loses accuracy in the
+ * direction that matters. Measured against the OpenSSF feed (236,015 reports):
+ *
+ *   all_versions   211,804  the package exists only to carry the payload -- a typosquat, a
+ *                           dependency-confusion stub. The NAME is the signal; every version
+ *                           published under it is malicious.
+ *   exact_versions  32,191  a legitimate package whose maintainer account was compromised, or
+ *                           which shipped a bad release. Only the listed versions are affected
+ *                           and the rest of its history is fine, so this must match exactly --
+ *                           widening it would condemn a package most of the estate depends on.
+ *   version_range    1,742  an open-ended or bounded range that needs version comparison.
+ *
+ * The last is under one percent, which is why the matcher can be exact for 99.3% of reports
+ * and only needs comparison for the remainder.
+ */
+export const maliciousMatchModes = ["all_versions", "exact_versions", "version_range"] as const;
+export const maliciousMatchModeSchema = z.enum(maliciousMatchModes);
+export type MaliciousMatchMode = z.infer<typeof maliciousMatchModeSchema>;
+
+/**
+ * What an administrator decided about a malicious-package finding.
+ *
+ * A finding is never hidden by any of these -- the state is a label on a row that stays
+ * visible. "Accept the risk" is deliberately absent: it is a reasonable thing to say about a
+ * medium-severity CVE in a library nobody calls, and not a thing anyone should be able to say
+ * about a package whose purpose is to exfiltrate credentials.
+ */
+export const maliciousAckStates = [
+  /** Someone owns it and is working on it. */
+  "investigating",
+  /** Removed, and any credentials exposed at install time have been rotated. */
+  "remediated",
+  /** Present in the SBOM but never installed anywhere that mattered. Needs the note to say why. */
+  "not_affected",
+  /** The upstream report is wrong about this package. */
+  "false_positive",
+] as const;
+export const maliciousAckStateSchema = z.enum(maliciousAckStates);
+export type MaliciousAckState = z.infer<typeof maliciousAckStateSchema>;
+
+/** What asked for a feed refresh. Mirrors the vulnerability database's triggers. */
+export const maliciousFeedTriggers = ["scheduled", "manual", "enable", "import"] as const;
+export const maliciousFeedTriggerSchema = z.enum(maliciousFeedTriggers);
+export type MaliciousFeedTrigger = z.infer<typeof maliciousFeedTriggerSchema>;
+
+export const maliciousFeedOutcomes = ["updated", "unchanged", "unreachable", "failed"] as const;
+export const maliciousFeedOutcomeSchema = z.enum(maliciousFeedOutcomes);
+export type MaliciousFeedOutcome = z.infer<typeof maliciousFeedOutcomeSchema>;

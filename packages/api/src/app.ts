@@ -23,6 +23,7 @@ import {
   vulnStatusRoutes,
 } from "./modules/vulnerabilities/vulnerability.routes.js";
 import { reportRoutes } from "./modules/reports/reports.routes.js";
+import { maliciousRoutes, maliciousStatusRoutes } from "./modules/malicious/malicious.routes.js";
 import { scanRoutes } from "./modules/scans/scans.routes.js";
 import { authPlugin } from "./plugins/auth.plugin.js";
 import { contextPlugin } from "./plugins/context.plugin.js";
@@ -150,6 +151,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
        */
       await api.register(vulnerabilityRoutes, { prefix: "" });
       await api.register(vulnStatusRoutes, { prefix: "/vuln-status" });
+
+      /*
+       * Malicious packages, split the same way and for the same reason: the findings route
+       * refuses with 409 while detection is off so an unchecked estate can never render as a
+       * clean one, while the status route stays readable so the UI can say which it is.
+       */
+      await api.register(maliciousRoutes, { prefix: "/malicious" });
+      await api.register(maliciousStatusRoutes, { prefix: "/malicious-status" });
 
       // Write APIs. Guarded as a whole scope by `requireAdmin`, so a route
       // added to that file is protected whether or not its author thought about it.

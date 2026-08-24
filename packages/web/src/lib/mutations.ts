@@ -14,6 +14,10 @@ import type {
   CreateSuppression,
   CreateUserRequest,
   DeleteScanResponse,
+  AcknowledgeMaliciousRequest,
+  MaliciousAckSummary,
+  MaliciousSettings,
+  UpdateMaliciousSettings,
   ManualUploadResponse,
   MergeApplicationRequest,
   MergeApplicationResponse,
@@ -602,5 +606,71 @@ export function useDeleteGroup() {
     mutationFn: (id: string) =>
       api.delete<{ deleted: true; memberCount: number }>(`/admin/groups/${id}`),
     onSuccess: () => invalidateGroups(qc),
+  });
+}
+
+
+// --- malicious packages ------------------------------------------------------
+
+/**
+ * Everything a malicious-package write invalidates.
+ *
+ * Broad on purpose. An acknowledgement changes the findings list, the detail page and the
+ * dashboard's acknowledged count at once, and a feed refresh can change every finding on the
+ * platform. These are rare admin actions, so refetching beats reasoning about which cached
+ * shape moved.
+ */
+function invalidateMalicious(qc: QueryClient): void {
+  void qc.invalidateQueries({ queryKey: ["malicious"] });
+  void qc.invalidateQueries({ queryKey: ["dashboard"] });
+  void qc.invalidateQueries({ queryKey: ["admin", "audit-log"] });
+}
+
+export function useAcknowledgeMalicious() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AcknowledgeMaliciousRequest) =>
+      api.post<{ acknowledgement: MaliciousAckSummary }>("/admin/malicious/acknowledgements", body),
+    onSuccess: () => invalidateMalicious(qc),
+  });
+}
+
+export function useRemoveMaliciousAcknowledgement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/admin/malicious/acknowledgements/${id}`),
+    onSuccess: () => invalidateMalicious(qc),
+  });
+}
+
+export function useUpdateMaliciousSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateMaliciousSettings) =>
+      api.patch<{ settings: MaliciousSettings }>("/admin/malicious/settings", body),
+    onSuccess: () => {
+      invalidateMalicious(qc);
+      // The nav entry and every "is this on" branch key off the status endpoint.
+      void qc.invalidateQueries({ queryKey: ["admin", "malicious"] });
+    },
+  });
+}
+
+/**
+ * Fetch the feed now.
+ *
+ * Resolves with an outcome rather than throwing when the feed is unreachable -- that is a
+ * normal state for an air-gapped install, and the page reports it as an outcome rather than
+ * as a failed request.
+ */
+export function useUpdateMaliciousFeed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ outcome: string; message: string | null }>("/admin/malicious/update", {}),
+    onSuccess: () => {
+      invalidateMalicious(qc);
+      void qc.invalidateQueries({ queryKey: ["admin", "malicious"] });
+    },
   });
 }

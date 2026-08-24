@@ -278,7 +278,7 @@ log("11. scan history and a historical build");
 await page.getByRole("tab", { name: /Scan history/ }).click();
 await page.waitForLoadState("networkidle");
 await page.waitForTimeout(400);
-await expectText("Retained permanently", "retention note");
+await expectText("Nothing is trimmed automatically", "retention note");
 await expectText("Upload SBOM", "the manual upload affordance");
 await shot("scan-history");
 

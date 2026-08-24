@@ -43,7 +43,22 @@ async function main(): Promise<void> {
     app.log.info({ reconciled }, "marked interrupted vulnerability database updates as failed");
   }
 
+  /*
+   * The same reconciliation for the malicious feed, for the same reason: an attempt row with
+   * no finish time describes a refresh nothing is performing, and left alone it shows the
+   * admin page a spinner that never stops.
+   */
+  const malReconciled = await app.ctx.maliciousFeed.reconcileInterrupted().catch((err: unknown) => {
+    app.log.warn({ err }, "could not reconcile interrupted malicious feed refreshes");
+    return 0;
+  });
+  if (malReconciled > 0) {
+    app.log.info({ reconciled: malReconciled }, "marked interrupted malicious feed refreshes as failed");
+  }
+
   app.ctx.vulnWorker.start();
+  // Idempotent and inert until an administrator switches detection on.
+  app.ctx.maliciousWorker.start();
   // Cheap and idempotent: it does nothing at all until an administrator enables report
   // delivery, and the database prevents a restart from resending a report already sent.
   app.ctx.reportScheduler.start();
@@ -95,6 +110,7 @@ async function main(): Promise<void> {
     // are idempotent upserts, and killing a grype subprocess mid-batch would just mean
     // the next start re-does that batch.
     app.ctx.vulnWorker.stop();
+    app.ctx.maliciousWorker.stop();
     app.ctx.reportScheduler.stop();
     try {
       // Closes the server first so in-flight ingests finish before the pool goes

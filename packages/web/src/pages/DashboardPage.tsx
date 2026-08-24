@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useClientSort } from "../lib/useSort.ts";
 import { TopVulnerableApplicationsCard, VulnBreakdownBlock } from "../components/VulnSummary.tsx";
+import { MaliciousAlert } from "../components/MaliciousAlert.tsx";
 import {
   fromVulnFilter,
   readVulnFilterParams,
@@ -158,6 +159,15 @@ export function DashboardPage() {
             : "No scans have been received yet"
         }
       />
+
+      {/*
+        Above every other panel, deliberately.
+
+        Everything else on this page is a measurement. This is an incident, and it is the one
+        thing here that is worse the longer it goes unread -- so it does not compete for
+        attention with the tiles, it precedes them.
+      */}
+      <MaliciousAlert />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile

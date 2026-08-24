@@ -17,6 +17,12 @@ import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
 import { ScansAdminService } from "./modules/scans/scans.admin.service.js";
+import { MaliciousService } from "./modules/malicious/malicious.service.js";
+import { MaliciousAdminService } from "./modules/malicious/malicious.admin.service.js";
+import { MaliciousFeedService } from "./modules/malicious/malicious-feed.service.js";
+import { MaliciousMatchService } from "./modules/malicious/malicious-match.service.js";
+import { MaliciousAlertService } from "./modules/malicious/malicious-alert.service.js";
+import { MaliciousWorker } from "./modules/malicious/malicious-worker.js";
 import { GroupsService } from "./modules/groups/groups.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
@@ -87,12 +93,26 @@ export interface AppContext {
   vulnDb: VulnDbService;
   sweep: SweepService;
   vulnWorker: VulnWorker;
+  /*
+   * Malicious-package detection.
+   *
+   * A parallel pipeline to the vulnerability one rather than a mode of it: its own feed, its
+   * own watermark on `component`, its own schedule and its own switch. The two answer
+   * different questions and are independently switchable on purpose -- this one needs no
+   * scanner binary and no gigabytes of database, so an estate can reasonably run it alone.
+   */
+  maliciousFeed: MaliciousFeedService;
+  maliciousMatch: MaliciousMatchService;
+  maliciousAlerts: MaliciousAlertService;
+  malicious: MaliciousService;
+  maliciousWorker: MaliciousWorker;
   // Write side. Every one of these is reachable only through `requireAdmin`.
   audit: AuditService;
   adminUsers: AdminUsersService;
   adminApplications: AdminApplicationsService;
   adminGroups: GroupsAdminService;
   adminScans: ScansAdminService;
+  adminMalicious: MaliciousAdminService;
   attributeDefinitions: AttributeDefinitionsService;
 }
 
@@ -189,11 +209,48 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   });
   const vulnWorker = new VulnWorker({ settings, vulnDb, sweep, logger });
 
+  /*
+   * Constructed after `settings` and `mailer`, which both feed it, and after `sweep` only for
+   * readability -- there is no dependency between the two pipelines.
+   *
+   * The worker takes the alert service rather than the mailer directly, so the decision about
+   * whether an alert is due lives in one place instead of being re-derived by every trigger.
+   */
+  const maliciousFeed = new MaliciousFeedService({ db, settings, logger });
+  const maliciousMatch = new MaliciousMatchService({ db, logger });
+  const maliciousAlerts = new MaliciousAlertService({
+    db,
+    settings,
+    mailer,
+    logger,
+    publicUrl: config.PUBLIC_URL,
+  });
+  const malicious = new MaliciousService({
+    db,
+    settings,
+    feed: maliciousFeed,
+    match: maliciousMatch,
+  });
+  const maliciousWorker = new MaliciousWorker({
+    settings,
+    feed: maliciousFeed,
+    match: maliciousMatch,
+    alerts: maliciousAlerts,
+    logger,
+  });
+
   // Write side.
   const audit = new AuditService({ db });
   const adminUsers = new AdminUsersService({ db, sessions, audit });
   const adminApplications = new AdminApplicationsService({ db, audit, applications });
   const adminGroups = new GroupsAdminService({ db, audit, groups });
+  const adminMalicious = new MaliciousAdminService({
+    db,
+    audit,
+    settings,
+    feed: maliciousFeed,
+    worker: maliciousWorker,
+  });
   const adminScans = new ScansAdminService({ db, blobStore, audit });
   const attributeDefinitions = new AttributeDefinitionsService({ db, audit });
 
@@ -225,11 +282,17 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     vulnDb,
     sweep,
     vulnWorker,
+    maliciousFeed,
+    maliciousMatch,
+    maliciousAlerts,
+    malicious,
+    maliciousWorker,
     audit,
     adminUsers,
     adminApplications,
     adminGroups,
     adminScans,
+    adminMalicious,
     attributeDefinitions,
   };
 }
