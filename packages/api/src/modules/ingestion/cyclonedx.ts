@@ -1,3 +1,8 @@
+import {
+  COMPONENT_LOCATION_PATH_CAP,
+  ecosystemHasMeaningfulPaths,
+  normalizeLocationPath,
+} from "@sbom/shared";
 import { sha256Hex } from "../../lib/crypto.js";
 import { UnprocessableError } from "../../lib/errors.js";
 import {
@@ -43,6 +48,18 @@ export interface ParsedComponent {
    * aggregates about dependencies without dropping it from the inventory.
    */
   kind: "library" | "os" | "runtime";
+  /**
+   * Where the package was found, capped at `COMPONENT_LOCATION_PATH_CAP` and sorted.
+   *
+   * Null for OS-package ecosystems, whose recorded paths locate the package manager's
+   * database rather than the package — see `ecosystemHasMeaningfulPaths`. Also null when the
+   * SBOM carried no location properties at all, which a non-Syft tool may well not emit.
+   */
+  paths: string[] | null;
+  /** True total before capping, so a truncated list can say "3 of 81". */
+  pathCount: number | null;
+  /** Image layer digest of the first recorded location. Null outside image scans. */
+  layerId: string | null;
 }
 
 export type SkipReason = "missing_name" | "not_an_object" | "excluded_type";
@@ -150,6 +167,48 @@ function readProperty(properties: unknown, key: string): string | null {
     if (p.name === key) return asNonEmptyString(p.value, 256);
   }
   return null;
+}
+
+/**
+ * Reads every `syft:location:N:path` / `syft:location:N:layerID` pair out of a component.
+ *
+ * Indices are not assumed contiguous or ordered — the properties array is walked once and
+ * grouped by the index in the key, because nothing in the CycloneDX spec promises the encoder
+ * emits them in order and a missed location is a package the reader cannot find.
+ *
+ * Returns raw values; capping, sorting and the OS-ecosystem exclusion are the caller's job,
+ * because they have to happen *after* duplicate components have been merged together.
+ */
+function readLocations(properties: unknown): { paths: string[]; layerId: string | null } {
+  if (!Array.isArray(properties)) return { paths: [], layerId: null };
+
+  const paths: string[] = [];
+  let layerId: string | null = null;
+
+  for (const prop of properties) {
+    if (typeof prop !== "object" || prop === null) continue;
+    const p = prop as { name?: unknown; value?: unknown };
+    if (typeof p.name !== "string") continue;
+
+    const pathMatch = /^syft:location:(\d+):path$/.exec(p.name);
+    if (pathMatch) {
+      const value = asNonEmptyString(p.value, 1024);
+      if (value !== null) {
+        const normalized = normalizeLocationPath(value);
+        if (normalized !== null) paths.push(normalized);
+      }
+      continue;
+    }
+
+    // The first layer digest is enough: it is kept as corroborating evidence for the origin
+    // label, not as a per-location index, and a package spread over several layers is far
+    // rarer than one spread over several paths in the same layer.
+    if (layerId === null && /^syft:location:\d+:layerID$/.test(p.name)) {
+      layerId = asNonEmptyString(p.value, 256);
+    }
+  }
+
+  return { paths, layerId };
 }
 
 /**
@@ -367,7 +426,19 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
 
   const components: ParsedComponent[] = [];
   const skipped: SkippedComponent[] = [];
-  const seen = new Set<string>();
+  /**
+   * Identity hash -> index into `components`.
+   *
+   * An index rather than a bare presence set, because a duplicate entry has to be *merged*
+   * into the one already kept rather than discarded. Syft emits the same package twice when it
+   * finds it in two image layers or via two catalogers, and those duplicates are precisely the
+   * entries carrying a location the first one did not have. Dropping them outright — which is
+   * what this did before locations were recorded — would silently throw away most of the
+   * multi-location data on exactly the packages installed in more than one place.
+   */
+  const indexByHash = new Map<string, number>();
+  /** Locations accumulated per kept component, parallel to `components`. */
+  const locationsByIndex: Array<{ paths: string[]; layerId: string | null }> = [];
   let duplicatesCollapsed = 0;
   // Collected during the same walk and reduced once at the end, rather than a
   // second pass over the document.
@@ -425,13 +496,59 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
 
     const identityHash = computeIdentityHash({ purl, ecosystem, name, version });
 
-    if (seen.has(identityHash)) {
+    const locations = readLocations(rawComponent.properties);
+
+    const existingIndex = indexByHash.get(identityHash);
+    if (existingIndex !== undefined) {
       duplicatesCollapsed++;
+      const acc = locationsByIndex[existingIndex]!;
+      acc.paths.push(...locations.paths);
+      acc.layerId ??= locations.layerId;
       continue;
     }
-    seen.add(identityHash);
 
-    components.push({ identityHash, name, version, ecosystem, purl, cpe, kind });
+    indexByHash.set(identityHash, components.length);
+    locationsByIndex.push({ paths: locations.paths, layerId: locations.layerId });
+    components.push({
+      identityHash,
+      name,
+      version,
+      ecosystem,
+      purl,
+      cpe,
+      kind,
+      // Filled in below, once every duplicate has contributed its locations.
+      paths: null,
+      pathCount: null,
+      layerId: null,
+    });
+  }
+
+  /**
+   * Reduce the accumulated locations to what is stored.
+   *
+   * Deferred to here rather than done inline because capping before the merge would keep an
+   * arbitrary three of the first entry's paths and discard a later duplicate's, which is the
+   * subtle version of the bug the merge exists to prevent.
+   *
+   * OS-package ecosystems are dropped entirely: their recorded paths are the package
+   * manager's database (`/var/lib/dpkg/status`, `/lib/apk/db/installed`) and locate nothing.
+   * `null` rather than `[]` so the reader can tell "no path applies here" from "we looked and
+   * found none".
+   */
+  for (let i = 0; i < components.length; i++) {
+    const parsed = components[i]!;
+    const acc = locationsByIndex[i]!;
+
+    if (!ecosystemHasMeaningfulPaths(parsed.ecosystem)) continue;
+    if (acc.paths.length === 0) continue;
+
+    // Sorted so the stored subset is deterministic: the same SBOM ingested twice must produce
+    // the same three paths, or a re-ingest looks like the package moved.
+    const unique = [...new Set(acc.paths)].sort();
+    parsed.paths = unique.slice(0, COMPONENT_LOCATION_PATH_CAP);
+    parsed.pathCount = unique.length;
+    parsed.layerId = acc.layerId;
   }
 
   return {

@@ -14,4 +14,5 @@ export * from "./schemas/admin.js";
 export * from "./schemas/analytics.js";
 export * from "./schemas/bulk-search.js";
 export * from "./schemas/vulnerability.js";
+export * from "./schemas/location.js";
 export * from "./schemas/malicious.js";

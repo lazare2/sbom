@@ -9,6 +9,7 @@ import type {
   ListApplicationsQuery,
   ListScanComponentsQuery,
   Paginated,
+  ScanComponentEntry,
   SortDirection,
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
@@ -17,6 +18,7 @@ import type { SettingsService } from "../settings/settings.service.js";
 import { NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
 import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
+import { toComponentLocation } from "../ingestion/location-row.js";
 import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 
 /**
@@ -322,11 +324,26 @@ export class ApplicationsService {
   async listLatestComponents(
     applicationId: string,
     query: ListScanComponentsQuery,
-  ): Promise<Paginated<ComponentRef> & { scanId: string | null }> {
+  ): Promise<
+    Paginated<ScanComponentEntry> & { scanId: string | null; locationsExtractedAt: string | null }
+  > {
     const { db } = this.deps;
 
-    const appRows = await db.execute<Row<{ latest_scan_id: string | null }>>(sql`
-      SELECT latest_scan_id FROM application WHERE id = ${applicationId}::uuid
+    /*
+     * The extraction marker travels with the page, not with the application.
+     *
+     * It describes the scan these components came from, and it is the only thing that lets the
+     * page tell "this SBOM had no locations" from "nobody has extracted this SBOM's locations
+     * yet". Returning it here means the caller never has to fetch the scan separately just to
+     * know which sentence to print under an empty path column.
+     */
+    const appRows = await db.execute<
+      Row<{ latest_scan_id: string | null; locations_extracted_at: Date | string | null }>
+    >(sql`
+      SELECT a.latest_scan_id, s.locations_extracted_at
+      FROM application a
+      LEFT JOIN scan s ON s.id = a.latest_scan_id
+      WHERE a.id = ${applicationId}::uuid
     `);
     const app = rowsOf(appRows)[0];
     if (!app) throw new NotFoundError("Application");
@@ -334,18 +351,22 @@ export class ApplicationsService {
     if (!app.latest_scan_id) {
       // Pre-registered but never scanned. An empty page is the honest answer;
       // a 404 would wrongly imply the application does not exist.
-      return { ...paginate<ComponentRef>([], 0, query), scanId: null };
+      return { ...paginate<ScanComponentEntry>([], 0, query), scanId: null, locationsExtractedAt: null };
     }
 
     const page = await this.listComponentsOfScan(app.latest_scan_id, query);
-    return { ...page, scanId: app.latest_scan_id };
+    return {
+      ...page,
+      scanId: app.latest_scan_id,
+      locationsExtractedAt: toIso(app.locations_extracted_at ?? null),
+    };
   }
 
   /** Shared by the current-state view and the historical-scan view. */
   async listComponentsOfScan(
     scanId: string,
     query: ListScanComponentsQuery,
-  ): Promise<Paginated<ComponentRef>> {
+  ): Promise<Paginated<ScanComponentEntry>> {
     const { db } = this.deps;
 
     const conditions: SQL[] = [sql`sc.scan_id = ${scanId}::uuid`];
@@ -362,8 +383,10 @@ export class ApplicationsService {
 
     const where = sql.join([sql`WHERE `, sql.join(conditions, sql` AND `)]);
 
-    const rows = await db.execute<Row<ComponentQueryRow>>(sql`
-      SELECT c.id, c.name, c.version, c.ecosystem, c.purl, count(*) OVER () AS total
+    const rows = await db.execute<Row<ScanComponentQueryRow>>(sql`
+      SELECT c.id, c.name, c.version, c.ecosystem, c.purl, c.kind,
+             sc.paths, sc.path_count, sc.layer_id,
+             count(*) OVER () AS total
       FROM scan_component sc
       JOIN component c ON c.id = sc.component_id
       ${where}
@@ -371,7 +394,7 @@ export class ApplicationsService {
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
 
-    return paginate(rowsOf(rows).map(toComponentRef), totalFromRows(rowsOf(rows)), query);
+    return paginate(rowsOf(rows).map(toScanComponentEntry), totalFromRows(rowsOf(rows)), query);
   }
 
   /** Distinct ecosystems present in a scan, for the filter dropdown. */
@@ -488,6 +511,13 @@ interface ComponentQueryRow {
   total?: number | string;
 }
 
+interface ScanComponentQueryRow extends ComponentQueryRow {
+  kind: string | null;
+  paths: string[] | null;
+  path_count: number | null;
+  layer_id: string | null;
+}
+
 function toIso(value: Date | string | null): string | null {
   if (value === null) return null;
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -550,6 +580,19 @@ function toApplicationSummary(row: ApplicationListRow, vulnEnabled: boolean): Ap
     // whose SBOM revealed no platform, which yields an object of nulls — a
     // scratch image is not the same as no data.
     platform: row.latest_scan_id === null ? null : toScanPlatform(row),
+  };
+}
+
+/**
+ * A scan's component, with where it was found in that scan.
+ *
+ * `origin` is derived here rather than stored, so the classifier can be corrected in a release
+ * without touching the millions of rows in `scan_component`.
+ */
+function toScanComponentEntry(row: ScanComponentQueryRow): ScanComponentEntry {
+  return {
+    ...toComponentRef(row),
+    location: toComponentLocation(row),
   };
 }
 

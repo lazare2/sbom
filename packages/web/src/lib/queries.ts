@@ -11,6 +11,7 @@ import type {
   AuditLogEntry,
   BulkSearchResult,
   ComponentRef,
+  ScanComponentEntry,
   ComponentSearchHit,
   ComponentSuggestion,
   DashboardStats,
@@ -127,8 +128,10 @@ export interface ScanDetailResponse extends ScanSummary {
   nextScanId: string | null;
 }
 
-export interface ApplicationComponentsResponse extends Paginated<ComponentRef> {
+export interface ApplicationComponentsResponse extends Paginated<ScanComponentEntry> {
   scanId: string | null;
+  /** Null when this build's SBOM has never had a location pass. See ComponentLocationCell. */
+  locationsExtractedAt: string | null;
 }
 
 export interface ComponentSearchResponse extends Paginated<ComponentSearchHit> {
@@ -264,7 +267,7 @@ export function useScan(id: string | undefined) {
 export function useScanComponents(id: string | undefined, params: Record<string, unknown>) {
   return useQuery({
     queryKey: queryKeys.scanComponents(id ?? "", params),
-    queryFn: () => api.get<Paginated<ComponentRef>>(`/scans/${id}/components${toQueryString(params)}`),
+    queryFn: () => api.get<Paginated<ScanComponentEntry>>(`/scans/${id}/components${toQueryString(params)}`),
     enabled: Boolean(id),
     placeholderData: (previous) => previous,
   });
@@ -679,6 +682,20 @@ export function useAdvisorySearch(params: Record<string, unknown>, enabled = tru
     queryFn: () => api.get<Paginated<AdvisorySummary>>(`/vulnerabilities${toQueryString(params)}`),
     placeholderData: (previous) => previous,
     enabled,
+  });
+}
+
+/**
+ * How many scans have never had a location pass.
+ *
+ * Polled only while a run is in progress, so an idle admin page is not a permanent source of
+ * requests — the same rule the malicious settings page follows.
+ */
+export function useLocationBackfillStatus() {
+  return useQuery({
+    queryKey: ["admin", "location-backfill"],
+    queryFn: () => api.get<{ pending: number; running: boolean }>("/admin/scans/backfill-locations"),
+    refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
   });
 }
 

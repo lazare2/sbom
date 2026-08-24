@@ -26,6 +26,7 @@ import { MaliciousWorker } from "./modules/malicious/malicious-worker.js";
 import { GroupsService } from "./modules/groups/groups.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
+import { LocationBackfillService } from "./modules/ingestion/location-backfill.service.js";
 import { Mailer } from "./modules/reports/mailer.js";
 import { ReportScheduler } from "./modules/reports/report-scheduler.js";
 import { ReportService } from "./modules/reports/report.service.js";
@@ -58,6 +59,8 @@ export interface AppContext {
   auth: AuthService;
   ingestTokens: IngestTokenService;
   ingestion: IngestionService;
+  /** Recovers component locations from SBOMs ingested before the platform recorded them. */
+  locationBackfill: LocationBackfillService;
   applications: ApplicationsService;
   /** Reads over named sets of applications. Counts distinct advisories, not summed findings. */
   groups: GroupsService;
@@ -152,6 +155,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
 
   const ingestTokens = new IngestTokenService({ db, config });
   const ingestion = new IngestionService({ db, blobStore, logger });
+  const locationBackfill = new LocationBackfillService({ db, blobs: blobStore, logger });
 
   // Read side. Stateless query services over the same pool.
   //
@@ -264,6 +268,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     auth,
     ingestTokens,
     ingestion,
+    locationBackfill,
     applications,
     groups,
     scans,

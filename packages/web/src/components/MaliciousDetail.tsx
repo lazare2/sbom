@@ -13,6 +13,7 @@ import {
   useRemoveMaliciousAcknowledgement,
 } from "../lib/mutations.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
+import { ComponentLocationCell } from "./ComponentLocationCell.tsx";
 import {
   Badge,
   Button,
@@ -238,6 +239,7 @@ function ImpactTable({
           <thead>
             <tr>
               <Th>Application</Th>
+              <Th width="300px">Where it is</Th>
               <Th width="120px">Versions</Th>
               <Th align="right" width="80px">
                 Builds
@@ -260,6 +262,15 @@ function ImpactTable({
                   {impact.acknowledgement ? (
                     <Badge tone="neutral">{MALICIOUS_ACK_LABELS[impact.acknowledgement.state]}</Badge>
                   ) : null}
+                </Td>
+                <Td>
+                  {/*
+                    The question this whole column answers is "is this in our code or in the
+                    image underneath it", which decides who has to fix it. The origin badge is
+                    the short answer and the paths under it are the evidence — shown together
+                    so a misclassification is visible rather than authoritative.
+                  */}
+                  <ComponentLocationCell location={impact.location} />
                 </Td>
                 <Td className="text-text-muted">{impact.versions.join(", ") || "—"}</Td>
                 <Td align="right" className="nums text-text-muted">

@@ -12,11 +12,13 @@ import {
   type SmtpEncryption,
 } from "@sbom/shared";
 import {
+  useLocationBackfillStatus,
   usePlatformSettings,
   useReportSettings,
   useVulnAdminStatus,
 } from "../../lib/queries.ts";
 import {
+  useBackfillLocations,
   useTestReportEmail,
   useUpdatePlatformSettings,
   useUpdateReportSettings,
@@ -27,12 +29,14 @@ import {
   Card,
   CardHeader,
   ErrorBanner,
+  FormError,
   FormRow,
   LoadingBlock,
   Select,
   Textarea,
   TextInput,
 } from "../../components/ui.tsx";
+import { formatNumber } from "../../lib/format.ts";
 
 /**
  * Every value an administrator sets once and forgets, in one place.
@@ -56,6 +60,7 @@ export function AdminConfigurationPage() {
   return (
     <div className="space-y-4">
       <StaleThresholdCard />
+      <LocationBackfillCard />
       <VulnIntervalCard />
       <ReportDeliveryCard />
     </div>
@@ -65,6 +70,77 @@ export function AdminConfigurationPage() {
 // ---------------------------------------------------------------------------
 // estate
 // ---------------------------------------------------------------------------
+
+/**
+ * Recovering component locations from SBOMs ingested before the platform recorded them.
+ *
+ * The card renders nothing at all once the estate is fully backfilled. That restraint is
+ * deliberate and matches the dashboard's malicious alert: a permanent panel reporting "0
+ * scans pending" is one people stop reading, and this is a one-off migration rather than a
+ * setting anybody needs to see again afterwards.
+ *
+ * A run is a batch, not a queue, and the button says so. An estate with tens of thousands of
+ * scans needs several presses, and telling the operator how many are left after each one is
+ * more honest than a progress bar over work whose duration depends on blob-store latency.
+ */
+function LocationBackfillCard() {
+  const status = useLocationBackfillStatus();
+  const backfill = useBackfillLocations();
+
+  // Undefined while loading, and 0 once there is nothing left to do. Neither is worth a card.
+  if (!status.data || status.data.pending === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Component locations"
+        subtitle="Builds ingested before the platform recorded where each package sits. Their paths can be recovered from the SBOMs already in storage."
+        actions={
+          <Button
+            variant="primary"
+            disabled={backfill.isPending || status.data.running}
+            onClick={() => backfill.mutate(undefined)}
+          >
+            {backfill.isPending || status.data.running ? "Extracting…" : "Extract next batch"}
+          </Button>
+        }
+      />
+      <div className="space-y-3 p-4">
+        <FormError error={backfill.error} />
+
+        <p className="text-sm text-text-muted">
+          <strong className="text-text-base">{formatNumber(status.data.pending)}</strong>{" "}
+          {status.data.pending === 1 ? "build has" : "builds have"} no location data. Until they
+          are processed their package lists say &ldquo;not extracted yet&rdquo; rather than
+          showing a path.
+        </p>
+
+        {backfill.data ? (
+          <p className="text-xs text-text-muted">
+            Last batch: {formatNumber(backfill.data.processed)} processed,{" "}
+            {formatNumber(backfill.data.rowsUpdated)} packages located,{" "}
+            {formatNumber(backfill.data.remaining)} remaining.
+            {backfill.data.unreadable > 0 ? (
+              <>
+                {" "}
+                <span className="text-warn">
+                  {formatNumber(backfill.data.unreadable)} could not be read — the raw SBOM is no
+                  longer in storage, so those builds cannot be backfilled.
+                </span>
+              </>
+            ) : null}
+          </p>
+        ) : null}
+
+        <p className="text-xs text-text-faint">
+          Runs in batches so the request returns rather than holding a connection open. Press
+          again until nothing remains; each batch commits as it goes, so an interrupted run
+          loses nothing.
+        </p>
+      </div>
+    </Card>
+  );
+}
 
 function StaleThresholdCard() {
   const query = usePlatformSettings();

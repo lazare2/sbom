@@ -345,7 +345,7 @@ export function pairVersionChanges(
   added: ComponentRef[],
   removed: ComponentRef[],
 ): { added: ComponentRef[]; removed: ComponentRef[]; changed: ScanDiff["changed"] } {
-  const key = (c: ComponentRef) => `${c.ecosystem} ${c.name.toLowerCase()}`;
+  const key = (c: ComponentRef) => `${c.ecosystem}\u0000${c.name.toLowerCase()}`;
 
   const addedByKey = new Map<string, ComponentRef[]>();
   for (const c of added) {

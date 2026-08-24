@@ -1,0 +1,1 @@
+ALTER TABLE "scan" ADD COLUMN "locations_extracted_at" timestamp with time zone;

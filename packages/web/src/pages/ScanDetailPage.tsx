@@ -6,6 +6,7 @@ import { useScan, useScanComponents } from "../lib/queries.ts";
 import { formatBytes, formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
+import { ComponentLocationCell } from "../components/ComponentLocationCell.tsx";
 import { PlatformChips } from "../components/Platform.tsx";
 import { DeleteScanModal } from "../components/DeleteScanModal.tsx";
 import { useDeleteScan } from "../lib/mutations.ts";
@@ -340,6 +341,7 @@ export function ScanDetailPage() {
                     <Th onSort={() => sort.toggle("ecosystem")} sorted={sort.stateOf("ecosystem")} width="120px">
                       Ecosystem
                     </Th>
+                    <Th width="320px">Location</Th>
                     <Th onSort={() => sort.toggle("purl")} sorted={sort.stateOf("purl")}>
                       Package URL
                     </Th>
@@ -364,7 +366,16 @@ export function ScanDetailPage() {
                           {c.ecosystem}
                         </span>
                       </Td>
-                      <Td className="max-w-[520px] truncate" title={c.purl ?? undefined}>
+                      <Td>
+                        <ComponentLocationCell
+                          location={c.location}
+                          // The scan knows whether anyone has ever extracted locations from
+                          // its SBOM, and an unextracted build must say so rather than
+                          // showing the same blank as one that genuinely had no paths.
+                          extracted={scan?.locationsExtractedAt != null}
+                        />
+                      </Td>
+                      <Td className="max-w-[380px] truncate" title={c.purl ?? undefined}>
                         {c.purl ? <Mono>{c.purl}</Mono> : <span className="text-text-faint">—</span>}
                       </Td>
                     </Tr>

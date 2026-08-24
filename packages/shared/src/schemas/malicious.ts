@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { paginationQuerySchema, uuidSchema } from "./common.js";
+import type { ComponentLocation } from "./location.js";
 import { defineSortTable } from "./sort.js";
 import {
   maliciousAckStateSchema,
@@ -217,6 +218,15 @@ export interface MaliciousApplicationImpact {
   lastSeenAt: string;
   /** The most recent build containing it, for a direct link into the scan. */
   lastScanId: string;
+  /**
+   * Where in this application's artifact the package was found.
+   *
+   * Unioned across every build that carried it rather than read from the newest one, because
+   * a package that moved between builds was genuinely in both places and somebody is about to
+   * go and delete it. `origin` separates "your dependency" from "inherited from the base
+   * image", which decides whose Dockerfile has to change.
+   */
+  location: ComponentLocation;
   acknowledgement: MaliciousAckSummary | null;
 }
 
@@ -231,20 +241,46 @@ export interface MaliciousApplicationImpact {
  * structure of zeros, which would read as a clean estate rather than an unexamined one.
  */
 export interface MaliciousSummary {
-  /** Distinct malicious packages present in some current build. */
+  /**
+   * Distinct UNACKNOWLEDGED malicious packages present in some current build.
+   *
+   * Every count below excludes findings somebody has already acknowledged, which makes this
+   * block different from every other read in the feature. The findings list and the detail
+   * view keep acknowledged findings visible and marked, because the record of what was
+   * shipped must stay intact. This block feeds the dashboard alert, whose entire job is to
+   * interrupt -- and a finding a human has already looked at and written a note about has
+   * finished interrupting.
+   *
+   * The exclusion is per (package, application) pair, so a package cleaned up in one
+   * application and untouched in another still counts for the second.
+   */
   currentPackages: number;
-  /** Applications whose current build contains at least one. */
+  /** Applications whose current build contains at least one unacknowledged finding. */
   currentApplications: number;
-  /** Distinct malicious packages anywhere in retained history, including current. */
+  /** Distinct unacknowledged packages anywhere in retained history, including current. */
   everPackages: number;
-  /** Applications that ever contained one. */
+  /** Applications that ever contained an unacknowledged one. */
   everApplications: number;
-  /** How many of the above carry an acknowledgement, so "handled" is visible at a glance. */
+  /**
+   * Packages fully acknowledged everywhere they appear, and therefore excluded above.
+   *
+   * Reported so the alert can say what it is not showing. A count that vanished silently
+   * would leave a reader unable to tell a handled estate from an unexamined one.
+   */
   acknowledgedPackages: number;
   feedBuiltAt: string;
   /** Components matched against the current feed, and how many are still queued. */
   matchedComponents: number;
   pendingComponents: number;
+  /**
+   * Digest of the unacknowledged package ids, or null when there are none.
+   *
+   * Exists so the dashboard alert can be dismissed without being dismissed forever. The
+   * client remembers the signature it dismissed; any change to the outstanding set produces a
+   * different one and the alert returns. A permanently dismissible malware banner would be a
+   * mute button on the one notice in this platform that must not have one.
+   */
+  signature: string | null;
 }
 
 // ---------------------------------------------------------------------------

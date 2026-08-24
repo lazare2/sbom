@@ -22,7 +22,7 @@ import {
   updateUserRequestSchema,
   updatePlatformSettingsSchema,
 } from "@sbom/shared";
-import { NotFoundError } from "../../lib/errors.js";
+import { ConflictError, NotFoundError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
 import { vulnAdminRoutes } from "../vulnerabilities/vuln-admin.routes.js";
@@ -33,6 +33,17 @@ function actorOf(request: FastifyRequest): Actor {
   const user = getUser(request);
   return { id: user.id, email: user.email };
 }
+
+/**
+ * Batch size for one backfill pass.
+ *
+ * Bounded at both ends: a floor of 1 so a caller can step through one scan at a time while
+ * diagnosing, and a ceiling of 2000 because each scan means a blob read plus a full JSON parse
+ * and an unbounded limit turns an admin click into an hour-long request.
+ */
+const backfillLocationsSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(2000).default(200),
+});
 
 const aliasBodySchema = z.object({
   aliasName: z
@@ -63,6 +74,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     attributeDefinitions,
     audit,
     ingestTokens,
+    locationBackfill,
     settings,
   } = fastify.ctx;
 
@@ -205,6 +217,51 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.delete("/scans/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     return reply.send(await adminScans.remove(id, actorOf(request)));
+  });
+
+  /**
+   * Recover component locations from the stored SBOMs of scans ingested before the platform
+   * recorded them.
+   *
+   * A batch at a time rather than one long request, and the response reports what is left so
+   * the caller can decide whether to run it again. That keeps an estate with tens of thousands
+   * of scans from turning this into a request that either times out or holds a connection open
+   * for an hour.
+   *
+   * 409 rather than a queue when a run is already in progress: two concurrent passes would
+   * read the same blobs and contend on the same rows for no gain, and an operator who clicked
+   * twice should be told, not silently ignored.
+   */
+  fastify.post("/scans/backfill-locations", async (request, reply) => {
+    if (locationBackfill.isRunning) {
+      throw new ConflictError("A location backfill is already running.", "backfill_in_progress");
+    }
+
+    const body = parseOrThrow(backfillLocationsSchema, request.body ?? {});
+    const result = await locationBackfill.run(body.limit);
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "scan.backfill_locations",
+      targetType: "scan",
+      // A batch has no single target, so the key names the job rather than a row.
+      targetId: "locations",
+      // Spread so the interface's named fields satisfy the audit row's index signature; the
+      // recorded values are the counts themselves, which is what makes a run explainable
+      // afterwards ("processed 200, 3 unreadable") rather than merely logged as having
+      // happened.
+      metadata: { ...result },
+    });
+
+    return reply.send(result);
+  });
+
+  /** How much of the estate still has no location pass, for the admin screen. */
+  fastify.get("/scans/backfill-locations", async (_request, reply) => {
+    return reply.send({
+      pending: await locationBackfill.pending(),
+      running: locationBackfill.isRunning,
+    });
   });
 
   // -------------------------------------------------------------------------

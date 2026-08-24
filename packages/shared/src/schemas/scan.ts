@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ScanSource } from "../enums.js";
 import { paginationQuerySchema, uuidSchema } from "./common.js";
 import { defineSortTable } from "./sort.js";
+import type { ComponentLocation } from "./location.js";
 
 /**
  * Sortable columns of an application's scan history.
@@ -82,6 +83,14 @@ export interface ScanSummary {
   source: ScanSource;
   /** Set for `manual` scans. Survives deletion of the uploader's account. */
   uploadedByEmail: string | null;
+  /**
+   * When component locations were extracted from this build's SBOM, or null if never.
+   *
+   * Null is what separates "this SBOM has no locations in it" from "nobody has looked at this
+   * SBOM for locations yet". Without it both render as an empty path column and an
+   * administrator has no way to tell whether running the backfill would change anything.
+   */
+  locationsExtractedAt: string | null;
 }
 
 /** Sortable columns of a component list — a scan's inventory, or an application's. */
@@ -104,6 +113,18 @@ export interface ComponentRef {
   version: string | null;
   ecosystem: string;
   purl: string | null;
+}
+
+/**
+ * A component as listed within one scan, carrying where it was found.
+ *
+ * Separate from `ComponentRef` because the location belongs to the scan, not to the package.
+ * The diff and removed-package views compare packages across scans and deliberately keep the
+ * plainer shape — a path that came from one of the two scans being compared would be read as
+ * applying to both.
+ */
+export interface ScanComponentEntry extends ComponentRef {
+  location: ComponentLocation;
 }
 
 // --- diff -------------------------------------------------------------------

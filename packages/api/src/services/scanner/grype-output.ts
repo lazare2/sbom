@@ -329,7 +329,7 @@ export function parseGrypeReport(raw: string): ParsedReport {
     const vulnerabilityId = asString(v.id, 128);
     if (!vulnerabilityId) continue;
 
-    const key = `${componentId} ${vulnerabilityId}`;
+    const key = `${componentId}\u0000${vulnerabilityId}`;
     if (seen.has(key)) continue;
     seen.add(key);
 

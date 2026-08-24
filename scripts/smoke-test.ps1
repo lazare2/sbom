@@ -2801,9 +2801,35 @@ try {
         $r = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/components/bulk-search",
             "-H", "Content-Type: application/json", "--data-binary", "@$body", "-b", $readJar)
         if ($r.Status -ne 200) { throw "bulk search returned $($r.Status)" }
-        $matched = ($r.Json.rollup | Measure-Object -Property matchedNameCount -Sum).Sum
-        # No package is literally named "%" or "_", so both lines must miss.
-        [int]$matched -eq 0
+
+        <#
+          Asserted as "every match contains the character literally", NOT as "nothing
+          matched".
+
+          The zero-match form looked stronger and was in fact an assertion about the estate
+          rather than about the escaping: it held only while no package anywhere had an
+          underscore in its name. Every Alpine image ships `ssl_client`, so the first real
+          container SBOM ingested into a database turned a correct escape into a red test.
+
+          What has to be true is that the metacharacters are inert. Unescaped, `%` matches
+          every package in the estate; escaped, it matches only names actually containing a
+          percent sign. Checking the matched names for the character proves that directly and
+          cannot be broken by whatever else happens to be catalogued.
+        #>
+        $ok = $true
+        $lines = 0
+        foreach ($line in $r.Json.rollup) {
+            $lines++
+            foreach ($name in @($line.matchedNames)) {
+                # PowerShell's -like wildcards are * and ?, so % and _ are literal on this
+                # side of the comparison and this asks the question it appears to ask.
+                if ($name -notlike "*$($line.name)*") { $ok = $false }
+            }
+        }
+
+        # Both input lines must have come back, or the loop above proved nothing by iterating
+        # over an empty collection.
+        $ok -and $lines -eq 2
     }
 
     Assert-That "the list search's matches view sorts on the same columns as the single search" {

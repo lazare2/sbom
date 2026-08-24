@@ -17,6 +17,7 @@ import { formatBytes, formatDateTime, formatNumber, formatRelative, shortImageRe
 import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { DiffView, LastSeen, PackageLink } from "../components/DiffView.tsx";
+import { ComponentLocationCell } from "../components/ComponentLocationCell.tsx";
 import { PlatformChips } from "../components/Platform.tsx";
 import { ApplicationFormModal } from "./admin/ApplicationFormModal.tsx";
 import { UploadSbomModal } from "./UploadSbomModal.tsx";
@@ -415,6 +416,7 @@ function ComponentsTab({
                     <Th onSort={() => sort.toggle("ecosystem")} sorted={sort.stateOf("ecosystem")} width="120px">
                       Ecosystem
                     </Th>
+                    <Th width="320px">Location</Th>
                     <Th onSort={() => sort.toggle("purl")} sorted={sort.stateOf("purl")}>
                       Package URL
                     </Th>
@@ -441,7 +443,13 @@ function ComponentsTab({
                           {c.ecosystem}
                         </span>
                       </Td>
-                      <Td className="max-w-[520px] truncate" title={c.purl ?? undefined}>
+                      <Td>
+                        <ComponentLocationCell
+                          location={c.location}
+                          extracted={data.locationsExtractedAt != null}
+                        />
+                      </Td>
+                      <Td className="max-w-[380px] truncate" title={c.purl ?? undefined}>
                         {c.purl ? <Mono>{c.purl}</Mono> : <span className="text-text-faint">—</span>}
                       </Td>
                     </Tr>

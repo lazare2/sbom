@@ -663,6 +663,34 @@ export function useUpdateMaliciousSettings() {
  * normal state for an air-gapped install, and the page reports it as an outcome rather than
  * as a failed request.
  */
+/**
+ * Re-parse stored SBOMs to recover component locations for scans ingested before the platform
+ * recorded them.
+ *
+ * Invalidates every view that shows a path, because a successful run changes what those
+ * screens can say — not merely the admin panel that triggered it. Scan and application
+ * component lists, findings and malicious impacts all read the same columns.
+ */
+export function useBackfillLocations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (limit?: number) =>
+      api.post<{
+        processed: number;
+        rowsUpdated: number;
+        unreadable: number;
+        remaining: number;
+      }>("/admin/scans/backfill-locations", limit === undefined ? {} : { limit }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "location-backfill"] });
+      void qc.invalidateQueries({ queryKey: ["scans"] });
+      void qc.invalidateQueries({ queryKey: ["applications"] });
+      void qc.invalidateQueries({ queryKey: ["vuln"] });
+      invalidateMalicious(qc);
+    },
+  });
+}
+
 export function useUpdateMaliciousFeed() {
   const qc = useQueryClient();
   return useMutation({

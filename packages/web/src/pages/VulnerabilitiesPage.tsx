@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { AdvisoryImpact, VulnSeverity } from "@sbom/shared";
 import { useAdvisoryImpact, useAdvisorySearch, useVulnStatus } from "../lib/queries.ts";
+import { ComponentLocationCell, OriginBadge } from "../components/ComponentLocationCell.tsx";
 import {
   AdvisoryApplicationsCell,
   AdvisoryPackagesCell,
@@ -485,12 +486,18 @@ function ImpactTable({
                     <StatusBadge status={row.applicationStatus} />
                   </Td>
                   <Td>
-                    <span className="flex flex-wrap gap-x-3 gap-y-1">
+                    <span className="flex flex-col gap-1.5">
                       {row.packages.map((pkg) => (
-                        <span key={pkg.componentId} className="whitespace-nowrap">
-                          <span className="text-text-base">{pkg.name}</span>{" "}
-                          <Mono>{pkg.version ?? "unknown"}</Mono>{" "}
-                          <EcosystemBadge ecosystem={pkg.ecosystem} />
+                        <span key={pkg.componentId}>
+                          <span className="whitespace-nowrap">
+                            <span className="text-text-base">{pkg.name}</span>{" "}
+                            <Mono>{pkg.version ?? "unknown"}</Mono>{" "}
+                            <EcosystemBadge ecosystem={pkg.ecosystem} />{" "}
+                            <OriginBadge origin={pkg.location.origin} />
+                          </span>
+                          {/* Stacked rather than wrapped now that each package carries a
+                              path: side by side, two long paths become unreadable. */}
+                          <ComponentLocationCell location={pkg.location} compact />
                         </span>
                       ))}
                     </span>

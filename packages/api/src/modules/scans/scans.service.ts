@@ -60,6 +60,7 @@ interface ScanQueryRow extends PlatformRow {
   is_latest: boolean;
   source: ScanSource;
   uploaded_by_email: string | null;
+  locations_extracted_at: Date | string | null;
   total?: number | string;
 }
 
@@ -106,7 +107,7 @@ export class ScansService {
         s.pipeline_id, s.image_ref, s.branch, s.component_count,
         s.tool_name, s.tool_version, s.sbom_size_bytes,
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
-        s.source, s.uploaded_by_email,
+        s.source, s.uploaded_by_email, s.locations_extracted_at,
         (s.id = a.latest_scan_id) AS is_latest,
         count(*) OVER () AS total
       FROM scan s
@@ -145,7 +146,7 @@ export class ScansService {
         s.tool_name, s.tool_version, s.sbom_size_bytes,
         s.os_name, s.os_version, s.os_pretty, s.runtimes, s.sbom_sha256,
         s.spec_version, s.serial_number, s.ingest_token_name,
-        s.source, s.uploaded_by_email, s.upload_note,
+        s.source, s.uploaded_by_email, s.locations_extracted_at, s.upload_note,
         a.name AS application_name,
         a.status AS application_status,
         (s.id = a.latest_scan_id) AS is_latest,
@@ -219,7 +220,7 @@ export class ScansService {
         s.pipeline_id, s.image_ref, s.branch, s.component_count,
         s.tool_name, s.tool_version, s.sbom_size_bytes,
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
-        s.source, s.uploaded_by_email,
+        s.source, s.uploaded_by_email, s.locations_extracted_at,
         a.name AS application_name,
         (s.id = a.latest_scan_id) AS is_latest
       FROM scan s
@@ -257,5 +258,6 @@ function toScanSummary(row: ScanQueryRow): ScanSummary {
     // "looks like CI" instead of rendering `undefined` as a badge.
     source: row.source ?? "ci",
     uploadedByEmail: row.uploaded_by_email ?? null,
+    locationsExtractedAt: toIso(row.locations_extracted_at ?? null),
   };
 }

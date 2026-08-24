@@ -6,6 +6,7 @@ import { useServerSort, type SortControl } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useCreateSuppression } from "../lib/mutations.ts";
 import { formatNumber } from "../lib/format.ts";
+import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
 import { SEVERITY_ORDER, SeverityBadge, SeverityBar } from "./Severity.tsx";
 import {
   Badge,
@@ -287,6 +288,16 @@ export function FindingsTable({
                         {finding.kind}
                       </Badge>
                     ) : null}
+                    <OriginBadge origin={finding.location.origin} />
+                  </div>
+                  {/*
+                    Inside the package cell rather than in a column of its own. The table is
+                    already six columns wide, and the path belongs to this package rather than
+                    to the row as a whole — putting it directly underneath keeps the two
+                    together when the table wraps on a narrow screen.
+                  */}
+                  <div className="mt-1">
+                    <ComponentLocationCell location={finding.location} compact />
                   </div>
                 </Td>
                 <Td>

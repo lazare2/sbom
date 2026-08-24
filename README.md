@@ -934,6 +934,92 @@ order applications by base-image age and bury the handful of findings a team act
 and can act on. Each row shows both halves in one column — `38 / 28` — so the pair reads as
 a pair rather than as two numbers to add up.
 
+### Where a package actually is
+
+Every finding — a CVE or a malicious package — carries the paths where the package was found
+in that build, and a label saying whether it belongs to the application or to the image
+underneath it.
+
+The data was already arriving and being thrown away. Syft records locations in the CycloneDX
+`properties` array as `syft:location:N:path` and `syft:location:N:layerID`; the parser read
+those properties only for the package type and discarded the rest. Nothing about how anyone
+scans had to change.
+
+**Paths live on the scan, not on the package.** `component` is a global, content-addressed
+row shared by every application that ships that exact package — one `lodash@4.17.21` row
+that a hundred scans point at — and the path is different in each of them. So the columns
+hang off `scan_component`, the per-scan join row.
+
+**OS packages deliberately store no path.** For `apk`, `deb` and `rpm`, the location Syft
+records is the *package manager's database*, not the package:
+
+```
+apk   /lib/apk/db/installed          identical for all 18 apk packages in an image
+deb   /var/lib/dpkg/info/<pkg>.list  185 of these in python:3.12-slim
+deb   /var/lib/dpkg/status           87 more
+```
+
+One deb package carried 81 such locations, none of which tell you where its files are.
+Showing them would send the reader to the wrong file, so they are dropped and the finding is
+labelled *Base image (OS package)* instead. That also removes nearly all the storage cost,
+since OS packages are the overwhelming majority of components in a container image.
+
+#### The four origins
+
+| Origin | How it is decided |
+|---|---|
+| **Base image (OS package)** | The ecosystem is a distro package manager. Certain, not inferred. |
+| **Image** | The path is under a system prefix — `/usr/lib`, `/usr/local/lib`, `/opt`, … |
+| **Application** | Anything else, including `/app` and `/usr/src/app`. |
+| **Unknown** | No location was recorded. Never rendered as either of the two above. |
+
+The middle two rest on a prefix list, which is the only heuristic in the feature. Two things
+make it acceptable: the list is small and auditable, and **the label is never shown without
+the path beside it** — a reader who sees *Image* above `/usr/src/app/node_modules/evil` can
+see instantly that the label is wrong and the path is right.
+
+Note what the list deliberately omits: a bare `/usr/` prefix. `/usr/src/app` is one of the
+most common WORKDIRs there is, and folding it into "image" would misfile the application's
+own dependencies in exactly the deployments most likely to be checking.
+
+#### Why not image layers
+
+The obvious rule — *a layer containing distro packages is the base image* — was measured
+against real images and does not work:
+
+```
+node:20-alpine     layer A {npm: 203, binary: 1}    layer B {apk: 18, npm: 1}
+python:3.12-slim   all three of its layers contain deb packages
+```
+
+On the first, the rule calls Node's 203 global npm packages "application" — but to anyone
+whose Dockerfile says `FROM node:20-alpine`, those are base image. On the second it has no
+discriminating power at all. The layer digest is still recorded, as ground truth to check
+against when the derived label looks wrong.
+
+#### Duplicates are merged, not dropped
+
+Syft emits the same package twice when it finds it in two layers or via two catalogers, and
+the parser collapses duplicates on identity hash. Those duplicate entries are precisely the
+ones carrying a location the first entry did not have. Collapsing without merging discards
+multi-location data on exactly the packages installed in more than one place — measured on
+`node:20-alpine`, merging raised the maximum locations on a single package from 1 to 5.
+
+Stored paths are capped at three per package per scan, with the true total kept alongside so
+a truncated list reads "Showing 3 of 81" rather than implying it is complete.
+
+#### Builds ingested before this existed
+
+`scan.locations_extracted_at` records whether anyone has looked. That is what keeps "this
+SBOM has no locations in it" distinct from "nobody has extracted this SBOM's locations yet" —
+without it both would render as the same blank cell.
+
+Older builds are recovered from the raw SBOMs already in the blob store, on the
+**Configuration** tab under *Component locations*. It runs in batches and reports what is
+left; each batch commits as it goes, so an interrupted run loses nothing. The card is not
+shown at all once nothing is pending. A build whose raw SBOM has since been pruned is
+reported as unreadable and left unmarked rather than being stamped as looked-at.
+
 ### One row per advisory
 
 The estate advisory table on the vulnerabilities tab answers the other direction: not "how

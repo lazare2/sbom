@@ -25,12 +25,17 @@ import { platformSummary } from "./platform.js";
 
 /**
  * Postgres allows at most 65535 bind parameters per statement. `component` has 6
- * inserted columns and `scan_component` has 4, so these chunk sizes keep both
+ * inserted columns and `scan_component` has 7, so these chunk sizes keep both
  * comfortably under the ceiling while still being few enough round trips that a
  * 50k-component image ingests in tens of statements rather than thousands.
+ *
+ * The scan_component chunk came down from 2000 when the three location columns were added:
+ * 2000 x 7 is 14,000 parameters, which still fits, but a text[] binds as one parameter whose
+ * size is unbounded rather than as a scalar, and 1500 keeps the statement comfortable rather
+ * than merely legal.
  */
 const COMPONENT_INSERT_CHUNK = 1000;
-const SCAN_COMPONENT_INSERT_CHUNK = 2000;
+const SCAN_COMPONENT_INSERT_CHUNK = 1500;
 const COMPONENT_LOOKUP_CHUNK = 5000;
 
 /**
@@ -305,6 +310,14 @@ export class IngestionService {
           osVersion: parsed.platform.osVersion,
           osPretty: parsed.platform.osPretty,
           runtimes: parsed.platform.runtimes,
+          /*
+           * Stamped because this scan was parsed by code that extracts locations, whether or
+           * not the SBOM turned out to carry any. That is exactly the distinction the column
+           * exists for: without it, a scan from a tool that emits no locations is
+           * indistinguishable from one ingested before the platform looked, and the backfill
+           * would keep re-reading its blob forever to rediscover that there is nothing there.
+           */
+          locationsExtractedAt: new Date(),
         })
         .returning();
 
@@ -573,6 +586,9 @@ export class IngestionService {
         componentId,
         applicationId: args.applicationId,
         createdAt: args.createdAt,
+        paths: c.paths,
+        pathCount: c.pathCount,
+        layerId: c.layerId,
       };
     });
 

@@ -1,4 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
+import { COMPONENT_LOCATION_PATH_CAP } from "@sbom/shared";
 import type {
   ListMaliciousQuery,
   MaliciousAckSummary,
@@ -16,6 +17,7 @@ import { NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
 import { direction, orderBy } from "../../lib/sorting.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
+import { toComponentLocation } from "../ingestion/location-row.js";
 import { groupMemberPredicate } from "../vulnerabilities/scope.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import type { MaliciousFeedService } from "./malicious-feed.service.js";
@@ -121,13 +123,46 @@ export class MaliciousService {
     const snapshot = await this.deps.feed.snapshot();
     if (!snapshot.builtAt) return null;
 
-    const rows = await this.deps.db.execute<Row<Record<string, number>>>(sql`
+    /*
+     * Every count here is of UNACKNOWLEDGED findings only.
+     *
+     * The dashboard alert is the one place in the feature that filters rather than annotates.
+     * Everywhere else -- the findings list, the detail view -- an acknowledged finding stays
+     * visible and marked, because the record of what was shipped must not become erasable.
+     * The alert is different in kind: it exists to interrupt, and something a human has
+     * already looked at and written a note about has done its interrupting.
+     *
+     * The filter is per (package, application) PAIR, not per package. An acknowledgement can
+     * be estate-wide (`application_id IS NULL`) or scoped to one application, and remediation
+     * is genuinely per-application because the credentials to rotate belong to a particular
+     * pipeline. A package cleaned up in one application and untouched in another must keep
+     * alerting for the second, and counting per package would silence it for both.
+     *
+     * `signature` is an md5 over the ids that survive the filter. It is what lets the alert be
+     * dismissible without being permanently dismissible: the client stores the signature it
+     * dismissed, and a set that gains a package produces a different one, so the alert comes
+     * back. Ordered inside the aggregate because an unordered string_agg would hash
+     * differently between two runs over identical data and resurrect a dismissed alert at
+     * random.
+     */
+    const rows = await this.deps.db.execute<Row<Record<string, number | string | null>>>(sql`
       SELECT
-        count(DISTINCT mp.id) FILTER (WHERE sc.scan_id = a.latest_scan_id)::int AS current_packages,
-        count(DISTINCT a.id)  FILTER (WHERE sc.scan_id = a.latest_scan_id)::int AS current_applications,
-        count(DISTINCT mp.id)::int AS ever_packages,
-        count(DISTINCT a.id)::int  AS ever_applications,
-        count(DISTINCT mp.id) FILTER (WHERE ack.id IS NOT NULL)::int AS acknowledged_packages
+        count(DISTINCT mp.id) FILTER (WHERE ack.id IS NULL AND sc.scan_id = a.latest_scan_id)::int
+          AS current_packages,
+        count(DISTINCT a.id)  FILTER (WHERE ack.id IS NULL AND sc.scan_id = a.latest_scan_id)::int
+          AS current_applications,
+        count(DISTINCT mp.id) FILTER (WHERE ack.id IS NULL)::int AS ever_packages,
+        count(DISTINCT a.id)  FILTER (WHERE ack.id IS NULL)::int AS ever_applications,
+        /*
+         * Fully acknowledged packages: everything matched, minus everything still unhandled.
+         * Not "packages carrying an acknowledgement", which would double-count a package that
+         * is handled in one application and outstanding in another -- it would appear in this
+         * figure and in ever_packages at once, and the two are shown side by side.
+         */
+        (count(DISTINCT mp.id) - count(DISTINCT mp.id) FILTER (WHERE ack.id IS NULL))::int
+          AS acknowledged_packages,
+        md5(string_agg(DISTINCT mp.id, ',' ORDER BY mp.id) FILTER (WHERE ack.id IS NULL))
+          AS signature
       FROM component_malicious cm
       JOIN malicious_package mp ON mp.id = cm.malicious_package_id AND ${LIVE_REPORT}
       JOIN scan_component sc ON sc.component_id = cm.component_id
@@ -149,6 +184,9 @@ export class MaliciousService {
       feedBuiltAt: snapshot.builtAt.toISOString(),
       matchedComponents: coverage.matched,
       pendingComponents: coverage.pending,
+      // Null when nothing is outstanding. There is then no alert to dismiss, and a stored
+      // dismissal of `null` must never match and suppress a later real one.
+      signature: typeof row?.signature === "string" ? row.signature : null,
     };
   }
 
@@ -293,24 +331,54 @@ export class MaliciousService {
 
   /** Per-application detail: what was affected, when, and whether it is still shipping. */
   private async impacts(id: string): Promise<MaliciousApplicationImpact[]> {
+    /*
+     * Locations are unioned across every build that carried the package, not taken from the
+     * latest one. A package that moved between builds was in both places, and the reader is
+     * about to go looking for it — the union is what they need, and the alternative (reading
+     * only the newest scan's row) would hide a second install directory precisely when a
+     * partially-completed cleanup makes it most dangerous to miss.
+     *
+     * `unnest` of a NULL array yields no rows, so an application whose components carry no
+     * paths simply does not appear in the CTE and comes back NULL through the LEFT JOIN. That
+     * is the "no location recorded" case, and it stays distinguishable from an empty list.
+     */
     const rows = await this.deps.db.execute<Row<ImpactRow>>(sql`
+      WITH hit AS (
+        SELECT sc.scan_id, sc.application_id, sc.paths, sc.layer_id,
+               c.version, c.ecosystem, c.kind, s.created_at, a.latest_scan_id
+        FROM component_malicious cm
+        JOIN component c ON c.id = cm.component_id
+        JOIN scan_component sc ON sc.component_id = cm.component_id
+        JOIN application a ON a.id = sc.application_id
+        JOIN scan s ON s.id = sc.scan_id
+        WHERE cm.malicious_package_id = ${id}
+      ),
+      located AS (
+        SELECT h.application_id,
+               (array_agg(DISTINCT p ORDER BY p))[1:${sql.raw(String(COMPONENT_LOCATION_PATH_CAP))}] AS paths,
+               count(DISTINCT p)::int AS path_count
+        FROM hit h, unnest(h.paths) AS p
+        GROUP BY h.application_id
+      )
       SELECT
         a.id AS application_id, a.name AS application_name, a.status AS application_status,
-        bool_or(sc.scan_id = a.latest_scan_id) AS in_current_build,
-        array_remove(array_agg(DISTINCT c.version), NULL) AS versions,
-        count(DISTINCT sc.scan_id)::int AS builds,
-        min(s.created_at) AS first_seen_at,
-        max(s.created_at) AS last_seen_at,
-        (array_agg(sc.scan_id ORDER BY s.created_at DESC))[1] AS last_scan_id
-      FROM component_malicious cm
-      JOIN component c ON c.id = cm.component_id
-      JOIN scan_component sc ON sc.component_id = cm.component_id
-      JOIN application a ON a.id = sc.application_id
-      JOIN scan s ON s.id = sc.scan_id
-      WHERE cm.malicious_package_id = ${id}
+        bool_or(h.scan_id = a.latest_scan_id) AS in_current_build,
+        array_remove(array_agg(DISTINCT h.version), NULL) AS versions,
+        count(DISTINCT h.scan_id)::int AS builds,
+        min(h.created_at) AS first_seen_at,
+        max(h.created_at) AS last_seen_at,
+        (array_agg(h.scan_id ORDER BY h.created_at DESC))[1] AS last_scan_id,
+        (array_agg(h.ecosystem ORDER BY h.created_at DESC))[1] AS ecosystem,
+        (array_agg(h.kind ORDER BY h.created_at DESC))[1] AS kind,
+        (array_remove(array_agg(h.layer_id ORDER BY h.created_at DESC), NULL))[1] AS layer_id,
+        max(l.paths) AS paths,
+        max(l.path_count)::int AS path_count
+      FROM hit h
+      JOIN application a ON a.id = h.application_id
+      LEFT JOIN located l ON l.application_id = h.application_id
       GROUP BY a.id, a.name, a.status
       -- Still-shipping applications first; they are the ones with work to do today.
-      ORDER BY bool_or(sc.scan_id = a.latest_scan_id) DESC, lower(a.name)
+      ORDER BY bool_or(h.scan_id = a.latest_scan_id) DESC, lower(a.name)
     `);
 
     const perApp = await this.acknowledgementsByApplication(id);
@@ -325,6 +393,7 @@ export class MaliciousService {
       firstSeenAt: toIso(row.first_seen_at)!,
       lastSeenAt: toIso(row.last_seen_at)!,
       lastScanId: row.last_scan_id,
+      location: toComponentLocation(row),
       acknowledgement: perApp.get(row.application_id) ?? perApp.get(GLOBAL_ACK) ?? null,
     }));
   }
@@ -371,7 +440,7 @@ export class MaliciousService {
 }
 
 /** Sentinel key for the estate-wide acknowledgement, which has no application id. */
-const GLOBAL_ACK = " global";
+const GLOBAL_ACK = "\u0000global";
 
 interface FindingRow {
   id: string;
@@ -408,6 +477,11 @@ interface ImpactRow {
   first_seen_at: Date | string;
   last_seen_at: Date | string;
   last_scan_id: string;
+  ecosystem: string;
+  kind: string | null;
+  paths: string[] | null;
+  path_count: number | null;
+  layer_id: string | null;
 }
 
 interface AckRow {

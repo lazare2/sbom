@@ -577,8 +577,42 @@ await fs.writeFile(
           { name: "syft:distro:versionID", value: "3.20.3" },
         ],
       },
-      { type: "library", name: "express", version: "4.19.2", purl: "pkg:npm/express@4.19.2" },
-      { type: "library", name: "lodash", version: "4.17.21", purl: "pkg:npm/lodash@4.17.21" },
+      /*
+       * Locations, in the three shapes the origin classifier has to tell apart.
+       *
+       * express sits in the application's own tree, lodash in the image's global
+       * node_modules, and `no-location-here` carries no location property at all — which is
+       * what a non-Syft SBOM looks like and must render as "recorded no location" rather than
+       * as a blank cell. The alpine marker above covers the fourth case, os_package.
+       */
+      {
+        type: "library",
+        name: "express",
+        version: "4.19.2",
+        purl: "pkg:npm/express@4.19.2",
+        properties: [
+          { name: "syft:package:type", value: "npm" },
+          { name: "syft:location:0:path", value: "/app/node_modules/express/package.json" },
+          { name: "syft:location:0:layerID", value: "sha256:0000000000000000000000000000000000000000000000000000000000000001" },
+        ],
+      },
+      {
+        type: "library",
+        name: "lodash",
+        version: "4.17.21",
+        purl: "pkg:npm/lodash@4.17.21",
+        properties: [
+          { name: "syft:package:type", value: "npm" },
+          { name: "syft:location:0:path", value: "/usr/local/lib/node_modules/lodash/package.json" },
+          { name: "syft:location:0:layerID", value: "sha256:0000000000000000000000000000000000000000000000000000000000000002" },
+        ],
+      },
+      {
+        type: "library",
+        name: "no-location-here",
+        version: "1.0.0",
+        purl: "pkg:npm/no-location-here@1.0.0",
+      },
     ],
   }),
   "utf8",
@@ -661,6 +695,34 @@ await expectText(EMAIL, "the uploader's identity");
 await expectText("Reason given for the manual upload");
 await expectText("Components in this build");
 await expectText("lodash", "a package from the uploaded SBOM");
+
+/*
+ * Where each package is, and which of the four origins it was classified as.
+ *
+ * All four are exercised by one table because the upload fixture was built to contain one of
+ * each. The origin label is a heuristic over a path prefix, and the rule that makes it
+ * acceptable is that the path is always rendered beside it — so this checks for both, not
+ * just the badge.
+ */
+await expectText("Location", "the component location column");
+await expectText("/app/node_modules/express/package.json", "an application-tree path");
+await expectText("/usr/local/lib/node_modules/lodash/package.json", "an image path");
+await expectText(
+  "This SBOM recorded no location",
+  "the wording for a package the SBOM gave no path for",
+);
+for (const [label, origin] of [
+  ["Application", "a package in the application's own tree"],
+  ["Image", "a package inherited from the image"],
+]) {
+  const badge = page.locator(`text="${label}"`);
+  if ((await badge.count()) === 0) {
+    problems.push(`scan detail does not show the ${label} origin badge`);
+    log(`  FAIL no ${label} origin badge`);
+  } else {
+    log(`  OK   badges ${origin}`);
+  }
+}
 await shot("scan-detail-manual");
 
 // Back to the admin panel for the remaining steps.

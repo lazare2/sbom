@@ -373,6 +373,20 @@ export const scan = pgTable(
     /** SHA-256 of the raw upload; also the basis of the content-addressed blob key. */
     sbomSha256: text("sbom_sha256").notNull(),
 
+    /**
+     * When this scan's component locations were extracted from its SBOM.
+     *
+     * The column exists so that a missing path stays interpretable. Without it, a
+     * `scan_component` row with no paths has two completely different meanings — the SBOM
+     * carried no location for that package, or this scan predates the platform recording
+     * locations at all — and the screen would have to render the same blank for both.
+     *
+     * Set at ingest for anything parsed by the current code, and by the backfill job for
+     * everything older. Null means nobody has looked yet, which is what the backfill selects
+     * on and what the UI reports as "not extracted" rather than as "no path".
+     */
+    locationsExtractedAt: timestamp("locations_extracted_at", { withTimezone: true }),
+
     // --- SBOM document metadata ------------------------------------------
     specVersion: text("spec_version"),
     serialNumber: text("serial_number"),
@@ -587,6 +601,36 @@ export const scanComponent = pgTable(
       .notNull()
       .references(() => application.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+    /**
+     * Where this package sits inside this particular artifact.
+     *
+     * On the join row rather than on component, and that placement is the whole design. A
+     * component row is global and shared — one lodash@4.17.20 row that a hundred scans point
+     * at — while the path is different in every one of them. Hanging a path off component
+     * would make the last ingest overwrite every other application's answer.
+     *
+     * Null means no location was recorded: an OS package, whose paths locate the package
+     * manager's database rather than the package; an SBOM from a tool that does not emit
+     * locations; or a scan ingested before this column existed. The three are told apart at
+     * read time by the component's ecosystem and by whether a backfill has run, never by
+     * treating an absent path as an empty one.
+     *
+     * Capped at COMPONENT_LOCATION_PATH_CAP entries. path_count carries the true total, so a
+     * truncated list is rendered as "3 of 81" rather than silently implying completeness.
+     */
+    paths: text("paths").array(),
+    pathCount: integer("path_count"),
+    /**
+     * Image layer digest, for image scans.
+     *
+     * Kept as corroborating evidence rather than as a classifier. The tempting rule — a layer
+     * containing distro packages is the base image — was measured against real images and does
+     * not hold: every layer of python:3.12-slim contains deb packages, and node:20-alpine puts
+     * its 203 global npm packages in a layer with none. It is recorded so that a reader who
+     * distrusts the derived origin label has the ground truth to check against.
+     */
+    layerId: text("layer_id"),
   },
   (t) => [
     // Per-scan component listing and the diff queries read by scan_id prefix.

@@ -56,3 +56,7 @@ estate-report.pdf
 deploy/ca/*
 !deploy/ca/.gitkeep
 !deploy/ca/README.md
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc

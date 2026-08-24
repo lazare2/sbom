@@ -13,7 +13,7 @@ import { STATUS_LABELS } from "../lib/format.ts";
 
 // --- badges ----------------------------------------------------------------
 
-type BadgeTone = "neutral" | "ok" | "warn" | "danger" | "info" | "accent";
+export type BadgeTone = "neutral" | "ok" | "warn" | "danger" | "info" | "accent";
 
 const BADGE_TONES: Record<BadgeTone, string> = {
   neutral: "bg-neutral-subtle text-text-muted",
