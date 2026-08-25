@@ -38,6 +38,19 @@ interface SettingsResponse {
   status: MaliciousStatus;
 }
 
+/**
+ * Share of the installed feed confirmed by more than one reporter.
+ *
+ * A percentage rather than a count, because the count on its own says nothing without the
+ * denominator, and the denominator is 236,000. One decimal place: the figure moves slowly and
+ * rounding to whole percents would hide a feed addition doing exactly what it was added for.
+ */
+function sharePercent(b: { corroborated: number; singleSource: number; unattributed: number }): string {
+  const total = b.corroborated + b.singleSource + b.unattributed;
+  if (total === 0) return "—";
+  return `${((b.corroborated / total) * 100).toFixed(1)}%`;
+}
+
 export function AdminMaliciousPage() {
   const settingsQuery = useQuery({
     queryKey: ["admin", "malicious", "settings"],
@@ -121,6 +134,43 @@ export function AdminMaliciousPage() {
                 </span>
               ) : (
                 <span className="text-text-muted">Never</span>
+              )}
+            </Field>
+            <Field label="Corroborated">
+              {/*
+                The baseline the whole "add more feeds" question turns on. Shown as a share
+                rather than a bare count because the number that matters is the proportion --
+                if a second feed is worth its complexity, this percentage rises.
+              */}
+              {status.corroboration === null ? (
+                <span className="text-text-muted">No feed yet</span>
+              ) : (
+                <span
+                  title={
+                    `${formatNumber(status.corroboration.corroborated)} confirmed by 2+ reporters, ` +
+                    `${formatNumber(status.corroboration.singleSource)} by one, ` +
+                    `${formatNumber(status.corroboration.unattributed)} with no attribution recorded, ` +
+                    `across ${formatNumber(status.corroboration.reporters)} reporters.`
+                  }
+                >
+                  {sharePercent(status.corroboration)}
+                  {/*
+                    The denominator is spelled out because "6.4% of 8 reporters" -- the first
+                    wording here -- reads as a share of the reporters rather than of the
+                    reports, which is a different and much more flattering number. The
+                    reporter count moved into the tooltip, where it cannot be misparsed as
+                    the thing being divided.
+                  */}
+                  <span className="text-text-muted">
+                    {" "}
+                    of {formatNumber(
+                      status.corroboration.corroborated +
+                        status.corroboration.singleSource +
+                        status.corroboration.unattributed,
+                    )}{" "}
+                    reports
+                  </span>
+                </span>
               )}
             </Field>
             <Field label="Packages checked">

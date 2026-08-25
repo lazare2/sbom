@@ -1,7 +1,9 @@
 import { sql, type SQL } from "drizzle-orm";
-import { COMPONENT_LOCATION_PATH_CAP } from "@sbom/shared";
+import { COMPONENT_LOCATION_PATH_CAP, corroborationOf } from "@sbom/shared";
 import type {
   ListMaliciousQuery,
+  MaliciousCorroboration,
+  MaliciousCorroborationBreakdown,
   MaliciousAckSummary,
   MaliciousApplicationImpact,
   MaliciousFinding,
@@ -51,11 +53,40 @@ import type { MaliciousMatchService } from "./malicious-match.service.js";
 /** Live reports only. A withdrawal must stop producing findings the moment it lands. */
 const LIVE_REPORT = sql`mp.withdrawn_at IS NULL`;
 
+/**
+ * Number of reporters behind a report, as a value that can be compared.
+ *
+ * `array_length` returns NULL for both an empty array and a NULL one, and NULL loses every
+ * comparison silently. Every site that counts reporters goes through this so none of them can
+ * forget the coalesce and quietly exclude the unattributed reports from its own answer.
+ */
+const REPORTER_COUNT = sql`coalesce(array_length(mp.sources, 1), 0)`;
+
+/** Row filter for one evidence tier, matching `corroborationOf` in the shared contract. */
+function corroborationPredicate(tier: MaliciousCorroboration): SQL {
+  if (tier === "corroborated") return sql`${REPORTER_COUNT} >= 2`;
+  if (tier === "single_source") return sql`${REPORTER_COUNT} = 1`;
+  return sql`${REPORTER_COUNT} = 0`;
+}
+
 function findingOrderBy(sortBy: ListMaliciousQuery["sortBy"], dir: SortDirection): SQL {
   const d = direction(dir);
   switch (sortBy) {
     case "affectedApplications":
       return orderBy([sql`affected_applications ${d}`], sql`mp.id`);
+    case "corroboration":
+      /*
+       * Ordered by the reporter count, with the estate reach as the tiebreak.
+       *
+       * `coalesce(..., 0)` is load-bearing: array_length of an empty or NULL array is NULL,
+       * not 0, and NULLs sort to one end regardless of direction unless they are turned into
+       * a real value first. Without it the 17% of reports carrying no attribution would
+       * cluster at whichever end of the table the reader was not looking at.
+       */
+      return orderBy(
+        [sql`coalesce(array_length(mp.sources, 1), 0) ${d}`, sql`current_applications ${d}`],
+        sql`mp.id`,
+      );
     case "packageName":
       return orderBy([sql`lower(mp.package_name) ${d}`], sql`mp.id`);
     case "publishedAt":
@@ -106,6 +137,37 @@ export class MaliciousService {
       // matched yet", which is a claim about the estate rather than about the feed.
       coverage: snapshot.builtAt ? await this.deps.match.coverage(snapshot.builtAt) : null,
       lastUpdate: await this.deps.feed.lastAttempt(),
+      // Same rule as coverage: no snapshot, no breakdown. Three zeros would describe a feed
+      // that was fetched and found to contain nothing.
+      corroboration: snapshot.builtAt ? await this.corroborationBreakdown() : null,
+    };
+  }
+
+  /**
+   * How the installed snapshot divides by evidence tier.
+   *
+   * Counted over the whole snapshot rather than over matched findings, because it measures the
+   * feed and not the estate. A site with nothing malicious installed still wants to know that
+   * three quarters of what it is being protected by rests on one party's word -- and that
+   * figure is the baseline against which adding a second feed either proves itself or does not.
+   */
+  private async corroborationBreakdown(): Promise<MaliciousCorroborationBreakdown> {
+    const rows = await this.deps.db.execute<Row<Record<string, number>>>(sql`
+      SELECT
+        count(*) FILTER (WHERE ${REPORTER_COUNT} >= 2)::int AS corroborated,
+        count(*) FILTER (WHERE ${REPORTER_COUNT} = 1)::int  AS single_source,
+        count(*) FILTER (WHERE ${REPORTER_COUNT} = 0)::int  AS unattributed,
+        (SELECT count(DISTINCT src)::int FROM malicious_package mp2, unnest(mp2.sources) AS src
+          WHERE mp2.withdrawn_at IS NULL) AS reporters
+      FROM malicious_package mp
+      WHERE mp.withdrawn_at IS NULL
+    `);
+    const row = rowsOf(rows)[0];
+    return {
+      corroborated: Number(row?.corroborated ?? 0),
+      singleSource: Number(row?.single_source ?? 0),
+      unattributed: Number(row?.unattributed ?? 0),
+      reporters: Number(row?.reporters ?? 0),
     };
   }
 
@@ -198,6 +260,7 @@ export class MaliciousService {
       conditions.push(sql`(mp.package_name ILIKE ${like} OR mp.id ILIKE ${like})`);
     }
     if (query.ecosystem) conditions.push(sql`mp.ecosystem = ${query.ecosystem}`);
+    if (query.corroboration) conditions.push(corroborationPredicate(query.corroboration));
     if (query.application) conditions.push(sql`a.id = ${query.application}::uuid`);
     if (query.group) conditions.push(groupMemberPredicate(query.group));
 
@@ -517,6 +580,10 @@ function toFinding(row: FindingRow, ack: MaliciousAckSummary | null): MaliciousF
     observedVersions: (row.observed_versions ?? []).slice().sort(),
     aliases: row.aliases ?? [],
     sources: row.sources ?? [],
+    reporterCount: (row.sources ?? []).length,
+    // Derived here rather than read from a column, so it needs no migration and cannot go
+    // stale when a feed refresh adds a reporter to a report that previously had one.
+    corroboration: corroborationOf(row.sources),
     referenceUrl: row.reference_url,
     publishedAt: toIso(row.published_at),
     currentApplications: Number(row.current_applications),

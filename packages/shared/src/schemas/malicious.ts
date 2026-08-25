@@ -71,6 +71,13 @@ export interface MaliciousStatus {
   coverage: { matched: number; pending: number } | null;
   /** The most recent refresh attempt, successful or not. Null before the first attempt. */
   lastUpdate: MaliciousFeedAttempt | null;
+  /**
+   * Evidence breakdown of the installed snapshot. Null when no snapshot is installed.
+   *
+   * Null rather than a structure of zeros, for the reason every other block here is: zeros
+   * would describe a feed that was downloaded and found to contain nothing.
+   */
+  corroboration: MaliciousCorroborationBreakdown | null;
 }
 
 export interface MaliciousFeedAttempt {
@@ -89,6 +96,100 @@ export interface MaliciousFeedAttempt {
 }
 
 // ---------------------------------------------------------------------------
+// Corroboration
+// ---------------------------------------------------------------------------
+
+/**
+ * How many independent parties reported a package as malicious.
+ *
+ * ## Why this is not a confidence score
+ *
+ * It is a count of reporters, named as one, and it is always rendered next to the reporters'
+ * actual names. That restraint is deliberate: this platform does not invent risk scores, for
+ * the same reason it refuses to combine severity, CVSS and EPSS into one number -- an
+ * invented figure gets carried into a meeting and acted on as though it meant something.
+ *
+ * What this *is* is triage order. Measured against the installed feed of 236,005 reports:
+ *
+ *   1 reporter    181,067   77.1%
+ *   0 reporters    39,944   16.9%
+ *   2 reporters    12,746    5.4%
+ *   3-4 reporters   2,248    1.0%
+ *
+ * So better than three quarters of every finding rests on a single party's word, and only
+ * 6.4% have been confirmed by anyone else. 351 reports in that same feed have since been
+ * withdrawn, which is the proof that single-source claims are sometimes wrong -- and a wrong
+ * one here is expensive, because acting on it means tearing down a service and rotating a
+ * fleet of credentials over a package that was fine.
+ *
+ * Nothing here hides a finding. A single-source report is still a report, still listed, still
+ * alerted on. This only says which ones a human should open first.
+ */
+export const maliciousCorroborations = [
+  /** Two or more reporters named it. The strongest evidence the feed offers. */
+  "corroborated",
+  /** Exactly one reporter. The common case, and the one most worth reading before acting. */
+  "single_source",
+  /**
+   * The report carries no reporter attribution at all.
+   *
+   * Upstream's own gap rather than a parsing failure: the feed sometimes sets
+   * `malicious-packages-origins` to null outright, as a recent batch of cargo reports drawn
+   * from one write-up does. Kept as its own state rather than folded into `single_source`,
+   * because "one party said so" and "we cannot tell who said so" are different things to a
+   * reader deciding whether to act.
+   */
+  "unattributed",
+] as const;
+export type MaliciousCorroboration = (typeof maliciousCorroborations)[number];
+export const maliciousCorroborationSchema = z.enum(maliciousCorroborations);
+
+/**
+ * Derive the tier from a report's reporter list.
+ *
+ * One function, shared by the API and the UI, so no screen can disagree with another about
+ * what "corroborated" means. Derived at read time from the `sources` column rather than
+ * stored: it needs no migration, and it stays correct automatically if a later feed refresh
+ * adds a reporter to a report that previously had one.
+ */
+export function corroborationOf(sources: readonly string[] | null | undefined): MaliciousCorroboration {
+  const count = sources?.length ?? 0;
+  if (count >= 2) return "corroborated";
+  if (count === 1) return "single_source";
+  return "unattributed";
+}
+
+export const MALICIOUS_CORROBORATION_LABELS: Record<MaliciousCorroboration, string> = {
+  corroborated: "Corroborated",
+  single_source: "Single source",
+  unattributed: "Unattributed",
+};
+
+export const MALICIOUS_CORROBORATION_HINTS: Record<MaliciousCorroboration, string> = {
+  corroborated:
+    "Two or more independent reporters named this package. The strongest evidence this feed carries.",
+  single_source:
+    "One reporter named this package and nobody else has confirmed it. Worth reading the report before acting on it.",
+  unattributed:
+    "The upstream report records no reporter. Not a parsing gap on our side -- the feed itself omits the attribution for some reports.",
+};
+
+/**
+ * How the installed feed breaks down by corroboration.
+ *
+ * Reported so the effect of adding a second feed is measurable rather than asserted: the
+ * whole argument for enriching the sources is that the corroborated share should rise, and a
+ * claim like that needs a number before and after.
+ */
+export interface MaliciousCorroborationBreakdown {
+  corroborated: number;
+  singleSource: number;
+  unattributed: number;
+  /** Distinct reporters contributing to the installed snapshot. */
+  reporters: number;
+}
+
+// ---------------------------------------------------------------------------
 // Findings
 // ---------------------------------------------------------------------------
 
@@ -102,6 +203,9 @@ export const maliciousFindingSort = defineSortTable(
   {
     currentApplications: "number",
     affectedApplications: "number",
+    // Sorts on the reporter count behind the tier, so a first click brings the
+    // best-evidenced findings to the top rather than ordering three labels alphabetically.
+    corroboration: "number",
     packageName: "text",
     publishedAt: "date",
     firstShippedAt: "date",
@@ -127,6 +231,8 @@ export const listMaliciousQuerySchema = paginationQuerySchema
     presence: maliciousPresenceSchema.default("all"),
     application: uuidSchema.optional(),
     group: uuidSchema.optional(),
+    /** Narrow to one evidence tier. Absent means every tier, which is the honest default. */
+    corroboration: maliciousCorroborationSchema.optional(),
     /** `true` hides findings someone has already acknowledged. Default shows everything. */
     unacknowledged: z
       .enum(["true", "false"])
@@ -157,6 +263,10 @@ export interface MaliciousFinding {
   aliases: string[];
   /** Upstream reporters, e.g. `ghsa-malware`. Shown so a claim can be attributed. */
   sources: string[];
+  /** `sources.length`, carried explicitly so a table can sort and filter on it. */
+  reporterCount: number;
+  /** Derived from `sources`. Never rendered without the reporters themselves beside it. */
+  corroboration: MaliciousCorroboration;
   referenceUrl: string | null;
   publishedAt: string | null;
   /** Applications whose current build still contains it. */

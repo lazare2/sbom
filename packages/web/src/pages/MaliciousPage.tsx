@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import {
   MALICIOUS_ACK_LABELS,
+  maliciousCorroborations,
   maliciousFindingSort,
   type MaliciousAckState,
   type MaliciousFinding,
@@ -11,6 +12,7 @@ import { useAuth } from "../auth/AuthProvider.tsx";
 import { useMaliciousFindings, useMaliciousStatus } from "../lib/queries.ts";
 import { useServerSort } from "../lib/useSort.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
+import { CorroborationBadge } from "../components/CorroborationBadge.tsx";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { AcknowledgeModal, MaliciousDetailModal } from "../components/MaliciousDetail.tsx";
@@ -54,12 +56,15 @@ import {
  */
 
 const PRESENCE = ["all", "current", "historical"] as const;
+/** "" means every tier. Kept out of `maliciousCorroborations` so the URL default is empty. */
+const CORROBORATION = ["", ...maliciousCorroborations] as const;
 const DIRECTIONS = ["asc", "desc"] as const;
 
 const spec = {
   defaults: {
     q: "",
     presence: "all" as (typeof PRESENCE)[number],
+    corroboration: "" as (typeof CORROBORATION)[number],
     unacknowledged: "",
     sortBy: maliciousFindingSort.defaultField,
     sortDir: maliciousFindingSort.defaultDirection as SortDirection,
@@ -68,6 +73,7 @@ const spec = {
   parse: (params: URLSearchParams) => ({
     q: readString(params, "q", ""),
     presence: readEnum(params, "presence", PRESENCE, "all"),
+    corroboration: readEnum(params, "corroboration", CORROBORATION, ""),
     unacknowledged: readString(params, "unacknowledged", ""),
     sortBy: readEnum(params, "sortBy", maliciousFindingSort.fields, maliciousFindingSort.defaultField),
     sortDir: readEnum(params, "sortDir", DIRECTIONS, maliciousFindingSort.defaultDirection),
@@ -90,6 +96,7 @@ export function MaliciousPage() {
     () => ({
       search: debounced || undefined,
       presence: state.presence === "all" ? undefined : state.presence,
+      corroboration: state.corroboration || undefined,
       unacknowledged: state.unacknowledged === "true" ? "true" : undefined,
       sortBy: state.sortBy,
       sortDir: state.sortDir,
@@ -196,6 +203,18 @@ export function MaliciousPage() {
                 ]}
               />
               <Select
+                value={state.corroboration}
+                onChange={(corroboration) =>
+                  setState({ corroboration: corroboration as (typeof CORROBORATION)[number], page: 1 })
+                }
+                options={[
+                  { value: "", label: "Any evidence" },
+                  { value: "corroborated", label: "Corroborated (2+ reporters)" },
+                  { value: "single_source", label: "Single source" },
+                  { value: "unattributed", label: "Unattributed" },
+                ]}
+              />
+              <Select
                 value={state.unacknowledged}
                 onChange={(unacknowledged) => setState({ unacknowledged, page: 1 })}
                 options={[
@@ -232,6 +251,13 @@ export function MaliciousPage() {
                       Package
                     </Th>
                     <Th width="110px">Ecosystem</Th>
+                    <Th
+                      onSort={() => sort.toggle("corroboration")}
+                      sorted={sort.stateOf("corroboration")}
+                      width="150px"
+                    >
+                      Evidence
+                    </Th>
                     <Th
                       onSort={() => sort.toggle("currentApplications")}
                       sorted={sort.stateOf("currentApplications")}
@@ -283,6 +309,13 @@ export function MaliciousPage() {
                         </div>
                       </Td>
                       <Td className="text-text-muted">{finding.ecosystem}</Td>
+                      <Td>
+                        <CorroborationBadge
+                          corroboration={finding.corroboration}
+                          sources={finding.sources}
+                          reporterCount={finding.reporterCount}
+                        />
+                      </Td>
                       <Td align="right">
                         {/*
                           The urgent number, and the only one on this page that can be driven to

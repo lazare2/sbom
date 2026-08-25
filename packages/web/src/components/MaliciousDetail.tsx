@@ -14,6 +14,7 @@ import {
 } from "../lib/mutations.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { ComponentLocationCell } from "./ComponentLocationCell.tsx";
+import { CorroborationBadge } from "./CorroborationBadge.tsx";
 import {
   Badge,
   Button,
@@ -117,8 +118,17 @@ export function MaliciousDetailModal({
             <Field label="Reported">
               {finding.publishedAt ? formatDateTime(finding.publishedAt) : "—"}
             </Field>
-            <Field label="Sources">
-              {finding.sources.length > 0 ? finding.sources.join(", ") : "—"}
+            <Field label="Evidence">
+              {/*
+                The tier and the reporters together, never the tier alone. Somebody about to
+                rotate a fleet of credentials over this finding should be able to see whose
+                word it rests on without leaving the page.
+              */}
+              <CorroborationBadge
+                corroboration={finding.corroboration}
+                sources={finding.sources}
+                reporterCount={finding.reporterCount}
+              />
             </Field>
           </dl>
 
