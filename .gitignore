@@ -57,6 +57,11 @@ deploy/ca/*
 !deploy/ca/.gitkeep
 !deploy/ca/README.md
 
-# Python bytecode from scripts/
+# Python bytecode from scripts/ and sast-scan/
 __pycache__/
 *.pyc
+.pytest_cache/
+*.egg-info/
+
+# sast-scan output written by a local run of the CI templates.
+sast-report.sarif

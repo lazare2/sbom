@@ -1,0 +1,93 @@
+# Shared GitLab CI template: run the vendored Python SAST scanner (sast-scan/)
+# against a project's source and publish the results as a SARIF artifact.
+#
+# This is intentionally independent of the SBOM ingestion pipeline
+# (sbom-scan.gitlab-ci.yml): findings here are not uploaded to the platform or
+# stored in its database — see sast-scan/README.md for why. The artifact is
+# the deliverable; a human or a downstream job (e.g. GitLab's own SARIF report
+# viewer, where available) consumes it from there.
+#
+# Usage in a project's .gitlab-ci.yml:
+#
+#   include:
+#     - project: 'platform/ci-templates'
+#       ref: main
+#       file: '/sast-scan.gitlab-ci.yml'
+#
+#   sast:scan:
+#     extends: .sast_scan
+#
+# The scanner ships in this repo (sast-scan/), so no registry or package index
+# is required — the job clones it via the same `include` mechanism GitLab uses
+# to fetch this file, alongside the project checkout.
+
+.sast_scan:
+  stage: test
+  image: python:3.11-slim
+  variables:
+    # Path within the project checkout to scan. Defaults to the whole thing;
+    # narrow it (e.g. "src") in projects with a large vendored/generated tree
+    # sast-scan's directory excludes (venv, .git, __pycache__, node_modules)
+    # don't already cover.
+    SAST_TARGET: "."
+    SAST_SEVERITY_THRESHOLD: "HIGH"
+    SAST_REPORT_FILE: "sast-report.sarif"
+    # sast-scan/tests/vulnerable_samples is deliberately vulnerable code — it's
+    # what sast-scan's own test suite scans to prove each rule fires. Excluded
+    # by name so a SAST_TARGET of "." doesn't fail every build on the tool's
+    # own fixtures forever. Not needed if SAST_TARGET already points below
+    # sast-scan/ (e.g. "src", "packages").
+    SAST_EXCLUDE: "sast-scan"
+    # Set to "true" to keep this job from failing the pipeline while a project
+    # works through its first set of findings. Same reasoning as Grype
+    # scanning: introduced disabled/non-blocking, turned into a real gate once
+    # the existing findings are triaged.
+    SAST_ALLOW_FAILURE: "false"
+  before_script:
+    - |
+      if [ ! -d "sast-scan/sast" ]; then
+        echo "sast-scan/ not found at the repo root — this template expects the" >&2
+        echo "sast-scan/ directory from the platform repo to be checked out alongside" >&2
+        echo "the project (e.g. as a second 'include' artifact or a git submodule)." >&2
+        exit 1
+      fi
+      pip install --quiet --no-cache-dir pyyaml
+  script:
+    - |
+      set -eu
+
+      echo "Scanning ${SAST_TARGET} (severity >= ${SAST_SEVERITY_THRESHOLD})"
+
+      set +e
+      PYTHONPATH="${CI_PROJECT_DIR}/sast-scan" python3 -m sast \
+        "${SAST_TARGET}" \
+        --exclude "${SAST_EXCLUDE}" \
+        --format sarif \
+        --severity-threshold "${SAST_SEVERITY_THRESHOLD}" \
+        > "${SAST_REPORT_FILE}"
+      SCAN_STATUS=$?
+      set -e
+
+      # Also print a human-readable summary to the job log — the SARIF file is
+      # for tooling, not for someone scrolling a failed build at 2am.
+      PYTHONPATH="${CI_PROJECT_DIR}/sast-scan" python3 -m sast \
+        "${SAST_TARGET}" \
+        --exclude "${SAST_EXCLUDE}" \
+        --severity-threshold "${SAST_SEVERITY_THRESHOLD}" \
+        --no-color || true
+
+      if [ "$SCAN_STATUS" -ne 0 ]; then
+        if [ "${SAST_ALLOW_FAILURE}" = "true" ]; then
+          echo "HIGH/CRITICAL findings present. SAST_ALLOW_FAILURE=true, so the job is allowed to pass." >&2
+          exit 0
+        fi
+        echo "HIGH/CRITICAL findings present — failing the job. Set SAST_ALLOW_FAILURE=\"true\" to unblock while triaging." >&2
+        exit "$SCAN_STATUS"
+      fi
+
+      echo "No HIGH/CRITICAL findings."
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - "$SAST_REPORT_FILE"
