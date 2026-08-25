@@ -91,6 +91,16 @@ export interface ScanSummary {
    * administrator has no way to tell whether running the backfill would change anything.
    */
   locationsExtractedAt: string | null;
+  /**
+   * When this scan's dependency edges were read. Null means nobody has looked.
+   *
+   * Separate from the location marker rather than merged into one "provenance extracted"
+   * flag, because the two genuinely diverge on exactly the rows that matter: a scan
+   * backfilled by the earlier, locations-only job has the first set and the second null.
+   * One flag would either claim its dependants were checked when they were not, or
+   * re-report its locations as missing when they are there.
+   */
+  dependenciesExtractedAt: string | null;
 }
 
 /** Sortable columns of a component list — a scan's inventory, or an application's. */

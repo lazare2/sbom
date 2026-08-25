@@ -241,26 +241,50 @@ try {
                    @{ name = "syft:distro:prettyName"; value = "Alpine Linux v3.20" }
                ) }
             @{ type = "application"; name = "node"; version = "22.11.0"
+               "bom-ref" = "ref-node"
                purl = "pkg:generic/node@22.11.0"
                properties = @(@{ name = "syft:package:type"; value = "binary" }) }
             # A binary that is NOT a runtime: must stay an ordinary component.
             @{ type = "application"; name = "busybox"; version = "1.36.1"
                purl = "pkg:generic/busybox@1.36.1"
                properties = @(@{ name = "syft:package:type"; value = "binary" }) }
-            @{ type = "library"; name = "express"; version = "4.19.2"; purl = "pkg:npm/express@4.19.2" }
-            # Exact duplicate: must collapse, or the (scan_id, component_id)
-            # primary key would abort the insert.
-            @{ type = "library"; name = "express"; version = "4.19.2"; purl = "pkg:npm/express@4.19.2" }
+            @{ type = "library"; name = "express"; version = "4.19.2"; "bom-ref" = "ref-express-a"
+               purl = "pkg:npm/express@4.19.2" }
+            # Duplicate package under a DIFFERENT bom-ref, which is how Syft emits a library
+            # found in two layers. It must still collapse to one component row -- and the
+            # dependency graph below deliberately refers to this collapsed copy, because an
+            # edge naming it would otherwise be silently dropped.
+            @{ type = "library"; name = "express"; version = "4.19.2"; "bom-ref" = "ref-express-b"
+               purl = "pkg:npm/express@4.19.2" }
             # Same package, purl qualifiers in a different order: must also collapse.
             @{ type = "library"; name = "libc6"; version = "2.36-9"
                purl = "pkg:deb/debian/libc6@2.36-9?distro=debian-12&arch=amd64" }
             @{ type = "library"; name = "libc6"; version = "2.36-9"
                purl = "pkg:deb/debian/libc6@2.36-9?arch=amd64&distro=debian-12" }
-            @{ type = "library"; name = "requests"; version = "2.32.3"; purl = "pkg:pypi/requests@2.32.3" }
+            @{ type = "library"; name = "requests"; version = "2.32.3"; "bom-ref" = "ref-requests"
+               purl = "pkg:pypi/requests@2.32.3" }
             # No version: legal in CycloneDX, must be kept.
-            @{ type = "library"; name = "mystery-lib" }
+            @{ type = "library"; name = "mystery-lib"; "bom-ref" = "ref-mystery" }
             # Excluded by the parser as not-a-dependency.
             @{ type = "file"; name = "/usr/lib/libcrypto.so.3" }
+        )
+        <#
+          A dependency graph shaped like the ones Syft actually emits, carrying all four cases
+          the reverse lookup has to survive:
+
+            ref-express-b   an edge from a duplicate that was collapsed away. The dependant is
+                            still express, and losing this edge is the silent failure.
+            ref-node        an ordinary parent with two children.
+            urn:...root     a ref that is not a component in this document. Real SBOMs put the
+                            root component here; resolving it to anything would be invented.
+            ref-requests    a self-edge. "requests is pulled in by requests" is noise that
+                            reads as a platform bug.
+        #>
+        dependencies = @(
+            @{ ref = "ref-express-b"; dependsOn = @("ref-mystery") }
+            @{ ref = "ref-node"; dependsOn = @("ref-express-a", "ref-requests") }
+            @{ ref = "urn:uuid:00000000-0000-0000-0000-00000000root"; dependsOn = @("ref-express-a") }
+            @{ ref = "ref-requests"; dependsOn = @("ref-requests") }
         )
     }
     $sbomPath = New-JsonFile -Data $sbom -Name "sbom.cdx.json"
@@ -347,6 +371,72 @@ try {
             return $false
         }
         return $p.summary -eq "Alpine 3.20.3 · Node.js 22.11.0"
+    }
+
+    Assert-That "records what pulled each package in" {
+        <#
+          The actionable half of a finding. Nothing declares mystery-lib, so a finding against
+          it is unactionable on its own; naming express as what brought it in names the thing
+          to upgrade.
+
+          express itself is the load-bearing case. The edge that reaches mystery-lib is
+          attached to ref-express-b, a duplicate that collapsed into ref-express-a during
+          parsing -- so this passing is what proves refs are resolved through the identity
+          hash rather than only for the entries that survived.
+        #>
+        $r = Invoke-Api @("$BaseUrl/api/v1/scans/$($script:ingest.scanId)/components?pageSize=50", "-b", $script:platJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+
+        $byName = @{}
+        foreach ($item in $r.Json.items) { $byName[$item.name] = $item }
+
+        $mystery = $byName["mystery-lib"]
+        $express = $byName["express"]
+        $requests = $byName["requests"]
+        $node = $byName["node"]
+        if ($null -eq $mystery -or $null -eq $express -or $null -eq $node) {
+            Write-Host "        missing a fixture component" -ForegroundColor Red
+            return $false
+        }
+
+        $ok = $true
+
+        # The collapsed-duplicate edge survived.
+        if (@($mystery.location.pulledInBy) -join "," -ne "express@4.19.2") {
+            Write-Host "        mystery-lib pulledInBy = $(@($mystery.location.pulledInBy) -join ',')" -ForegroundColor Red
+            $ok = $false
+        }
+        # An ordinary edge, and the versionless child is named without a trailing @.
+        if (@($express.location.pulledInBy) -join "," -ne "node@22.11.0") {
+            Write-Host "        express pulledInBy = $(@($express.location.pulledInBy) -join ',')" -ForegroundColor Red
+            $ok = $false
+        }
+        # Self-edge dropped: requests depends on itself in the fixture and must not say so.
+        if (@($requests.location.pulledInBy) -join "," -ne "node@22.11.0") {
+            Write-Host "        requests pulledInBy = $(@($requests.location.pulledInBy) -join ',')" -ForegroundColor Red
+            $ok = $false
+        }
+        <#
+          node is depended on by nothing, and by the dangling root ref that was dropped. It
+          must come back null rather than an empty list: an empty list is a claim that nothing
+          depends on it, and null is "no edge was recorded" -- which is the state every npm
+          package in a container image is in, because the lockfile the graph comes from is not
+          in the image.
+        #>
+        if ($null -ne $node.location.pulledInBy) {
+            Write-Host "        node pulledInBy should be null, got $(@($node.location.pulledInBy) -join ',')" -ForegroundColor Red
+            $ok = $false
+        }
+        return $ok
+    }
+
+    Assert-That "marks the build as having had its dependency graph read" {
+        # The marker is what lets an absent list mean "nothing recorded" rather than "nobody
+        # looked", and the two must never render the same way. A scan ingested by current code
+        # has been read even when the graph turned out to be empty.
+        $r = Invoke-Api @("$BaseUrl/api/v1/scans/$($script:ingest.scanId)", "-b", $script:platJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        return ($null -ne $r.Json.dependenciesExtractedAt) -and ($null -ne $r.Json.locationsExtractedAt)
     }
 
     Assert-That "the application reports the platform of its current build" {
@@ -1398,7 +1488,9 @@ try {
         }
         $target = @($adv.Json.items)[0].vulnerabilityId
 
-        $body = New-JsonFile -Name "suppress.json" -Data @{ vulnerabilityId = $target; reason = "smoke test accepted risk" }
+        # vexStatus is required: a suppression that does not say what it claims cannot be
+        # published as VEX, and the API refuses to guess on its author's behalf.
+        $body = New-JsonFile -Name "suppress.json" -Data @{ vulnerabilityId = $target; reason = "smoke test accepted risk"; vexStatus = "affected" }
         $created = Invoke-Api @("-X", "POST", "$vulnAdmin/suppressions", "-H", "Content-Type: application/json",
             "--data-binary", "@$body", "-b", $script:platJar)
         Show-Body $created 201
@@ -1415,11 +1507,81 @@ try {
 
     Assert-That "requires a reason before accepting a risk" {
         # An unexplained suppression is indistinguishable from a mistake later.
-        $body = New-JsonFile -Name "suppress-bad.json" -Data @{ vulnerabilityId = "CVE-2021-44228"; reason = "" }
+        $body = New-JsonFile -Name "suppress-bad.json" -Data @{ vulnerabilityId = "CVE-2021-44228"; reason = ""; vexStatus = "affected" }
         $r = Invoke-Api @("-X", "POST", "$vulnAdmin/suppressions", "-H", "Content-Type: application/json",
             "--data-binary", "@$body", "-b", $script:platJar)
         Show-Body $r 400
         $r.Status -eq 400
+    }
+
+    Assert-That "refuses a suppression that does not say what it claims" {
+        # The whole point of the field. Without a status the row cannot be published as VEX,
+        # and defaulting one would put an assertion nobody made into a document other
+        # organisations read.
+        $body = New-JsonFile -Name "suppress-nostatus.json" -Data @{ vulnerabilityId = "CVE-2021-44228"; reason = "no status given" }
+        $r = Invoke-Api @("-X", "POST", "$vulnAdmin/suppressions", "-H", "Content-Type: application/json",
+            "--data-binary", "@$body", "-b", $script:platJar)
+        Show-Body $r 400
+        $r.Status -eq 400
+    }
+
+    Assert-That "requires a justification for 'not affected' and refuses one otherwise" {
+        # VEX attaches justification to not_affected alone, because there is nothing to
+        # justify about a finding you have agreed is real. Both halves are enforced, so a
+        # stale value left in a form cannot travel into the document unnoticed.
+        $missing = New-JsonFile -Name "suppress-nojust.json" -Data @{
+            vulnerabilityId = "CVE-2021-44228"; reason = "not reachable"; vexStatus = "not_affected" }
+        $a = Invoke-Api @("-X", "POST", "$vulnAdmin/suppressions", "-H", "Content-Type: application/json",
+            "--data-binary", "@$missing", "-b", $script:platJar)
+        Show-Body $a 400
+
+        $spurious = New-JsonFile -Name "suppress-badjust.json" -Data @{
+            vulnerabilityId = "CVE-2021-44228"; reason = "accepted"; vexStatus = "affected"
+            vexJustification = "code_not_reachable" }
+        $b = Invoke-Api @("-X", "POST", "$vulnAdmin/suppressions", "-H", "Content-Type: application/json",
+            "--data-binary", "@$spurious", "-b", $script:platJar)
+        Show-Body $b 400
+
+        ($a.Status -eq 400) -and ($b.Status -eq 400)
+    }
+
+    Assert-That "classifies a suppression and reports it back" {
+        if (-not $script:vulnReady) {
+            Write-Host "        skipped: scanner or database unavailable" -ForegroundColor DarkGray
+            return $true
+        }
+        $adv = Invoke-Api @("$BaseUrl/api/v1/vulnerabilities?scope=all&pageSize=1", "-b", $script:platJar)
+        if ($adv.Status -ne 200 -or @($adv.Json.items).Count -lt 1) {
+            Write-Host "        skipped: no advisory to suppress" -ForegroundColor DarkGray
+            return $true
+        }
+        $target = @($adv.Json.items)[0].vulnerabilityId
+
+        $body = New-JsonFile -Name "suppress-classify.json" -Data @{ vulnerabilityId = $target; reason = "smoke classify"; vexStatus = "affected" }
+        $created = Invoke-Api @("-X", "POST", "$vulnAdmin/suppressions", "-H", "Content-Type: application/json",
+            "--data-binary", "@$body", "-b", $script:platJar)
+        if ($created.Status -ne 201) { Show-Body $created 201; return $false }
+        $id = $created.Json.id
+
+        $patch = New-JsonFile -Name "classify.json" -Data @{ vexStatus = "not_affected"; vexJustification = "code_not_reachable" }
+        $upd = Invoke-Api @("-X", "PATCH", "$vulnAdmin/suppressions/$id", "-H", "Content-Type: application/json",
+            "--data-binary", "@$patch", "-b", $script:platJar)
+        Show-Body $upd 204
+
+        $list = Invoke-Api @("$vulnAdmin/suppressions", "-b", $script:platJar)
+        $row = @($list.Json.suppressions | Where-Object { $_.id -eq $id })
+        $ok = ($upd.Status -eq 204) -and ($row.Count -eq 1) -and
+              ($row[0].vexStatus -eq "not_affected") -and ($row[0].vexJustification -eq "code_not_reachable")
+
+        # The classification has to reach the audit trail: it is a claim made to people
+        # outside the organisation, so "who decided this" must stay answerable.
+        $audit = Invoke-Api @("$BaseUrl/api/v1/admin/audit-log?action=vuln.suppression_classify&pageSize=5", "-b", $script:platJar)
+        if ($audit.Status -eq 200) {
+            $ok = $ok -and (@($audit.Json.items | Where-Object { $_.targetId -eq $id }).Count -ge 1)
+        }
+
+        Invoke-Api @("-X", "DELETE", "$vulnAdmin/suppressions/$id", "-b", $script:platJar) | Out-Null
+        $ok
     }
 
     Assert-That "restores the vulnerability setting this run found" {
@@ -2132,6 +2294,142 @@ try {
         # Round-trips: proves the stored blob decompressed to the original document.
         $doc = $r.Body | ConvertFrom-Json
         return $doc.bomFormat -eq "CycloneDX"
+    }
+
+    Assert-That "exports the current inventory as CycloneDX, without claiming to have looked for findings" {
+        # The load-bearing property of the inventory flavour. An empty vulnerabilities array
+        # here would read as "we checked and this is clean" on a document that never checked,
+        # and this is precisely the file that goes to somebody outside the organisation.
+        $r = Invoke-Api @("$BaseUrl/api/v1/exports/applications/$($script:appId)", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+
+        # Headers need their own call: Invoke-Api returns only status, body and parsed JSON.
+        # The media type is what makes a downloaded file recognisable to the tools that
+        # consume it, so it is worth pinning rather than assuming.
+        $hdr = (& curl.exe -s -D - -o NUL "$BaseUrl/api/v1/exports/applications/$($script:appId)" -b $readJar) -join "`n"
+        if ($hdr -notmatch 'application/vnd\.cyclonedx\+json') {
+            Write-Host "        wrong media type" -ForegroundColor Red
+            return $false
+        }
+        if ($hdr -notmatch 'attachment; filename=".+\.json"') {
+            Write-Host "        not served as a named download" -ForegroundColor Red
+            return $false
+        }
+        $doc = $r.Body | ConvertFrom-Json
+        $hasVulnKey = $doc.PSObject.Properties.Name -contains "vulnerabilities"
+        $props = @{}
+        foreach ($pr in $doc.metadata.properties) { $props[$pr.name] = $pr.value }
+        return ($doc.bomFormat -eq "CycloneDX") -and ($doc.specVersion -eq "1.6") -and
+               (@($doc.components).Count -gt 0) -and (-not $hasVulnKey) -and
+               ($props["sbom:subject:kind"] -eq "application")
+    }
+
+    Assert-That "an enriched export declares what had actually been assessed" {
+        # Here an empty findings list IS an answer, so the key is present -- and the document
+        # states whether each feed was switched on, because a file outlives the request that
+        # produced it and has to be readable without access to this platform.
+        $r = Invoke-Api @("$BaseUrl/api/v1/exports/applications/$($script:appId)?flavour=enriched", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        $doc = $r.Body | ConvertFrom-Json
+        $props = @{}
+        foreach ($pr in $doc.metadata.properties) { $props[$pr.name] = $pr.value }
+        return ($doc.PSObject.Properties.Name -contains "vulnerabilities") -and
+               ($props["sbom:assessment:vulnerability-scanning"] -in @("enabled", "disabled")) -and
+               ($props["sbom:assessment:malicious-detection"] -in @("enabled", "disabled"))
+    }
+
+    Assert-That "exports the same inventory as SPDX 2.3" {
+        # The reason this feature exists: Syft emitted CycloneDX, and re-running it on a build
+        # that no longer exists is not an option.
+        $cdx = Invoke-Api @("$BaseUrl/api/v1/exports/applications/$($script:appId)", "-b", $readJar)
+        $r = Invoke-Api @("$BaseUrl/api/v1/exports/applications/$($script:appId)?format=spdx", "-b", $readJar)
+        if ($r.Status -ne 200 -or $cdx.Status -ne 200) { Show-Body $r 200; return $false }
+        $doc = $r.Body | ConvertFrom-Json
+        $cdxDoc = $cdx.Body | ConvertFrom-Json
+
+        # Second precision: a JS ISO string carries milliseconds, which strict validators reject.
+        if ($doc.creationInfo.created -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') {
+            Write-Host "        bad SPDX timestamp: $($doc.creationInfo.created)" -ForegroundColor Red
+            return $false
+        }
+        $badId = @($doc.packages | Where-Object { $_.SPDXID -notmatch '^SPDXRef-[a-zA-Z0-9.-]+$' })
+        if ($badId.Count -gt 0) {
+            Write-Host "        illegal SPDXID: $($badId[0].SPDXID)" -ForegroundColor Red
+            return $false
+        }
+        # Assembled once and rendered twice, so the two formats cannot disagree about the
+        # estate. The extra package is the subject the document describes.
+        return ($doc.spdxVersion -eq "SPDX-2.3") -and ($doc.dataLicense -eq "CC0-1.0") -and
+               (@($doc.packages).Count -eq (@($cdxDoc.components).Count + 1)) -and
+               (-not ($doc.PSObject.Properties.Name -contains "vulnerabilities"))
+    }
+
+    Assert-That "refuses an enriched SPDX rather than quietly serving the inventory" {
+        # The dangerous downgrade. A caller who asked for findings and got a package list
+        # cannot tell "this format cannot carry them" from "there are none".
+        $r = Invoke-Api @("$BaseUrl/api/v1/exports/applications/$($script:appId)?format=spdx&flavour=enriched", "-b", $readJar)
+        Show-Body $r 400
+        return ($r.Status -eq 400) -and ($r.Json.error.code -eq "export_flavour_unsupported")
+    }
+
+    Assert-That "exports a build and a group through the same assembler" {
+        $scan = Invoke-Api @("$BaseUrl/api/v1/exports/scans/$($script:scanId)", "-b", $readJar)
+        if ($scan.Status -ne 200) { Show-Body $scan 200; return $false }
+        $scanDoc = $scan.Body | ConvertFrom-Json
+        $props = @{}
+        foreach ($pr in $scanDoc.metadata.properties) { $props[$pr.name] = $pr.value }
+        if ($props["sbom:subject:kind"] -ne "scan") { return $false }
+
+        # bom-refs must be unique or a consumer resolving a finding hits two components.
+        $refs = @($scanDoc.components | ForEach-Object { $_."bom-ref" })
+        return ($refs.Count -eq (@($refs | Sort-Object -Unique)).Count)
+    }
+
+    Assert-That "publishes an accepted risk as exploitable, never as not affected" {
+        <#
+          The single most consequential line in the export feature. A suppression covers three
+          different claims -- the scanner was wrong, the code is unreachable, and it is real
+          but accepted -- and only the third means the product IS vulnerable. Publishing that
+          one as not_affected tells a recipient they are safe when they are not, in a document
+          they have no way to check.
+        #>
+        $adv = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:appId)/vulnerabilities?pageSize=1", "-b", $script:platJar)
+        if ($adv.Status -ne 200 -or @($adv.Json.items).Count -lt 1) {
+            Write-Host "        skipped: this application has no findings to accept" -ForegroundColor DarkGray
+            return $true
+        }
+        $target = @($adv.Json.items)[0]
+
+        $body = New-JsonFile -Name "vex-accept.json" -Data @{
+            vulnerabilityId = $target.vulnerabilityId; componentId = $target.componentId
+            reason = "smoke test: real, carried deliberately"; vexStatus = "affected" }
+        $created = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/admin/vuln/suppressions",
+            "-H", "Content-Type: application/json", "--data-binary", "@$body", "-b", $script:platJar)
+        if ($created.Status -ne 201) { Show-Body $created 201; return $false }
+        $id = $created.Json.id
+
+        $vex = Invoke-Api @("$BaseUrl/api/v1/exports/applications/$($script:appId)/vex", "-b", $readJar)
+        $ok = $false
+        if ($vex.Status -eq 200) {
+            $doc = $vex.Body | ConvertFrom-Json
+            $entry = @($doc.vulnerabilities | Where-Object { $_."bom-ref" -eq $id })
+            if ($entry.Count -eq 1) {
+                $ok = ($entry[0].analysis.state -eq "exploitable") -and
+                      (-not ($entry[0].analysis.PSObject.Properties.Name -contains "justification"))
+            }
+            # The VEX refs have to resolve against the SBOM export of the same subject, or the
+            # two documents cannot be used together.
+            $sbom = Invoke-Api @("$BaseUrl/api/v1/exports/applications/$($script:appId)", "-b", $readJar)
+            if ($sbom.Status -eq 200 -and $entry.Count -eq 1) {
+                $refs = @(($sbom.Body | ConvertFrom-Json).components | ForEach-Object { $_."bom-ref" })
+                foreach ($a in $entry[0].affects) {
+                    if ($refs -notcontains $a.ref) { $ok = $false }
+                }
+            }
+        }
+
+        Invoke-Api @("-X", "DELETE", "$BaseUrl/api/v1/admin/vuln/suppressions/$id", "-b", $script:platJar) | Out-Null
+        return $ok
     }
 
     Assert-That "search distinguishes current from historical usage" {

@@ -17,6 +17,7 @@ import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
 import { ScansAdminService } from "./modules/scans/scans.admin.service.js";
+import { ExportService } from "./modules/exports/export.service.js";
 import { MaliciousService } from "./modules/malicious/malicious.service.js";
 import { MaliciousAdminService } from "./modules/malicious/malicious.admin.service.js";
 import { MaliciousFeedService } from "./modules/malicious/malicious-feed.service.js";
@@ -26,7 +27,7 @@ import { MaliciousWorker } from "./modules/malicious/malicious-worker.js";
 import { GroupsService } from "./modules/groups/groups.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
-import { LocationBackfillService } from "./modules/ingestion/location-backfill.service.js";
+import { SbomBackfillService } from "./modules/ingestion/sbom-backfill.service.js";
 import { Mailer } from "./modules/reports/mailer.js";
 import { ReportScheduler } from "./modules/reports/report-scheduler.js";
 import { ReportService } from "./modules/reports/report.service.js";
@@ -60,7 +61,7 @@ export interface AppContext {
   ingestTokens: IngestTokenService;
   ingestion: IngestionService;
   /** Recovers component locations from SBOMs ingested before the platform recorded them. */
-  locationBackfill: LocationBackfillService;
+  sbomBackfill: SbomBackfillService;
   applications: ApplicationsService;
   /** Reads over named sets of applications. Counts distinct advisories, not summed findings. */
   groups: GroupsService;
@@ -108,6 +109,7 @@ export interface AppContext {
   maliciousMatch: MaliciousMatchService;
   maliciousAlerts: MaliciousAlertService;
   malicious: MaliciousService;
+  exports: ExportService;
   maliciousWorker: MaliciousWorker;
   // Write side. Every one of these is reachable only through `requireAdmin`.
   audit: AuditService;
@@ -155,7 +157,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
 
   const ingestTokens = new IngestTokenService({ db, config });
   const ingestion = new IngestionService({ db, blobStore, logger });
-  const locationBackfill = new LocationBackfillService({ db, blobs: blobStore, logger });
+  const sbomBackfill = new SbomBackfillService({ db, blobs: blobStore, logger });
 
   // Read side. Stateless query services over the same pool.
   //
@@ -235,6 +237,13 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     feed: maliciousFeed,
     match: maliciousMatch,
   });
+  /*
+    Constructed after `settings` because it resolves both feature toggles to decide whether an
+    enriched export may claim the estate was assessed. It reads nothing else, so it does not
+    need to wait on the vulnerability or malicious services themselves.
+  */
+  const exports = new ExportService({ db, settings });
+
   const maliciousWorker = new MaliciousWorker({
     settings,
     feed: maliciousFeed,
@@ -268,7 +277,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     auth,
     ingestTokens,
     ingestion,
-    locationBackfill,
+    sbomBackfill,
     applications,
     groups,
     scans,
@@ -292,6 +301,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     maliciousAlerts,
     malicious,
     maliciousWorker,
+    exports,
     audit,
     adminUsers,
     adminApplications,

@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import { COMPONENT_LOCATION_PATH_CAP, corroborationOf } from "@sbom/shared";
+import { COMPONENT_DEPENDANT_CAP, COMPONENT_LOCATION_PATH_CAP, corroborationOf } from "@sbom/shared";
 import type {
   ListMaliciousQuery,
   MaliciousCorroboration,
@@ -407,7 +407,7 @@ export class MaliciousService {
      */
     const rows = await this.deps.db.execute<Row<ImpactRow>>(sql`
       WITH hit AS (
-        SELECT sc.scan_id, sc.application_id, sc.paths, sc.layer_id,
+        SELECT sc.scan_id, sc.application_id, sc.paths, sc.layer_id, sc.pulled_in_by,
                c.version, c.ecosystem, c.kind, s.created_at, a.latest_scan_id
         FROM component_malicious cm
         JOIN component c ON c.id = cm.component_id
@@ -422,6 +422,24 @@ export class MaliciousService {
                count(DISTINCT p)::int AS path_count
         FROM hit h, unnest(h.paths) AS p
         GROUP BY h.application_id
+      ),
+      /*
+        The same shape again for dependants, and a separate CTE rather than a second aggregate
+        inside located. The two lists are independently absent: an image scan records paths for
+        its npm packages and no edges at all, while an OS package is the reverse. Folding them
+        together would make an application drop out of both the moment it had neither, because
+        unnest over an empty array produces no rows -- so a package with a dependant but no
+        recorded path would silently lose the dependant as well.
+
+        No backticks anywhere in here: this is inside a sql template literal, where one ends
+        the string and surfaces as a TS1005 pointing at a line that looks fine.
+      */
+      depended AS (
+        SELECT h.application_id,
+               (array_agg(DISTINCT d ORDER BY d))[1:${sql.raw(String(COMPONENT_DEPENDANT_CAP))}] AS pulled_in_by,
+               count(DISTINCT d)::int AS pulled_in_by_count
+        FROM hit h, unnest(h.pulled_in_by) AS d
+        GROUP BY h.application_id
       )
       SELECT
         a.id AS application_id, a.name AS application_name, a.status AS application_status,
@@ -435,10 +453,13 @@ export class MaliciousService {
         (array_agg(h.kind ORDER BY h.created_at DESC))[1] AS kind,
         (array_remove(array_agg(h.layer_id ORDER BY h.created_at DESC), NULL))[1] AS layer_id,
         max(l.paths) AS paths,
-        max(l.path_count)::int AS path_count
+        max(l.path_count)::int AS path_count,
+        max(d.pulled_in_by) AS pulled_in_by,
+        max(d.pulled_in_by_count)::int AS pulled_in_by_count
       FROM hit h
       JOIN application a ON a.id = h.application_id
       LEFT JOIN located l ON l.application_id = h.application_id
+      LEFT JOIN depended d ON d.application_id = h.application_id
       GROUP BY a.id, a.name, a.status
       -- Still-shipping applications first; they are the ones with work to do today.
       ORDER BY bool_or(h.scan_id = a.latest_scan_id) DESC, lower(a.name)
@@ -545,6 +566,8 @@ interface ImpactRow {
   paths: string[] | null;
   path_count: number | null;
   layer_id: string | null;
+  pulled_in_by: string[] | null;
+  pulled_in_by_count: number | null;
 }
 
 interface AckRow {

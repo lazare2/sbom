@@ -14,6 +14,7 @@ import { groupRoutes } from "./modules/groups/groups.routes.js";
 import { attributeRoutes } from "./modules/attributes/attributes.routes.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { componentRoutes } from "./modules/components/components.routes.js";
+import { exportRoutes } from "./modules/exports/export.routes.js";
 import { dashboardRoutes } from "./modules/dashboard/dashboard.routes.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
 import { ingestionRoutes } from "./modules/ingestion/ingestion.routes.js";
@@ -137,6 +138,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       await api.register(groupRoutes, { prefix: "/groups" });
       await api.register(scanRoutes, { prefix: "/scans" });
       await api.register(componentRoutes, { prefix: "/components" });
+      /*
+        Its own prefix rather than a query parameter on the existing read routes. An export is
+        a file with a filename and a media type, not another representation of a JSON list,
+        and hanging it off `/applications/:id` would mean one URL whose response was sometimes
+        a page of a paginated list and sometimes a download.
+      */
+      await api.register(exportRoutes, { prefix: "/exports" });
       await api.register(attributeRoutes, { prefix: "/attribute-definitions" });
       await api.register(dashboardRoutes, { prefix: "/dashboard" });
       await api.register(analyticsRoutes, { prefix: "/analytics" });

@@ -12,13 +12,13 @@ import {
   type SmtpEncryption,
 } from "@sbom/shared";
 import {
-  useLocationBackfillStatus,
+  useSbomBackfillStatus,
   usePlatformSettings,
   useReportSettings,
   useVulnAdminStatus,
 } from "../../lib/queries.ts";
 import {
-  useBackfillLocations,
+  useBackfillSbom,
   useTestReportEmail,
   useUpdatePlatformSettings,
   useUpdateReportSettings,
@@ -60,7 +60,7 @@ export function AdminConfigurationPage() {
   return (
     <div className="space-y-4">
       <StaleThresholdCard />
-      <LocationBackfillCard />
+      <SbomBackfillCard />
       <VulnIntervalCard />
       <ReportDeliveryCard />
     </div>
@@ -72,7 +72,13 @@ export function AdminConfigurationPage() {
 // ---------------------------------------------------------------------------
 
 /**
- * Recovering component locations from SBOMs ingested before the platform recorded them.
+ * Recovering derived columns from SBOMs ingested before the platform recorded them.
+ *
+ * Covers both component locations and component dependants: one re-parse of one stored blob
+ * produces both, and they are reported separately below because they are absent for
+ * unrelated reasons. An image scan yields locations for nearly every package and dependants
+ * for almost none -- the dependency graph comes from a lockfile that is not in the image --
+ * and one merged number would hide that entirely.
  *
  * The card renders nothing at all once the estate is fully backfilled. That restraint is
  * deliberate and matches the dashboard's malicious alert: a permanent panel reporting "0
@@ -83,9 +89,9 @@ export function AdminConfigurationPage() {
  * scans needs several presses, and telling the operator how many are left after each one is
  * more honest than a progress bar over work whose duration depends on blob-store latency.
  */
-function LocationBackfillCard() {
-  const status = useLocationBackfillStatus();
-  const backfill = useBackfillLocations();
+function SbomBackfillCard() {
+  const status = useSbomBackfillStatus();
+  const backfill = useBackfillSbom();
 
   // Undefined while loading, and 0 once there is nothing left to do. Neither is worth a card.
   if (!status.data || status.data.pending === 0) return null;
@@ -93,8 +99,8 @@ function LocationBackfillCard() {
   return (
     <Card>
       <CardHeader
-        title="Component locations"
-        subtitle="Builds ingested before the platform recorded where each package sits. Their paths can be recovered from the SBOMs already in storage."
+        title="Package provenance"
+        subtitle="Builds ingested before the platform recorded where each package sits and what pulled it in. Both can be recovered from the SBOMs already in storage."
         actions={
           <Button
             variant="primary"
@@ -110,15 +116,16 @@ function LocationBackfillCard() {
 
         <p className="text-sm text-text-muted">
           <strong className="text-text-base">{formatNumber(status.data.pending)}</strong>{" "}
-          {status.data.pending === 1 ? "build has" : "builds have"} no location data. Until they
-          are processed their package lists say &ldquo;not extracted yet&rdquo; rather than
-          showing a path.
+          {status.data.pending === 1 ? "build has" : "builds have"} not been processed. Until
+          they are, their package lists say &ldquo;not extracted yet&rdquo; rather than showing
+          where a package sits or what depends on it.
         </p>
 
         {backfill.data ? (
           <p className="text-xs text-text-muted">
             Last batch: {formatNumber(backfill.data.processed)} processed,{" "}
-            {formatNumber(backfill.data.rowsUpdated)} packages located,{" "}
+            {formatNumber(backfill.data.locationsUpdated)} packages located,{" "}
+            {formatNumber(backfill.data.dependantsUpdated)} with dependants recorded,{" "}
             {formatNumber(backfill.data.remaining)} remaining.
             {backfill.data.unreadable > 0 ? (
               <>

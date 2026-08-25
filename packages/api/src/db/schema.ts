@@ -29,6 +29,8 @@ import type {
   ScanVulnStatus,
   SeverityCounts,
   UserRole,
+  VexJustification,
+  VexStatus,
   VulnDbUpdateOutcome,
   VulnDbUpdateTrigger,
   VulnSeverity,
@@ -387,6 +389,21 @@ export const scan = pgTable(
      */
     locationsExtractedAt: timestamp("locations_extracted_at", { withTimezone: true }),
 
+    /**
+     * When this scan's dependency edges were extracted from its SBOM.
+     *
+     * A second marker rather than a reuse of the one above, and the separation is the whole
+     * point. Every scan already backfilled for locations carries a non-null
+     * locations_extracted_at; if dependants shared that column, those scans would look
+     * already-processed and would never be visited, so the feature would silently cover only
+     * builds ingested after this change.
+     *
+     * Null means nobody has looked. That is what the backfill selects on, and what lets the
+     * UI say "not extracted" rather than "nothing depends on this" -- two states that must
+     * never render the same way.
+     */
+    dependenciesExtractedAt: timestamp("dependencies_extracted_at", { withTimezone: true }),
+
     // --- SBOM document metadata ------------------------------------------
     specVersion: text("spec_version"),
     serialNumber: text("serial_number"),
@@ -631,6 +648,29 @@ export const scanComponent = pgTable(
      * distrusts the derived origin label has the ground truth to check against.
      */
     layerId: text("layer_id"),
+
+    /**
+     * The packages in this same build that depend on this one.
+     *
+     * On the join row for the same reason paths are: a component row is global and shared,
+     * while what depends on a package is a property of the build it was found in. lodash is
+     * pulled in by different things in different applications, and hanging this off
+     * `component` would make the last ingest overwrite every other application's answer.
+     *
+     * Stored as display labels rather than references. The alternative -- component ids
+     * resolved at read time -- would put a join on the hottest read path in the system to
+     * render text that cannot change once the build is ingested.
+     *
+     * Null means no edge was recorded, which is the common case and not a defect. Syft reads
+     * these from a lockfile or a package manager's own metadata, so an image scan carries the
+     * distro's graph and nothing for the application packages inside it. Rendering null as
+     * "nothing depends on this" would therefore be wrong for every npm package in an image.
+     *
+     * Capped at COMPONENT_DEPENDANT_CAP entries; pulled_in_by_count carries the true total so
+     * a truncated list reads "5 of 71" rather than implying it is complete.
+     */
+    pulledInBy: text("pulled_in_by").array(),
+    pulledInByCount: integer("pulled_in_by_count"),
   },
   (t) => [
     // Per-scan component listing and the diff queries read by scan_id prefix.
@@ -971,6 +1011,25 @@ export const vulnerabilitySuppression = pgTable(
     applicationId: uuid("application_id").references(() => application.id, { onDelete: "cascade" }),
     /** Required. A suppression with no stated reason is indistinguishable from a mistake. */
     reason: text("reason").notNull(),
+
+    /**
+     * What is actually being claimed, for VEX export. See the vex schema in shared.
+     *
+     * Nullable, and the null is load-bearing. Suppressions created before this column existed
+     * carry no status, and nothing back-fills them: the free-text reason cannot be mapped to
+     * an enum by machine, and a default would put a judgement nobody made into a document
+     * whose whole purpose is to be trusted by people who cannot check it. Unclassified
+     * suppressions are excluded from VEX and counted on screen so somebody can work through
+     * them.
+     *
+     * Note this is deliberately not derivable from `reason`. Internally the distinction
+     * between "the scanner was wrong" and "this is real and we accept it" only changes a
+     * sentence on a page; in a VEX document it changes what a downstream consumer is told
+     * about whether they are exposed.
+     */
+    vexStatus: text("vex_status").$type<VexStatus>(),
+    /** Only meaningful when vexStatus is not_affected, which is the one state VEX asks to justify. */
+    vexJustification: text("vex_justification").$type<VexJustification>(),
     /** Optional review date, so an accepted risk can be made to expire rather than persist forever. */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdByUserId: uuid("created_by_user_id").references(() => user.id, { onDelete: "set null" }),

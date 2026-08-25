@@ -589,6 +589,7 @@ await fs.writeFile(
         type: "library",
         name: "express",
         version: "4.19.2",
+        "bom-ref": "ref-express",
         purl: "pkg:npm/express@4.19.2",
         properties: [
           { name: "syft:package:type", value: "npm" },
@@ -600,6 +601,7 @@ await fs.writeFile(
         type: "library",
         name: "lodash",
         version: "4.17.21",
+        "bom-ref": "ref-lodash",
         purl: "pkg:npm/lodash@4.17.21",
         properties: [
           { name: "syft:package:type", value: "npm" },
@@ -611,9 +613,19 @@ await fs.writeFile(
         type: "library",
         name: "no-location-here",
         version: "1.0.0",
+        "bom-ref": "ref-no-location",
         purl: "pkg:npm/no-location-here@1.0.0",
       },
     ],
+    /*
+     * A dependency graph, so the cell renders both halves of a package's provenance.
+     *
+     * express pulls in lodash and no-location-here; nothing pulls in express. That last part
+     * is the case worth having on screen: express must show no dependants line at all rather
+     * than "nothing depends on this", because null here means no edge was recorded and an
+     * image scan produces exactly that for every npm package in the build.
+     */
+    dependencies: [{ ref: "ref-express", dependsOn: ["ref-lodash", "ref-no-location"] }],
   }),
   "utf8",
 );
@@ -1165,11 +1177,104 @@ if (swept) {
       } else {
         log("  OK   dialog stayed open and requires a reason");
       }
+
+      /*
+        The VEX status. Three things are checked, and the third is the one that matters:
+
+          - the field is asked at all
+          - it starts unchosen, so nothing is published by taking the path of least resistance
+          - a reason ALONE does not enable submit
+
+        The last is what stops a suppression being created with no stated claim. Internally
+        the three statuses read the same; to a recipient of the VEX document they do not, and
+        "affected" is an admission that the product is vulnerable.
+      */
+      await expectText("What are you claiming?", "the VEX status field");
+      const statusSelect = dialog.getByLabel("VEX status");
+      if ((await statusSelect.inputValue()) !== "") {
+        problems.push("the VEX status defaulted to a value instead of asking");
+      }
+      await dialog.getByLabel(/Why is this risk accepted/).fill("ui-drive: checking the form");
+      await page.waitForTimeout(300);
+      if (await submit.isEnabled()) {
+        problems.push("accept-risk submit was enabled with a reason but no stated claim");
+      } else {
+        log("  OK   a reason alone is not enough; the claim must be stated");
+      }
+
+      // Justification is asked for `not affected` and only there -- it is the one state the
+      // spec attaches one to, because there is nothing to justify about a finding you agree
+      // is real. The API rejects the mismatch either way, so the form must not offer it.
+      await statusSelect.selectOption("not_affected");
+      await page.waitForTimeout(400);
+      await expectText("Why is it not affected?", "the justification field for not_affected");
+      if (await submit.isEnabled()) {
+        problems.push("submit was enabled for not_affected with no justification chosen");
+      }
       await shot("accept-risk-modal");
+
+      await statusSelect.selectOption("affected");
+      await page.waitForTimeout(400);
+      if ((await dialog.getByLabel("VEX justification").count()) > 0) {
+        problems.push("the justification field stayed visible on a status that cannot carry one");
+      } else {
+        log("  OK   justification is asked for not_affected and only there");
+      }
+      if (!(await submit.isEnabled())) {
+        problems.push("submit stayed disabled with a reason and a claim that needs no justification");
+      }
       await dialog.getByRole("button", { name: "Cancel" }).click();
       await page.waitForTimeout(600);
       if ((await page.locator("dialog[open]").count()) > 0) {
         problems.push("the accept-risk dialog did not close on Cancel");
+      }
+
+      /*
+        Now do it for real, so the admin table has a classified row to render.
+
+        Checking the column against an empty table would have proved nothing -- and on an
+        estate where nothing has been accepted, that is exactly what happens. This creates
+        one, reads it back, and removes it in the same block so the window in which the run
+        could leave a suppression behind on real data is as short as possible. The reason
+        string is distinctive so a leftover from a failed run is identifiable.
+      */
+      const REASON = "ui-drive: temporary, removed by this run";
+      await acceptButton.click();
+      await page.waitForTimeout(900);
+      const live = page.locator("dialog[open]");
+      await live.getByLabel(/Why is this risk accepted/).fill(REASON);
+      await live.getByLabel("VEX status").selectOption("affected");
+      await page.waitForTimeout(300);
+      await live.getByRole("button", { name: "Accept risk" }).click();
+      await page.waitForTimeout(1500);
+
+      if ((await page.locator("dialog[open]").count()) > 0) {
+        problems.push("the accept-risk dialog stayed open after a complete submission");
+      }
+
+      await page.goto(`${BASE}/admin/vulnerabilities`, { waitUntil: "networkidle" });
+      await page.waitForTimeout(900);
+      const acceptedRow = page.locator("tbody tr", { hasText: REASON });
+      if ((await acceptedRow.count()) === 0) {
+        problems.push("the accepted risk did not appear in the admin table");
+      } else {
+        await expectText("Published as", "the published-status column on accepted risks");
+        // The label, not the raw enum: "affected" alone reads as a database value, and this
+        // column is where somebody checks what is being said on their behalf.
+        await expectText("Affected, risk accepted", "the published status of the new row");
+        // Scrolled into view first: the accepted-risks card sits below three others on this
+        // page, and a viewport screenshot of the page top is evidence of nothing.
+        await acceptedRow.first().scrollIntoViewIfNeeded();
+        await page.waitForTimeout(300);
+        await shot("admin-accepted-risks-classified");
+
+        await acceptedRow.first().getByRole("button", { name: "Remove" }).click();
+        await page.waitForTimeout(1500);
+        if ((await page.locator("tbody tr", { hasText: REASON }).count()) > 0) {
+          problems.push("the accepted risk created by this run was not removed");
+        } else {
+          log("  OK   an accepted risk shows its published status, and was cleaned up");
+        }
       }
     }
   }
@@ -1184,6 +1289,132 @@ if (!wasEnabled) {
     await page.waitForTimeout(1500);
     log("  restored scanning to disabled");
   }
+}
+
+// --- 22b-dep. what pulled each package in -----------------------------------
+//
+// The actionable half of a finding, and the half a table cell can most easily get wrong:
+// the line has to appear where an edge exists and be absent — not empty, not "none" —
+// where one does not.
+log("22b-dep. dependants in the component list");
+{
+  await page.goto(`${BASE}/applications`, { waitUntil: "networkidle" });
+  await page
+    .locator("tbody tr", { hasText: TEST_APP })
+    .locator('a[href^="/applications/"]')
+    .first()
+    .click();
+  await page.waitForURL(/\/applications\/[0-9a-f-]+/, { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(600);
+
+  const lodashRow = page.locator("tbody tr", { hasText: "lodash" }).first();
+  const expressRow = page.locator("tbody tr", { hasText: "express" }).first();
+
+  if ((await lodashRow.count()) === 0 || (await expressRow.count()) === 0) {
+    problems.push("the uploaded fixture's packages are not on the application page");
+  } else {
+    const lodashText = (await lodashRow.innerText()).replace(/\s+/g, " ");
+    const expressText = (await expressRow.innerText()).replace(/\s+/g, " ");
+
+    if (!/Pulled in by\s*express@4\.19\.2/.test(lodashText)) {
+      problems.push(`lodash row does not name what pulled it in: ${lodashText.slice(0, 160)}`);
+    } else {
+      log("  OK   lodash names express as what pulled it in");
+    }
+
+    /*
+      express is depended on by nothing in this fixture. The cell must stay silent rather
+      than assert a negative — null means "no edge recorded", which is the state every npm
+      package in a container-image scan is in, and printing "nothing depends on this" there
+      would be wrong on every row of such a build.
+    */
+    if (/Pulled in by/.test(expressText)) {
+      problems.push(`express claims a dependant it does not have: ${expressText.slice(0, 160)}`);
+    } else {
+      log("  OK   a package with no recorded edge says nothing at all");
+    }
+
+    // The locations half must still be there: the two live in one cell and a change to
+    // either can silently displace the other.
+    if (!/node_modules/.test(lodashText)) {
+      problems.push("the location line disappeared from the cell alongside the dependants");
+    }
+  }
+  await shot("component-dependants");
+}
+
+// --- 22c. exporting ---------------------------------------------------------
+//
+// The export dialog is the only place the disclosure boundary is visible to a human. The
+// checks below are about what it *tells* somebody: which flavour they are about to download,
+// and that the combination SPDX cannot represent is not offered at all rather than offered
+// and rejected on click.
+log("22c. export dialog");
+{
+  await page.goto(`${BASE}/applications`, { waitUntil: "networkidle" });
+  await page
+    .locator("tbody tr", { hasText: TEST_APP })
+    .locator('a[href^="/applications/"]')
+    .first()
+    .click();
+  await page.waitForURL(/\/applications\/[0-9a-f-]+/, { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+
+  await page.getByRole("button", { name: "Export…" }).click();
+  await page.waitForTimeout(400);
+
+  await expectText("Format", "the export format field");
+  await expectText("Assessments (VEX)", "the VEX section of the export dialog");
+  // The disclosure wording, not just the label. "Safe to send outside the organisation" is
+  // the sentence that stops somebody handing over an enriched export by accident.
+  await expectText("Safe to send outside the organisation", "the inventory disclosure hint");
+
+  const sbomHref = await page
+    .locator('a[href*="/api/v1/exports/applications/"]')
+    .first()
+    .getAttribute("href");
+  if (!/format=cyclonedx&flavour=inventory/.test(sbomHref ?? "")) {
+    problems.push(`export link defaults wrong: ${sbomHref}`);
+  }
+
+  const vexHref = await page.locator('a[href$="/vex"]').first().getAttribute("href");
+  if (!/\/api\/v1\/exports\/applications\/[0-9a-f-]+\/vex$/.test(vexHref ?? "")) {
+    problems.push(`VEX link malformed: ${vexHref}`);
+  }
+
+  // Enriched must warn about what it carries, in different words from the inventory hint.
+  await page.getByLabel("Export contents").selectOption("enriched");
+  await page.waitForTimeout(300);
+  await expectText("Internal use", "the enriched disclosure hint");
+  await shot("export-dialog-enriched");
+
+  /*
+    Switching to SPDX while "enriched" is selected. The dialog must fall back to inventory
+    AND stop offering the combination: a Download button that is guaranteed to 400 would be a
+    trap rather than a safeguard, and this is the interaction that produces it.
+  */
+  await page.getByLabel("Export format").selectOption("spdx");
+  await page.waitForTimeout(300);
+  const flavourOptions = await page.getByLabel("Export contents").locator("option").count();
+  if (flavourOptions !== 1) {
+    problems.push(`SPDX still offers ${flavourOptions} content options; expected only inventory`);
+  }
+  const spdxHref = await page
+    .locator('a[href*="/api/v1/exports/applications/"]')
+    .first()
+    .getAttribute("href");
+  if (!/format=spdx&flavour=inventory/.test(spdxHref ?? "")) {
+    problems.push(`SPDX export did not fall back to inventory: ${spdxHref}`);
+  }
+  await expectText("SPDX 2.3 has no representation", "the SPDX limitation note");
+  await shot("export-dialog-spdx");
+
+  // getByLabel, not getByRole: the modal carries both an aria-labelled x and a footer button
+  // reading "Close", and a role lookup by name matches them both.
+  await page.getByLabel("Close").click();
+  await page.waitForTimeout(300);
+  log("  OK   export dialog offers only combinations the API will serve");
 }
 
 // --- 23. clean up the records this run created ------------------------------

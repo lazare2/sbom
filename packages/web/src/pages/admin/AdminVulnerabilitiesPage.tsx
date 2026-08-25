@@ -1,12 +1,27 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router";
-import type { VulnDbUpdateAttempt, VulnScanStatus } from "@sbom/shared";
+import type {
+  SuppressionSummary,
+  VexJustification,
+  VexStatus,
+  VulnDbUpdateAttempt,
+  VulnScanStatus,
+} from "@sbom/shared";
+import {
+  requiresJustification,
+  vexJustifications,
+  vexStatuses,
+  VEX_JUSTIFICATION_LABELS,
+  VEX_STATUS_HINTS,
+  VEX_STATUS_LABELS,
+} from "@sbom/shared";
 import {
   useImportVulnDb,
   useRunVulnSweep,
   useUpdateVulnDb,
   useUpdateVulnSettings,
   useDeleteSuppression,
+  useClassifySuppression,
 } from "../../lib/mutations.ts";
 import { useVulnAdminStatus, useVulnHistory, useVulnSuppressions } from "../../lib/queries.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../../lib/format.ts";
@@ -20,8 +35,11 @@ import {
   ErrorBanner,
   Field,
   FormError,
+  FormRow,
   LoadingBlock,
+  Modal,
   Mono,
+  Select,
   Table,
   TableWrap,
   Td,
@@ -477,22 +495,6 @@ function HistoryCard() {
   );
 }
 
-function OutcomeBadge({ attempt }: { attempt: VulnDbUpdateAttempt }) {
-  if (attempt.finishedAt === null) return <Badge tone="info">running</Badge>;
-  switch (attempt.outcome) {
-    case "updated":
-    case "imported":
-      return <Badge tone="ok">{attempt.outcome}</Badge>;
-    case "already-current":
-      return <Badge tone="neutral">up to date</Badge>;
-    case "unreachable":
-      // Warn, not danger: being air-gapped is a state, not a fault.
-      return <Badge tone="warn">no connection</Badge>;
-    default:
-      return <Badge tone="danger">failed</Badge>;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Suppressions
 // ---------------------------------------------------------------------------
@@ -509,6 +511,14 @@ const SUPPRESSION_COLUMNS = {
 function SuppressionsCard() {
   const { data: suppressions, isLoading } = useVulnSuppressions();
   const remove = useDeleteSuppression();
+  const [classifying, setClassifying] = useState<SuppressionSummary | null>(null);
+
+  /*
+    Counted from the list already loaded rather than from a second request. These are a short,
+    curated set by design, so the client has all of them; an endpoint returning a number the
+    page could compute would be one more thing able to disagree with the table beside it.
+  */
+  const unclassified = (suppressions ?? []).filter((s) => s.vexStatus === null).length;
 
   const sort = useClientSort(
     suppressions,
@@ -544,6 +554,21 @@ function SuppressionsCard() {
         title="Accepted risks"
         subtitle="Findings an administrator has assessed and excluded from every count. Excluded, never deleted — so the decision stays auditable."
       />
+      {unclassified > 0 ? (
+        <div
+          role="note"
+          className="mx-4 mb-3 rounded-lg border border-border bg-surface-sunken px-4 py-3 text-xs text-text-muted"
+        >
+          <strong className="font-semibold text-text">
+            {formatNumber(unclassified)} accepted risk{unclassified === 1 ? "" : "s"} carry no
+            published status.
+          </strong>{" "}
+          They are excluded from every count exactly as intended, and are left out of VEX
+          exports rather than being guessed at. "The scanner was wrong" and "this is real and
+          we accept it" are opposite claims, and only the person who made the decision can say
+          which it was.
+        </div>
+      ) : null}
       {isLoading ? (
         <LoadingBlock label="Loading accepted risks" />
       ) : !suppressions || suppressions.length === 0 ? (
@@ -567,6 +592,13 @@ function SuppressionsCard() {
                 </Th>
                 {/* Free text written by whoever accepted the risk. */}
                 <Th>Reason</Th>
+                {/*
+                  What this suppression says to anybody outside the organisation. Internally
+                  all three read the same -- the finding is excluded either way -- so this
+                  column exists to make the published claim visible to the people responsible
+                  for it.
+                */}
+                <Th width="150px">Published as</Th>
                 <Th onSort={() => sort.toggle("acceptedBy")} sorted={sort.stateOf("acceptedBy")} width="150px">
                   Accepted by
                 </Th>
@@ -594,8 +626,32 @@ function SuppressionsCard() {
                         ? s.applicationName
                         : "Everywhere"}
                   </Td>
-                  <Td className="max-w-[380px] truncate" title={s.reason}>
+                  <Td className="max-w-[300px] truncate" title={s.reason}>
                     {s.reason}
+                  </Td>
+                  <Td>
+                    {s.vexStatus ? (
+                      <span className="flex flex-col gap-0.5">
+                        <Badge tone="neutral" title={VEX_STATUS_HINTS[s.vexStatus]}>
+                          {VEX_STATUS_LABELS[s.vexStatus]}
+                        </Badge>
+                        {s.vexJustification ? (
+                          <span className="text-[11px] leading-snug text-text-faint">
+                            {VEX_JUSTIFICATION_LABELS[s.vexJustification]}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      /*
+                        Not a badge and not a warning colour. This row is doing its job -- the
+                        finding is excluded exactly as intended. All that is missing is a
+                        machine-readable form of a decision somebody already made, so it reads
+                        as an action available rather than as a fault.
+                      */
+                      <Button size="sm" variant="ghost" onClick={() => setClassifying(s)}>
+                        Not classified
+                      </Button>
+                    )}
                   </Td>
                   <Td className="text-text-muted">{s.createdByEmail ?? "—"}</Td>
                   <Td className="text-text-muted">
@@ -622,6 +678,146 @@ function SuppressionsCard() {
           </Table>
         </TableWrap>
       )}
+      <ClassifySuppressionModal suppression={classifying} onClose={() => setClassifying(null)} />
     </Card>
   );
 }
+
+/**
+ * Saying what an existing suppression actually claims.
+ *
+ * The reason it was accepted is shown, uneditable, above the choice. Whoever is classifying
+ * these is often not the person who wrote them, and the only evidence of what was meant is
+ * that sentence -- so it has to be in front of them while they decide, rather than something
+ * they have to remember from the row behind the dialog.
+ */
+function ClassifySuppressionModal({
+  suppression,
+  onClose,
+}: {
+  suppression: SuppressionSummary | null;
+  onClose: () => void;
+}) {
+  const classify = useClassifySuppression();
+  const [status, setStatus] = useState<VexStatus | "">("");
+  const [justification, setJustification] = useState<VexJustification | "">("");
+
+  if (!suppression) return null;
+  const target = suppression;
+
+  const needsJustification = status !== "" && requiresJustification(status);
+  const complete = status !== "" && (!needsJustification || justification !== "");
+
+  function submit() {
+    if (status === "") return;
+    classify.mutate(
+      {
+        id: target.id,
+        body: {
+          vexStatus: status,
+          ...(requiresJustification(status) && justification !== ""
+            ? { vexJustification: justification }
+            : {}),
+        },
+      },
+      {
+        onSuccess: () => {
+          setStatus("");
+          setJustification("");
+          onClose();
+        },
+      },
+    );
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={"Classify " + target.vulnerabilityId}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={classify.isPending}>
+            Cancel
+          </Button>
+          <Button variant="primary" disabled={!complete || classify.isPending} onClick={submit}>
+            {classify.isPending ? "Saving…" : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded border border-border bg-surface-sunken p-3">
+          <p className="text-[11px] uppercase tracking-wide text-text-faint">Stated reason</p>
+          <p className="mt-1 text-xs text-text-muted">{target.reason}</p>
+          {target.createdByEmail ? (
+            <p className="mt-2 text-[11px] text-text-faint">Accepted by {target.createdByEmail}</p>
+          ) : null}
+        </div>
+
+        <p className="text-xs text-text-muted">
+          This changes nothing about what is counted — the finding is already excluded. It
+          decides what a VEX document tells other organisations about it.
+        </p>
+
+        <FormRow label="What does this claim?" htmlFor="classify-status">
+          <Select
+            id="classify-status"
+            value={status}
+            onChange={(v) => {
+              setStatus(v as VexStatus | "");
+              // Cleared on every change, so a justification chosen for "not affected" cannot
+              // survive a switch to a status where it would describe the wrong thing.
+              setJustification("");
+            }}
+            ariaLabel="VEX status"
+            options={[
+              { value: "", label: "Choose one…" },
+              ...vexStatuses.map((v) => ({ value: v, label: VEX_STATUS_LABELS[v] })),
+            ]}
+          />
+        </FormRow>
+
+        {status !== "" ? (
+          <p className="-mt-2 border-l-2 border-border-strong pl-3 text-xs text-text-muted">
+            {VEX_STATUS_HINTS[status]}
+          </p>
+        ) : null}
+
+        {needsJustification ? (
+          <FormRow label="Why is it not affected?" htmlFor="classify-justification">
+            <Select
+              id="classify-justification"
+              value={justification}
+              onChange={(v) => setJustification(v as VexJustification | "")}
+              ariaLabel="VEX justification"
+              options={[
+                { value: "", label: "Choose one…" },
+                ...vexJustifications.map((j) => ({ value: j, label: VEX_JUSTIFICATION_LABELS[j] })),
+              ]}
+            />
+          </FormRow>
+        ) : null}
+
+        <FormError error={classify.error} />
+      </div>
+    </Modal>
+  );
+}
+
+function OutcomeBadge({ attempt }: { attempt: VulnDbUpdateAttempt }) {
+  if (attempt.finishedAt === null) return <Badge tone="info">running</Badge>;
+  switch (attempt.outcome) {
+    case "updated":
+    case "imported":
+      return <Badge tone="ok">{attempt.outcome}</Badge>;
+    case "already-current":
+      return <Badge tone="neutral">up to date</Badge>;
+    case "unreachable":
+      // Warn, not danger: being air-gapped is a state, not a fault.
+      return <Badge tone="warn">no connection</Badge>;
+    default:
+      return <Badge tone="danger">failed</Badge>;
+  }
+}
+

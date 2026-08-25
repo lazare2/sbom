@@ -132,6 +132,7 @@ export interface ApplicationComponentsResponse extends Paginated<ScanComponentEn
   scanId: string | null;
   /** Null when this build's SBOM has never had a location pass. See ComponentLocationCell. */
   locationsExtractedAt: string | null;
+  dependenciesExtractedAt: string | null;
 }
 
 export interface ComponentSearchResponse extends Paginated<ComponentSearchHit> {
@@ -691,10 +692,10 @@ export function useAdvisorySearch(params: Record<string, unknown>, enabled = tru
  * Polled only while a run is in progress, so an idle admin page is not a permanent source of
  * requests — the same rule the malicious settings page follows.
  */
-export function useLocationBackfillStatus() {
+export function useSbomBackfillStatus() {
   return useQuery({
-    queryKey: ["admin", "location-backfill"],
-    queryFn: () => api.get<{ pending: number; running: boolean }>("/admin/scans/backfill-locations"),
+    queryKey: ["admin", "sbom-backfill"],
+    queryFn: () => api.get<{ pending: number; running: boolean }>("/admin/scans/backfill-sbom"),
     refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
   });
 }

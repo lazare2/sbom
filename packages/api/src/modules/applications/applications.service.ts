@@ -325,7 +325,11 @@ export class ApplicationsService {
     applicationId: string,
     query: ListScanComponentsQuery,
   ): Promise<
-    Paginated<ScanComponentEntry> & { scanId: string | null; locationsExtractedAt: string | null }
+    Paginated<ScanComponentEntry> & {
+      scanId: string | null;
+      locationsExtractedAt: string | null;
+      dependenciesExtractedAt: string | null;
+    }
   > {
     const { db } = this.deps;
 
@@ -338,9 +342,13 @@ export class ApplicationsService {
      * know which sentence to print under an empty path column.
      */
     const appRows = await db.execute<
-      Row<{ latest_scan_id: string | null; locations_extracted_at: Date | string | null }>
+      Row<{
+        latest_scan_id: string | null;
+        locations_extracted_at: Date | string | null;
+        dependencies_extracted_at: Date | string | null;
+      }>
     >(sql`
-      SELECT a.latest_scan_id, s.locations_extracted_at
+      SELECT a.latest_scan_id, s.locations_extracted_at, s.dependencies_extracted_at
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
       WHERE a.id = ${applicationId}::uuid
@@ -351,7 +359,12 @@ export class ApplicationsService {
     if (!app.latest_scan_id) {
       // Pre-registered but never scanned. An empty page is the honest answer;
       // a 404 would wrongly imply the application does not exist.
-      return { ...paginate<ScanComponentEntry>([], 0, query), scanId: null, locationsExtractedAt: null };
+      return {
+        ...paginate<ScanComponentEntry>([], 0, query),
+        scanId: null,
+        locationsExtractedAt: null,
+        dependenciesExtractedAt: null,
+      };
     }
 
     const page = await this.listComponentsOfScan(app.latest_scan_id, query);
@@ -359,6 +372,7 @@ export class ApplicationsService {
       ...page,
       scanId: app.latest_scan_id,
       locationsExtractedAt: toIso(app.locations_extracted_at ?? null),
+      dependenciesExtractedAt: toIso(app.dependencies_extracted_at ?? null),
     };
   }
 
@@ -385,7 +399,7 @@ export class ApplicationsService {
 
     const rows = await db.execute<Row<ScanComponentQueryRow>>(sql`
       SELECT c.id, c.name, c.version, c.ecosystem, c.purl, c.kind,
-             sc.paths, sc.path_count, sc.layer_id,
+             sc.paths, sc.path_count, sc.layer_id, sc.pulled_in_by, sc.pulled_in_by_count,
              count(*) OVER () AS total
       FROM scan_component sc
       JOIN component c ON c.id = sc.component_id
@@ -516,6 +530,8 @@ interface ScanComponentQueryRow extends ComponentQueryRow {
   paths: string[] | null;
   path_count: number | null;
   layer_id: string | null;
+  pulled_in_by: string[] | null;
+  pulled_in_by_count: number | null;
 }
 
 function toIso(value: Date | string | null): string | null {

@@ -11,6 +11,7 @@ import type {
   ConfirmApplicationRequest,
   CreateApplicationRequest,
   CreateIngestTokenResponse,
+  ClassifySuppression,
   CreateSuppression,
   CreateUserRequest,
   DeleteScanResponse,
@@ -521,6 +522,22 @@ export function useCreateSuppression() {
   });
 }
 
+/**
+ * Applies a VEX status to a suppression that predates the field.
+ *
+ * Separate from creating one because these rows already exist: somebody is going back over
+ * decisions that may not be theirs and saying what each one actually claims, so it can be
+ * published to people outside the organisation.
+ */
+export function useClassifySuppression() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; body: ClassifySuppression }) =>
+      api.patch<void>(`/admin/vuln/suppressions/${vars.id}`, vars.body),
+    onSuccess: () => invalidateVulnerabilities(qc),
+  });
+}
+
 export function useDeleteSuppression() {
   const qc = useQueryClient();
   return useMutation({
@@ -671,18 +688,19 @@ export function useUpdateMaliciousSettings() {
  * screens can say — not merely the admin panel that triggered it. Scan and application
  * component lists, findings and malicious impacts all read the same columns.
  */
-export function useBackfillLocations() {
+export function useBackfillSbom() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (limit?: number) =>
       api.post<{
         processed: number;
-        rowsUpdated: number;
+        locationsUpdated: number;
+        dependantsUpdated: number;
         unreadable: number;
         remaining: number;
-      }>("/admin/scans/backfill-locations", limit === undefined ? {} : { limit }),
+      }>("/admin/scans/backfill-sbom", limit === undefined ? {} : { limit }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["admin", "location-backfill"] });
+      void qc.invalidateQueries({ queryKey: ["admin", "sbom-backfill"] });
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["applications"] });
       void qc.invalidateQueries({ queryKey: ["vuln"] });

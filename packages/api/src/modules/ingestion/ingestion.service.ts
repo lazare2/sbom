@@ -25,17 +25,18 @@ import { platformSummary } from "./platform.js";
 
 /**
  * Postgres allows at most 65535 bind parameters per statement. `component` has 6
- * inserted columns and `scan_component` has 7, so these chunk sizes keep both
+ * inserted columns and `scan_component` has 9, so these chunk sizes keep both
  * comfortably under the ceiling while still being few enough round trips that a
  * 50k-component image ingests in tens of statements rather than thousands.
  *
- * The scan_component chunk came down from 2000 when the three location columns were added:
- * 2000 x 7 is 14,000 parameters, which still fits, but a text[] binds as one parameter whose
- * size is unbounded rather than as a scalar, and 1500 keeps the statement comfortable rather
- * than merely legal.
+ * The scan_component chunk came down from 2000 when the three location columns were added,
+ * and again to 1200 when the two dependant columns brought it to 9. 1200 x 9 is 10,800
+ * parameters, well inside the limit -- but the margin is not really about the count. Two of
+ * those nine are text[], and an array binds as a single parameter whose size is unbounded
+ * rather than as a scalar, so the statement's real weight is bytes rather than placeholders.
  */
 const COMPONENT_INSERT_CHUNK = 1000;
-const SCAN_COMPONENT_INSERT_CHUNK = 1500;
+const SCAN_COMPONENT_INSERT_CHUNK = 1200;
 const COMPONENT_LOOKUP_CHUNK = 5000;
 
 /**
@@ -318,6 +319,10 @@ export class IngestionService {
            * would keep re-reading its blob forever to rediscover that there is nothing there.
            */
           locationsExtractedAt: new Date(),
+          // Stamped together because one parse produced both. A scan ingested by this code
+          // has had its dependency graph read, even when that graph turned out to be empty --
+          // which is exactly the case the marker exists to distinguish from "not looked at".
+          dependenciesExtractedAt: new Date(),
         })
         .returning();
 
@@ -589,6 +594,8 @@ export class IngestionService {
         paths: c.paths,
         pathCount: c.pathCount,
         layerId: c.layerId,
+        pulledInBy: c.pulledInBy,
+        pulledInByCount: c.pulledInByCount,
       };
     });
 

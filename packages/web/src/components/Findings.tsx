@@ -1,7 +1,17 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import type { Paginated, SortDirection, VulnBreakdown, VulnerabilityFinding, VulnSeverity } from "@sbom/shared";
-import { findingSort } from "@sbom/shared";
+import {
+  findingSort,
+  requiresJustification,
+  vexJustifications,
+  vexStatuses,
+  VEX_JUSTIFICATION_LABELS,
+  VEX_STATUS_HINTS,
+  VEX_STATUS_LABELS,
+  type VexJustification,
+  type VexStatus,
+} from "@sbom/shared";
 import { useServerSort, type SortControl } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useCreateSuppression } from "../lib/mutations.ts";
@@ -363,23 +373,41 @@ function AcceptRiskModal({
   const create = useCreateSuppression();
   const [reason, setReason] = useState("");
   const [scope, setScope] = useState<"package" | "application" | "everywhere">("package");
+  /*
+    No default. The three statuses are not degrees of the same thing -- "the scanner was
+    wrong" and "this is real and we accept it" are opposite claims -- and a pre-selected one
+    would be accepted by whoever is in a hurry, which is most people most of the time. What
+    gets published to other organisations should not have a path of least resistance.
+  */
+  const [vexStatus, setVexStatus] = useState<VexStatus | "">("");
+  const [justification, setJustification] = useState<VexJustification | "">("");
 
   if (!finding) return null;
 
   // Captured after the null check so the closure below has a narrowed value.
   const target = finding;
+  const needsJustification = vexStatus !== "" && requiresJustification(vexStatus);
+  const complete =
+    reason.trim().length >= 3 && vexStatus !== "" && (!needsJustification || justification !== "");
 
   function submit() {
+    if (vexStatus === "") return;
     create.mutate(
       {
         vulnerabilityId: target.vulnerabilityId,
         ...(scope === "package" ? { componentId: target.componentId } : {}),
         ...(scope === "application" && applicationId ? { applicationId } : {}),
         reason: reason.trim(),
+        vexStatus,
+        // Sent only where it means something. The API rejects a justification on any other
+        // status rather than ignoring it, so a stale value left in state would be a 400.
+        ...(requiresJustification(vexStatus) && justification !== "" ? { vexJustification: justification } : {}),
       },
       {
         onSuccess: () => {
           setReason("");
+          setVexStatus("");
+          setJustification("");
           onClose();
         },
       },
@@ -396,11 +424,7 @@ function AcceptRiskModal({
           <Button onClick={onClose} disabled={create.isPending}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            disabled={reason.trim().length < 3 || create.isPending}
-            onClick={submit}
-          >
+          <Button variant="primary" disabled={!complete || create.isPending} onClick={submit}>
             {create.isPending ? "Saving…" : "Accept risk"}
           </Button>
         </>
@@ -436,6 +460,64 @@ function AcceptRiskModal({
         >
           <Textarea id="accept-reason" rows={3} value={reason} onChange={setReason} />
         </FormRow>
+
+        <FormRow
+          label="What are you claiming?"
+          htmlFor="accept-vex-status"
+          hint="Published in the VEX document that goes out with this application's SBOM. Internally these three read the same; to somebody outside they do not."
+        >
+          <Select
+            id="accept-vex-status"
+            value={vexStatus}
+            onChange={(v) => {
+              setVexStatus(v as VexStatus | "");
+              // Cleared on every change, so a justification chosen for "not affected" cannot
+              // survive a switch to a status where it would be a claim about the wrong thing.
+              setJustification("");
+            }}
+            ariaLabel="VEX status"
+            options={[
+              { value: "", label: "Choose one…" },
+              ...vexStatuses.map((status) => ({
+                value: status,
+                label: VEX_STATUS_LABELS[status],
+              })),
+            ]}
+          />
+        </FormRow>
+
+        {vexStatus !== "" ? (
+          /*
+            Set off by a rule so it reads as "this is what you just chose" rather than as a
+            second sentence of the field's own instructions. Stacked as plain grey paragraphs
+            the two were indistinguishable, and only one of them changes with the selection.
+          */
+          <p className="-mt-2 border-l-2 border-border-strong pl-3 text-xs text-text-muted">
+            {VEX_STATUS_HINTS[vexStatus]}
+          </p>
+        ) : null}
+
+        {needsJustification ? (
+          <FormRow
+            label="Why is it not affected?"
+            htmlFor="accept-vex-justification"
+            hint="Required. VEX consumers reject a 'not affected' with no stated reason, and rightly."
+          >
+            <Select
+              id="accept-vex-justification"
+              value={justification}
+              onChange={(v) => setJustification(v as VexJustification | "")}
+              ariaLabel="VEX justification"
+              options={[
+                { value: "", label: "Choose one…" },
+                ...vexJustifications.map((j) => ({
+                  value: j,
+                  label: VEX_JUSTIFICATION_LABELS[j],
+                })),
+              ]}
+            />
+          </FormRow>
+        ) : null}
 
         <FormError error={create.error} />
       </div>

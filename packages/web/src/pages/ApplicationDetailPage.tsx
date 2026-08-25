@@ -18,6 +18,7 @@ import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/
 import { useDebounced } from "../lib/useDebounced.ts";
 import { DiffView, LastSeen, PackageLink } from "../components/DiffView.tsx";
 import { ComponentLocationCell } from "../components/ComponentLocationCell.tsx";
+import { ExportMenu } from "../components/ExportMenu.tsx";
 import { PlatformChips } from "../components/Platform.tsx";
 import { ApplicationFormModal } from "./admin/ApplicationFormModal.tsx";
 import { UploadSbomModal } from "./UploadSbomModal.tsx";
@@ -152,18 +153,26 @@ export function ApplicationDetailPage() {
           </span>
         }
         actions={
-          isAdmin && app.status !== "pending_confirmation" ? (
-            <Button size="sm" onClick={() => setEditing(true)}>
-              Edit application
-            </Button>
-          ) : isAdmin ? (
-            <Link
-              to="/admin/pending"
-              className="inline-flex items-center rounded-md border border-border-strong bg-bg-raised px-3 py-1.5 text-sm font-medium text-text-base hover:bg-bg-subtle"
-            >
-              Resolve this record
-            </Link>
-          ) : undefined
+          /*
+            Export is offered to every signed-in user, not just admins: it is the same
+            inventory the page below already shows, in a shape a tool can read. Gating it
+            would push people back to copying tables out of the browser.
+          */
+          <span className="flex flex-wrap items-center gap-2">
+            <ExportMenu subject={app.name} kind="applications" id={app.id} />
+            {isAdmin && app.status !== "pending_confirmation" ? (
+              <Button size="sm" onClick={() => setEditing(true)}>
+                Edit application
+              </Button>
+            ) : isAdmin ? (
+              <Link
+                to="/admin/pending"
+                className="inline-flex items-center rounded-md border border-border-strong bg-bg-raised px-3 py-1.5 text-sm font-medium text-text-base hover:bg-bg-subtle"
+              >
+                Resolve this record
+              </Link>
+            ) : null}
+          </span>
         }
       />
 
@@ -447,6 +456,7 @@ function ComponentsTab({
                         <ComponentLocationCell
                           location={c.location}
                           extracted={data.locationsExtractedAt != null}
+                          dependantsExtracted={data.dependenciesExtractedAt != null}
                         />
                       </Td>
                       <Td className="max-w-[380px] truncate" title={c.purl ?? undefined}>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { ExportMenu } from "../components/ExportMenu.tsx";
 import { componentListSort } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
 import { useScan, useScanComponents } from "../lib/queries.ts";
@@ -172,9 +173,16 @@ export function ScanDetailPage() {
             */}
             <a href={`/api/v1/scans/${scan.id}/raw`} download>
               <Button size="sm" variant="secondary">
-                Download SBOM
+                Original upload
               </Button>
             </a>
+            {/*
+              Distinct from the anchor above, and the labels say which is which. That one is
+              the pipeline's own bytes, unmodified, which is what an audit asks for. This one
+              is what the platform holds -- convertible to SPDX, and able to carry findings and
+              origin that the uploaded document never had.
+            */}
+            <ExportMenu subject={scan.applicationName} kind="scans" id={scan.id} />
             {/*
               Last in the row, after the navigation and the download.
 
@@ -373,6 +381,7 @@ export function ScanDetailPage() {
                           // its SBOM, and an unextracted build must say so rather than
                           // showing the same blank as one that genuinely had no paths.
                           extracted={scan?.locationsExtractedAt != null}
+                          dependantsExtracted={scan?.dependenciesExtractedAt != null}
                         />
                       </Td>
                       <Td className="max-w-[380px] truncate" title={c.purl ?? undefined}>

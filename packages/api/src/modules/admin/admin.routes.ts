@@ -41,7 +41,7 @@ function actorOf(request: FastifyRequest): Actor {
  * diagnosing, and a ceiling of 2000 because each scan means a blob read plus a full JSON parse
  * and an unbounded limit turns an admin click into an hour-long request.
  */
-const backfillLocationsSchema = z.object({
+const backfillSbomSchema = z.object({
   limit: z.coerce.number().int().min(1).max(2000).default(200),
 });
 
@@ -74,7 +74,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     attributeDefinitions,
     audit,
     ingestTokens,
-    locationBackfill,
+    sbomBackfill,
     settings,
   } = fastify.ctx;
 
@@ -232,16 +232,19 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
    * read the same blobs and contend on the same rows for no gain, and an operator who clicked
    * twice should be told, not silently ignored.
    */
-  fastify.post("/scans/backfill-locations", async (request, reply) => {
-    if (locationBackfill.isRunning) {
-      throw new ConflictError("A location backfill is already running.", "backfill_in_progress");
+  fastify.post("/scans/backfill-sbom", async (request, reply) => {
+    if (sbomBackfill.isRunning) {
+      throw new ConflictError("An SBOM backfill is already running.", "backfill_in_progress");
     }
 
-    const body = parseOrThrow(backfillLocationsSchema, request.body ?? {});
-    const result = await locationBackfill.run(body.limit);
+    const body = parseOrThrow(backfillSbomSchema, request.body ?? {});
+    const result = await sbomBackfill.run(body.limit);
 
     await audit.record({
       actor: actorOf(request),
+      // Kept as the existing action name rather than renamed with the job. The audit trail
+      // is append-only and the admin page filters on an exact action string, so renaming it
+      // would split one job's history into two namespaces at the point of the rename.
       action: "scan.backfill_locations",
       targetType: "scan",
       // A batch has no single target, so the key names the job rather than a row.
@@ -256,11 +259,11 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.send(result);
   });
 
-  /** How much of the estate still has no location pass, for the admin screen. */
-  fastify.get("/scans/backfill-locations", async (_request, reply) => {
+  /** How much of the estate still has no provenance pass, for the admin screen. */
+  fastify.get("/scans/backfill-sbom", async (_request, reply) => {
     return reply.send({
-      pending: await locationBackfill.pending(),
-      running: locationBackfill.isRunning,
+      pending: await sbomBackfill.pending(),
+      running: sbomBackfill.isRunning,
     });
   });
 

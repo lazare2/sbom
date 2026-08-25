@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
+  classifySuppressionSchema,
   createSuppressionSchema,
   idParamSchema,
   updateVulnSettingsSchema,
@@ -279,6 +280,8 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
         componentId: body.componentId ?? null,
         applicationId: body.applicationId ?? null,
         expiresAt: body.expiresAt ?? null,
+        vexStatus: body.vexStatus,
+        vexJustification: body.vexJustification ?? null,
       },
     });
 
@@ -287,6 +290,35 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
     vulnWorker.requestSummaryRefresh();
 
     return reply.status(201).send({ id: created.id });
+  });
+
+  /**
+   * Applies a VEX status to a suppression made before the field existed.
+   *
+   * A PATCH rather than part of the create body, because these rows already exist and their
+   * authors are not necessarily around. Whoever classifies one is making a claim to people
+   * outside the organisation, which is why the transition is audited with both ends recorded.
+   */
+  fastify.patch("/suppressions/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(classifySuppressionSchema, request.body);
+    const changed = await vulnerabilities.classifySuppression(id, body);
+    if (!changed) throw new NotFoundError("Suppression");
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "vuln.suppression_classify",
+      targetType: "vulnerability",
+      targetId: id,
+      metadata: {
+        status: { from: changed.before.status, to: changed.after.status },
+        justification: { from: changed.before.justification, to: changed.after.justification },
+      },
+    });
+
+    // Deliberately no summary refresh: a VEX status changes what is published, never what is
+    // counted. The suppression was already excluded from every figure before it was classified.
+    return reply.status(204).send();
   });
 
   fastify.delete("/suppressions/:id", async (request, reply) => {

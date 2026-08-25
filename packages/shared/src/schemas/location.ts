@@ -196,6 +196,42 @@ export interface ComponentLocation {
   /** Image layer digest, for image scans. Ground truth when the origin label looks wrong. */
   layerId: string | null;
   origin: ComponentOrigin;
+
+  /**
+   * The packages that depend on this one, within the same build.
+   *
+   * This answers the question a finding otherwise leaves unanswered. Nobody installed
+   * `@fastify/error`; it is not in anyone's manifest, so a developer looking at a finding
+   * against it has nothing to act on. Knowing that `fastify` and `avvio` depend on it names
+   * the package to actually upgrade.
+   *
+   * Read from the CycloneDX `dependencies` graph and reversed. Deliberately *not* a claim
+   * about whether a package was directly chosen: the SBOM's root component carries no
+   * dependency entry, so nothing here can distinguish "you asked for this" from "something
+   * else did". These are the immediate dependants, and only that.
+   *
+   * ## Null is the common case, and what decides it is how the SBOM was produced
+   *
+   * Syft emits these edges from a lockfile or a package manager's own declared dependencies.
+   * It does not infer them from files on disk. Measured across three real SBOMs:
+   *
+   *   directory scan with package-lock.json     npm   226/234   97%
+   *   node:20-alpine image                      npm     0/193    0%
+   *                                             apk    12/18    67%
+   *   python:3.12-slim image                    deb    59/92    64%
+   *                                             pypi    0/1      0%
+   *
+   * So a pipeline that scans its source tree gets almost complete coverage of its own
+   * dependencies, and a pipeline that scans the built image gets the distro's graph and
+   * nothing at all for the application packages inside it -- the lockfile is not in the
+   * image, so there is nothing left to read the graph from.
+   *
+   * This is why null must never render as "nothing depends on this". On an image scan that
+   * would be wrong for every npm package in the build.
+   */
+  pulledInBy: string[] | null;
+  /** Total dependants before capping. Null whenever `pulledInBy` is null. */
+  pulledInByCount: number | null;
 }
 
 /**
@@ -207,6 +243,32 @@ export interface ComponentLocation {
  * system.
  */
 export const COMPONENT_LOCATION_PATH_CAP = 3;
+
+/**
+ * How many dependants are kept per component per scan.
+ *
+ * Five rather than three because the list is the actionable half of a finding -- it names
+ * what to upgrade -- and a package pulled in by several things needs all of them named
+ * before anybody can be sure removing one is enough. Five rather than all of them because
+ * the measured maximum on a single real package was 71, against a table that already carries
+ * one row per package per build.
+ *
+ * `pulledInByCount` carries the true total, so a capped list reads "5 of 71" rather than
+ * quietly presenting itself as the whole answer.
+ */
+export const COMPONENT_DEPENDANT_CAP = 5;
+
+/**
+ * How a dependant is written for display and storage.
+ *
+ * Denormalised to a string rather than stored as a reference, for the same reason paths are:
+ * the set is per-build, and resolving a dozen references per row on every findings page
+ * would put a join on the hottest read path in the system to render text that never changes
+ * once the build is ingested.
+ */
+export function formatDependant(name: string, version: string | null): string {
+  return version ? `${name}@${version}` : name;
+}
 
 /**
  * Wording for each origin, shared so no two screens describe the same state differently.

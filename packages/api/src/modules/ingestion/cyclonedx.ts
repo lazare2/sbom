@@ -1,6 +1,8 @@
 import {
+  COMPONENT_DEPENDANT_CAP,
   COMPONENT_LOCATION_PATH_CAP,
   ecosystemHasMeaningfulPaths,
+  formatDependant,
   normalizeLocationPath,
 } from "@sbom/shared";
 import { sha256Hex } from "../../lib/crypto.js";
@@ -60,6 +62,19 @@ export interface ParsedComponent {
   pathCount: number | null;
   /** Image layer digest of the first recorded location. Null outside image scans. */
   layerId: string | null;
+  /**
+   * Packages in this same document that depend on this one, capped at
+   * `COMPONENT_DEPENDANT_CAP` and sorted.
+   *
+   * Null when the SBOM recorded no edge reaching this component, which is the ordinary case
+   * rather than an exception: Syft reads these edges from a lockfile or a package manager's
+   * own metadata, so an image scan carries the distro graph and nothing for the application
+   * packages inside it. See the note on ComponentLocation.pulledInBy for the measured
+   * numbers.
+   */
+  pulledInBy: string[] | null;
+  /** True total before capping, so a truncated list can say "5 of 71". */
+  pulledInByCount: number | null;
 }
 
 export type SkipReason = "missing_name" | "not_an_object" | "excluded_type";
@@ -149,6 +164,8 @@ interface RawComponent {
   purl?: unknown;
   cpe?: unknown;
   properties?: unknown;
+  /** Hyphenated in the spec, so it needs quoting here and bracket access at the call site. */
+  "bom-ref"?: unknown;
 }
 
 function asNonEmptyString(value: unknown, maxLength = 2048): string | null {
@@ -253,6 +270,75 @@ function lengthPrefixed(parts: readonly string[]): string {
  * The `purl:` / `nvt:` scheme prefix keeps the two derivations from colliding
  * with each other.
  */
+/**
+ * Reverses the CycloneDX `dependencies` graph into "who depends on this".
+ *
+ * ## What the graph does and does not contain
+ *
+ * Entries are package-to-package: `{ ref, dependsOn: [...] }`. The document's own root
+ * component has no entry -- measured across a directory scan, a Debian image and an Alpine
+ * image, none of the three carried one -- so the graph cannot say which packages a developer
+ * actually declared. It can only say which packages depend on which. That is why this reads
+ * the edges backwards and stops there rather than trying to reconstruct a chain up to a
+ * manifest that was never in the document.
+ *
+ * ## Refs are resolved through the identity hash, not kept as refs
+ *
+ * Several `bom-ref` values can denote the same package: Syft emits a component twice when it
+ * finds it in two layers, and the parser collapses those into one row. Both refs therefore
+ * have to resolve to the same identity, or an edge naming the second copy would point at
+ * nothing. Refs that resolve to no kept component -- the root, an excluded `file` entry, a
+ * dangling reference -- are dropped rather than guessed at.
+ */
+function readDependants(
+  dependencies: unknown,
+  hashByRef: Map<string, string>,
+  labelByHash: Map<string, string>,
+): Map<string, string[]> {
+  const dependantsByHash = new Map<string, Set<string>>();
+  if (!Array.isArray(dependencies)) return new Map();
+
+  for (const entry of dependencies) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { ref, dependsOn } = entry as { ref?: unknown; dependsOn?: unknown };
+    if (typeof ref !== "string" || !Array.isArray(dependsOn)) continue;
+
+    const parentHash = hashByRef.get(ref);
+    if (parentHash === undefined) continue;
+    const parentLabel = labelByHash.get(parentHash);
+    if (parentLabel === undefined) continue;
+
+    for (const child of dependsOn) {
+      if (typeof child !== "string") continue;
+      const childHash = hashByRef.get(child);
+      if (childHash === undefined) continue;
+      /*
+        A package that collapsed into its own parent. Real documents produce this: two
+        bom-refs for the same library, one listed as depending on the other. "lodash is
+        pulled in by lodash" is noise at best and looks like a bug to whoever reads it.
+      */
+      if (childHash === parentHash) continue;
+
+      let set = dependantsByHash.get(childHash);
+      if (set === undefined) {
+        set = new Set<string>();
+        dependantsByHash.set(childHash, set);
+      }
+      // A Set, because `dependsOn` genuinely repeats entries -- one real document listed
+      // @types/node twice under a single parent.
+      set.add(parentLabel);
+    }
+  }
+
+  const out = new Map<string, string[]>();
+  for (const [hash, set] of dependantsByHash) {
+    // Sorted so the stored subset is deterministic: the same SBOM ingested twice must keep
+    // the same five dependants, or a re-ingest looks like the dependency graph changed.
+    out.set(hash, [...set].sort());
+  }
+  return out;
+}
+
 export function computeIdentityHash(input: {
   purl: string | null;
   ecosystem: string;
@@ -401,6 +487,7 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
     serialNumber?: unknown;
     metadata?: unknown;
     components?: unknown;
+    dependencies?: unknown;
   };
 
   const bomFormat = asNonEmptyString(root.bomFormat, 64);
@@ -439,6 +526,17 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
   const indexByHash = new Map<string, number>();
   /** Locations accumulated per kept component, parallel to `components`. */
   const locationsByIndex: Array<{ paths: string[]; layerId: string | null }> = [];
+  /**
+   * Every `bom-ref` seen, mapped to the identity of the component it denotes.
+   *
+   * Populated for duplicates too. That is the whole reason it is a separate map rather than
+   * a field on the component: the duplicate is collapsed away, but the dependency graph may
+   * still refer to it by its own ref, and dropping those edges would lose real relationships
+   * on precisely the packages found in more than one place.
+   */
+  const hashByRef = new Map<string, string>();
+  /** Identity -> display label, for naming a dependant once the graph is reversed. */
+  const labelByHash = new Map<string, string>();
   let duplicatesCollapsed = 0;
   // Collected during the same walk and reduced once at the end, rather than a
   // second pass over the document.
@@ -498,6 +596,11 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
 
     const locations = readLocations(rawComponent.properties);
 
+    // Before the duplicate check, so a collapsed entry still contributes its ref.
+    const bomRef = asNonEmptyString(rawComponent["bom-ref"], 1024);
+    if (bomRef !== null) hashByRef.set(bomRef, identityHash);
+    labelByHash.set(identityHash, formatDependant(name, version));
+
     const existingIndex = indexByHash.get(identityHash);
     if (existingIndex !== undefined) {
       duplicatesCollapsed++;
@@ -521,6 +624,9 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
       paths: null,
       pathCount: null,
       layerId: null,
+      // Filled in below, once the whole component list exists to resolve refs against.
+      pulledInBy: null,
+      pulledInByCount: null,
     });
   }
 
@@ -549,6 +655,23 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
     parsed.paths = unique.slice(0, COMPONENT_LOCATION_PATH_CAP);
     parsed.pathCount = unique.length;
     parsed.layerId = acc.layerId;
+  }
+
+  /*
+    Dependants, resolved only now that every component has been seen.
+
+    It has to be a second pass: an edge can name a package that appears later in the
+    components array than the one it points at, so nothing can be resolved while the walk is
+    still in progress. Unlike locations there is no per-ecosystem exclusion here -- an edge
+    from apt to adduser is a real relationship and worth keeping, even though OS packages
+    carry far fewer of them.
+  */
+  const dependants = readDependants(root.dependencies, hashByRef, labelByHash);
+  for (const parsed of components) {
+    const list = dependants.get(parsed.identityHash);
+    if (list === undefined || list.length === 0) continue;
+    parsed.pulledInBy = list.slice(0, COMPONENT_DEPENDANT_CAP);
+    parsed.pulledInByCount = list.length;
   }
 
   return {

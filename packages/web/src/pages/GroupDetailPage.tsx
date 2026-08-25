@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router";
+import { ExportMenu } from "../components/ExportMenu.tsx";
 import { groupAdvisorySort, sortDirections } from "@sbom/shared";
 import type { VulnSeverity } from "@sbom/shared";
 import { vulnSeverities } from "@sbom/shared";
@@ -106,6 +107,7 @@ export function GroupDetailPage() {
       <PageHeader
         title={group.name}
         subtitle={group.description ?? undefined}
+        actions={<ExportMenu subject={group.name} kind="groups" id={group.id} />}
       />
 
       <div className="mb-4 grid gap-3 md:grid-cols-2">

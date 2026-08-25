@@ -24,12 +24,15 @@ export interface LocationRow {
   paths: string[] | null;
   path_count: number | string | null;
   layer_id: string | null;
+  pulled_in_by: string[] | null;
+  pulled_in_by_count: number | string | null;
 }
 
 export function toComponentLocation(row: LocationRow): ComponentLocation {
   // Postgres returns an empty array rather than NULL if one is ever written; both mean the
   // same thing to a reader, so they collapse to null here and stay one case downstream.
   const paths = row.paths && row.paths.length > 0 ? row.paths : null;
+  const pulledInBy = row.pulled_in_by && row.pulled_in_by.length > 0 ? row.pulled_in_by : null;
 
   return {
     paths,
@@ -40,5 +43,13 @@ export function toComponentLocation(row: LocationRow): ComponentLocation {
       paths,
       kind: row.kind ?? null,
     }),
+    /*
+      Same null-not-empty rule as paths, for the same reason. An empty list would read as
+      "nothing depends on this", which is a real and interesting claim -- it would mean the
+      package is a root of the dependency forest. A null means no edge was recorded at all,
+      which on an OS package is simply what Syft emits.
+    */
+    pulledInBy,
+    pulledInByCount: pulledInBy ? Number(row.pulled_in_by_count ?? pulledInBy.length) : null,
   };
 }

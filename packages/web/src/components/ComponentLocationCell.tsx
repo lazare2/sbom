@@ -32,6 +32,14 @@ import type { BadgeTone } from "./ui.tsx";
  *
  * None of them renders as blank, because a blank cell in a table of paths reads as "this
  * package is nowhere", which is a claim about the artifact rather than about the record.
+ *
+ * ## Dependants sit here too
+ *
+ * "Where is it" and "what pulled it in" are different questions, but they are read together
+ * and by the same person: the first says where to look, the second says what to change. They
+ * come from the same row and are rendered in the same cell so a reader never has to correlate
+ * two columns to act on one finding. See DependantsLine for why that half stays silent when
+ * nothing was recorded, which is the opposite of the rule the paths above follow.
  */
 
 const ORIGIN_TONES: Record<ComponentOrigin, BadgeTone> = {
@@ -61,6 +69,7 @@ export function OriginBadge({ origin }: { origin: ComponentOrigin }) {
 export function ComponentLocationCell({
   location,
   extracted = true,
+  dependantsExtracted = true,
   compact = false,
 }: {
   location: ComponentLocation;
@@ -70,9 +79,18 @@ export function ComponentLocationCell({
    * an administrator can press.
    */
   extracted?: boolean;
+  /**
+   * The same for dependants, and a separate flag rather than a reuse of the one above.
+   *
+   * They diverge on exactly the rows where it matters: a scan processed by the earlier,
+   * locations-only backfill has its paths but has never had its dependency graph read. One
+   * shared flag would either claim those dependants were checked when they were not, or
+   * re-report their locations as missing when they are right there.
+   */
+  dependantsExtracted?: boolean;
   compact?: boolean;
 }) {
-  const { paths, pathCount, origin } = location;
+  const { paths, pathCount, origin, pulledInBy, pulledInByCount } = location;
 
   return (
     <div className="space-y-1">
@@ -98,7 +116,68 @@ export function ComponentLocationCell({
       ) : (
         <p className="text-[11px] text-text-faint">{absentReason(origin, extracted)}</p>
       )}
+
+      <DependantsLine
+        pulledInBy={pulledInBy}
+        pulledInByCount={pulledInByCount}
+        extracted={dependantsExtracted}
+      />
     </div>
+  );
+}
+
+/**
+ * "Pulled in by fastify, avvio" — the actionable half of a finding.
+ *
+ * A finding against a package nobody installed is unactionable on its own: nothing names
+ * @fastify/error in any manifest, so a developer reading that row has nothing to change.
+ * Naming the packages that depend on it names the one to upgrade.
+ *
+ * ## Silence when there is nothing recorded, and why that is not the usual sin
+ *
+ * Everywhere else in this platform an absence is spelled out, because an unrendered absence
+ * reads as a negative. Here it is rendered as nothing at all, and the reason is that no claim
+ * is being suppressed: the column is null only when the SBOM carried no edge, never when it
+ * carried an empty one. The parser stores null and never an empty array, so "nothing depends
+ * on this" is a state that cannot reach here.
+ *
+ * The alternative was tried on paper and rejected. Syft reads dependency edges from a
+ * lockfile, so a container-image scan has none for its application packages at all —
+ * measured at 0 of 193 npm packages in node:20-alpine. A sentence explaining the absence
+ * would therefore appear on every row of such a build, which is not information, it is a
+ * wall of identical grey text that teaches people to skip the cell.
+ *
+ * The one absence worth a sentence is the actionable one: a build that has never had its
+ * dependency graph read, which an administrator can fix by pressing a button.
+ */
+function DependantsLine({
+  pulledInBy,
+  pulledInByCount,
+  extracted,
+}: {
+  pulledInBy: string[] | null;
+  pulledInByCount: number | null;
+  extracted: boolean;
+}) {
+  if (!pulledInBy || pulledInBy.length === 0) {
+    if (extracted) return null;
+    return (
+      <p className="text-[11px] text-text-faint">
+        Dependencies not extracted yet for this build.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-[11px] leading-snug text-text-muted">
+      <span className="text-text-faint">Pulled in by </span>
+      {pulledInBy.join(", ")}
+      {/* Same rule as the path list: a capped list has to say it is capped, or five names
+          read as the complete set and removing all five looks sufficient when it is not. */}
+      {pulledInByCount !== null && pulledInByCount > pulledInBy.length ? (
+        <span className="text-text-faint"> and {pulledInByCount - pulledInBy.length} more</span>
+      ) : null}
+    </p>
   );
 }
 

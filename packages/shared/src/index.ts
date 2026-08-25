@@ -16,3 +16,5 @@ export * from "./schemas/bulk-search.js";
 export * from "./schemas/vulnerability.js";
 export * from "./schemas/location.js";
 export * from "./schemas/malicious.js";
+export * from "./schemas/export.js";
+export * from "./schemas/vex.js";
