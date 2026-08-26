@@ -7,9 +7,17 @@ import {
   useComponentSearch,
   useComponentSuggestions,
   useComponentVersions,
+  useEnvironments,
 } from "../lib/queries.ts";
 import { formatNumber } from "../lib/format.ts";
-import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
+import {
+  readBool,
+  readEnum,
+  readNumber,
+  readString,
+  readStringList,
+  useUrlState,
+} from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { ComponentHitsTable } from "../components/ComponentHitsTable.tsx";
 import { BulkPackageSearch } from "./BulkPackageSearch.tsx";
@@ -50,6 +58,13 @@ const DEFAULTS = {
   scope: "current" as (typeof SCOPES)[number],
   match: "contains" as (typeof MATCHES)[number],
   includeInactive: false,
+  /*
+    Empty means every estate the account can reach, which is what the page opens on. That is
+    the one place on the platform where crossing environments is correct: "where does log4j
+    appear" is a question about the deployment, and answering it one estate at a time invites
+    someone to check production, find nothing, and stop.
+  */
+  environments: [] as string[],
   sortBy: componentSearchSort.defaultField,
   sortDir: componentSearchSort.defaultDirection,
   page: 1,
@@ -64,6 +79,7 @@ const urlSpec = {
     scope: readEnum(params, "scope", SCOPES, "current"),
     match: readEnum(params, "match", MATCHES, "contains"),
     includeInactive: readBool(params, "includeInactive"),
+    environments: readStringList(params, "environments"),
     sortBy: readEnum(params, "sortBy", SORT_FIELDS, componentSearchSort.defaultField),
     sortDir: readEnum(params, "sortDir", SORT_DIRECTIONS, componentSearchSort.defaultDirection),
     page: readNumber(params, "page", 1),
@@ -169,6 +185,8 @@ function SinglePackageSearch() {
       scope: state.scope,
       match: state.match,
       includeInactive: state.includeInactive || undefined,
+      // Omitted rather than sent empty: the API reads an absent selection as every estate.
+      environments: state.environments.length > 0 ? state.environments : undefined,
       sortBy: state.sortBy,
       sortDir: state.sortDir,
       page: state.page,
@@ -314,6 +332,11 @@ function SinglePackageSearch() {
             label="Include inactive applications"
           />
         </div>
+
+        <EnvironmentFilter
+          selected={state.environments}
+          onChange={(environments) => setState({ environments })}
+        />
 
         <p className="border-t border-border-base px-3 py-2 text-[11px] text-text-faint">
           {SCOPE_HINTS[state.scope]}{" "}
@@ -461,5 +484,78 @@ function SinglePackageSearch() {
         </Card>
       )}
     </>
+  );
+}
+
+/**
+ * Which estates this search covers.
+ *
+ * Rendered only where there is more than one. With a single environment the control would
+ * offer a choice that changes nothing, and an unticked box would read as excluding the only
+ * estate there is.
+ *
+ * "All" is the absence of a selection rather than every box ticked, and the difference is
+ * not cosmetic: a search saved as "all" keeps covering an estate created next month,
+ * whereas one that enumerated today's estates quietly stops being a whole-deployment
+ * search the moment somebody adds one.
+ */
+function EnvironmentFilter({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (environments: string[]) => void;
+}) {
+  const { data } = useEnvironments();
+  const environments = data?.environments ?? [];
+  if (environments.length < 2) return null;
+
+  const searchingAll = selected.length === 0;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border-base px-3 py-2">
+      <span className="text-[11px] font-medium text-text-muted">Environments</span>
+      <button
+        type="button"
+        aria-pressed={searchingAll}
+        onClick={() => onChange([])}
+        className={`rounded-md px-2 py-1 text-xs transition-colors ${
+          searchingAll
+            ? "bg-accent-subtle font-medium text-accent"
+            : "text-text-muted hover:bg-bg-subtle hover:text-text-base"
+        }`}
+      >
+        All
+      </button>
+      {environments.map((environment) => {
+        const on = selected.includes(environment.id);
+        return (
+          <button
+            key={environment.id}
+            type="button"
+            aria-pressed={on}
+            onClick={() =>
+              onChange(
+                on
+                  ? selected.filter((id) => id !== environment.id)
+                  : [...selected, environment.id],
+              )
+            }
+            className={`rounded-md px-2 py-1 text-xs transition-colors ${
+              on
+                ? "bg-accent-subtle font-medium text-accent"
+                : "text-text-muted hover:bg-bg-subtle hover:text-text-base"
+            }`}
+          >
+            {environment.name}
+          </button>
+        );
+      })}
+      <span className="text-[11px] text-text-faint">
+        {searchingAll
+          ? "Searching every environment you can see. Each result says which one it is in."
+          : `Searching ${selected.length} of ${environments.length}.`}
+      </span>
+    </div>
   );
 }

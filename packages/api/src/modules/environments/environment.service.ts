@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import type {
   Environment,
   EnvironmentAccess,
+  EnvironmentComparison,
   CreateEnvironmentRequest,
   UpdateEnvironmentRequest,
 } from "@sbom/shared";
@@ -74,6 +75,24 @@ interface EnvironmentRow {
   scan_count: number | string;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+interface ComparisonRow {
+  id: string;
+  name: string;
+  app_total: number | string;
+  app_active: number | string;
+  app_stale: number | string;
+  app_never_scanned: number | string;
+  scan_total: number | string;
+  scan_7d: number | string;
+  scan_latest_at: Date | string | null;
+  packages_in_use: number | string;
+  vuln_assessed: number | string;
+  vuln_critical: number | string;
+  vuln_high: number | string;
+  vuln_app_findings: number | string;
+  vuln_os_findings: number | string;
 }
 
 function toIso(value: Date | string): string {
@@ -334,5 +353,126 @@ export class EnvironmentService {
       sql`SELECT id FROM environment ORDER BY created_at ASC`,
     );
     return rowsOf(result).map((r) => r.id);
+  }
+
+  // -- comparison -----------------------------------------------------------
+
+  /**
+   * Every estate's figures side by side.
+   *
+   * The one screen that shows more than one environment at a time, and the reason it is
+   * safe to is that it never combines them: each row is a complete set of figures for one
+   * estate, there is no total, and the response carries no field that could become one.
+   *
+   * Correlated subqueries per environment rather than one grouped join. A join would
+   * multiply application rows by their scans and inflate every count, and the distinct
+   * package figure cannot be reached from a grouped join at all. There are between two and
+   * a handful of environments, so the shape that is obviously correct is also fast enough.
+   *
+   * `staleInterval` is passed in rather than resolved here so this agrees with the
+   * dashboard and the applications list about what stale means. Three definitions of it is
+   * how the overview and the comparison end up disagreeing about the same estate.
+   */
+  async comparison(
+    access: EnvironmentAccess,
+    staleInterval: SQL,
+    includeVulnerabilities: boolean,
+  ): Promise<EnvironmentComparison> {
+    const visible = access.all
+      ? sql`TRUE`
+      : sql`e.id = ANY(${sql.param(access.environmentIds)}::uuid[])`;
+
+    const result = await this.deps.db.execute<Row<ComparisonRow>>(sql`
+      SELECT
+        e.id, e.name,
+        (SELECT count(*) FROM application a
+          WHERE a.environment_id = e.id)::int AS app_total,
+        (SELECT count(*) FROM application a
+          WHERE a.environment_id = e.id AND a.status = 'active')::int AS app_active,
+        (SELECT count(*) FROM application a
+          WHERE a.environment_id = e.id
+            AND a.status = 'active'
+            AND a.last_scan_at IS NOT NULL
+            AND a.last_scan_at < now() - ${staleInterval})::int AS app_stale,
+        (SELECT count(*) FROM application a
+          WHERE a.environment_id = e.id AND a.latest_scan_id IS NULL)::int AS app_never_scanned,
+        (SELECT count(*) FROM scan s JOIN application a ON a.id = s.application_id
+          WHERE a.environment_id = e.id)::int AS scan_total,
+        (SELECT count(*) FROM scan s JOIN application a ON a.id = s.application_id
+          WHERE a.environment_id = e.id
+            AND s.created_at > now() - interval '7 days')::int AS scan_7d,
+        (SELECT max(s.created_at) FROM scan s JOIN application a ON a.id = s.application_id
+          WHERE a.environment_id = e.id) AS scan_latest_at,
+        /*
+          Packages in the current build of each application, not everything the estate has
+          ever shipped. The component table is a shared catalogue with no estate of its own,
+          so it is reached through the scans that reference it -- counting it directly would
+          print the same number under every environment.
+        */
+        (SELECT count(DISTINCT sc.component_id)
+           FROM scan_component sc
+           JOIN application a ON a.latest_scan_id = sc.scan_id
+          WHERE a.environment_id = e.id)::int AS packages_in_use,
+        /*
+          Vulnerability figures come from the frozen per-scan summary of each application's
+          current build, which is what the sweep writes and what every other panel reads.
+          Recomputing them here from raw findings would let this page disagree with the
+          dashboard about the same estate on the same day.
+        */
+        (SELECT count(*) FROM application a
+           JOIN scan_vuln_summary v ON v.scan_id = a.latest_scan_id
+          WHERE a.environment_id = e.id)::int AS vuln_assessed,
+        (SELECT coalesce(sum(v.app_critical + v.os_critical), 0) FROM application a
+           JOIN scan_vuln_summary v ON v.scan_id = a.latest_scan_id
+          WHERE a.environment_id = e.id)::int AS vuln_critical,
+        (SELECT coalesce(sum(v.app_high + v.os_high), 0) FROM application a
+           JOIN scan_vuln_summary v ON v.scan_id = a.latest_scan_id
+          WHERE a.environment_id = e.id)::int AS vuln_high,
+        (SELECT coalesce(sum(v.app_findings), 0) FROM application a
+           JOIN scan_vuln_summary v ON v.scan_id = a.latest_scan_id
+          WHERE a.environment_id = e.id)::int AS vuln_app_findings,
+        (SELECT coalesce(sum(v.os_findings), 0) FROM application a
+           JOIN scan_vuln_summary v ON v.scan_id = a.latest_scan_id
+          WHERE a.environment_id = e.id)::int AS vuln_os_findings
+      FROM environment e
+      WHERE ${visible}
+      ORDER BY e.created_at ASC
+    `);
+
+    return {
+      vulnerabilityScanningEnabled: includeVulnerabilities,
+      environments: rowsOf(result).map((r) => ({
+        id: r.id,
+        name: r.name,
+        applications: {
+          total: Number(r.app_total),
+          active: Number(r.app_active),
+          stale: Number(r.app_stale),
+          neverScanned: Number(r.app_never_scanned),
+        },
+        scans: {
+          total: Number(r.scan_total),
+          last7d: Number(r.scan_7d),
+          latestAt: r.scan_latest_at === null ? null : toIso(r.scan_latest_at),
+        },
+        packagesInUse: Number(r.packages_in_use),
+        /*
+          Null in two distinct situations that must not render as zero: scanning is switched
+          off platform-wide, or it is on and this estate has nothing assessed yet. A column
+          of zeroes beside production's real numbers would read as a clean test estate,
+          which is a stronger claim than the truth and the one nobody would question.
+        */
+        vulnerabilities:
+          includeVulnerabilities && Number(r.vuln_assessed) > 0
+            ? {
+                assessedApplications: Number(r.vuln_assessed),
+                critical: Number(r.vuln_critical),
+                high: Number(r.vuln_high),
+                appFindings: Number(r.vuln_app_findings),
+                baseImageFindings: Number(r.vuln_os_findings),
+              }
+            : null,
+      })),
+    };
   }
 }

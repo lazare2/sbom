@@ -14,6 +14,10 @@ import { groupRoutes } from "./modules/groups/groups.routes.js";
 import { attributeRoutes } from "./modules/attributes/attributes.routes.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { componentRoutes } from "./modules/components/components.routes.js";
+import {
+  environmentRoutes,
+  environmentAdminRoutes,
+} from "./modules/environments/environment.routes.js";
 import { exportRoutes } from "./modules/exports/export.routes.js";
 import { dashboardRoutes } from "./modules/dashboard/dashboard.routes.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
@@ -136,6 +140,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       // the read-only applications plugin.
       await api.register(manualUploadRoutes, { prefix: "/applications" });
       await api.register(groupRoutes, { prefix: "/groups" });
+      /*
+        The estates themselves. Readable by any signed-in user, because the header switcher
+        loads it on every page and a read-only account that cannot see its own environments
+        cannot navigate at all. It returns only what the caller was granted.
+      */
+      await api.register(environmentRoutes, { prefix: "/environments" });
       await api.register(scanRoutes, { prefix: "/scans" });
       await api.register(componentRoutes, { prefix: "/components" });
       /*
@@ -181,6 +191,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         },
         { prefix: "/admin/reports" },
       );
+      // Same arrangement, same reason: `environmentAdminRoutes` applies `requireAdmin` in
+      // its own scope rather than inheriting it from where it happens to be registered.
+      await api.register(environmentAdminRoutes, { prefix: "/admin/environments" });
 
       await api.register(
         async (scoped) => {

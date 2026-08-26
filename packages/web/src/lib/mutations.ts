@@ -13,7 +13,10 @@ import type {
   CreateIngestTokenResponse,
   ClassifySuppression,
   CreateSuppression,
+  CreateEnvironmentRequest,
   CreateUserRequest,
+  Environment,
+  UpdateEnvironmentRequest,
   DeleteScanResponse,
   AcknowledgeMaliciousRequest,
   MaliciousAckSummary,
@@ -191,6 +194,82 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: (vars: { id: string; body: UpdateUserRequest }) =>
       api.patch<{ user: UserSummary }>(`/admin/users/${vars.id}`, vars.body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+  });
+}
+
+// --- environments -----------------------------------------------------------
+
+/**
+ * Writing an estate invalidates everything, without exception.
+ *
+ * Creating one changes the switcher; renaming one changes what every page's header says;
+ * deleting one destroys the applications, builds and figures that half the cache is
+ * holding. There is no narrower invalidation that is safe, and a targeted one here would
+ * be a guess about which cached answers mentioned the estate.
+ */
+function invalidateEnvironments(qc: QueryClient): Promise<unknown> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["environments"] }),
+    qc.invalidateQueries({ queryKey: ["admin"] }),
+    qc.invalidateQueries({ queryKey: ["applications"] }),
+    qc.invalidateQueries({ queryKey: ["dashboard"] }),
+    qc.invalidateQueries({ queryKey: ["components"] }),
+    qc.invalidateQueries({ queryKey: ["groups"] }),
+  ]);
+}
+
+export function useCreateEnvironment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateEnvironmentRequest) =>
+      api.post<{ environment: Environment }>("/admin/environments", body),
+    onSuccess: () => {
+      void invalidateEnvironments(qc);
+    },
+  });
+}
+
+export function useUpdateEnvironment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; body: UpdateEnvironmentRequest }) =>
+      api.patch<{ environment: Environment }>(`/admin/environments/${vars.id}`, vars.body),
+    onSuccess: () => {
+      void invalidateEnvironments(qc);
+    },
+  });
+}
+
+/**
+ * The typed name travels in the body of a DELETE rather than as a query parameter.
+ *
+ * A confirmation in the URL is written to the access log of every proxy between here and
+ * the API, which turns "prove you meant it" into a string somebody can replay from a log
+ * file.
+ */
+export function useDeleteEnvironment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; confirmName: string }) =>
+      api.deleteWithBody<void>(`/admin/environments/${vars.id}`, {
+        confirmName: vars.confirmName,
+      }),
+    onSuccess: () => {
+      void invalidateEnvironments(qc);
+    },
+  });
+}
+
+export function useSetUserEnvironments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; environmentIds: string[] }) =>
+      api.put<{ environmentIds: string[] }>(`/admin/users/${vars.id}/environments`, {
+        environmentIds: vars.environmentIds,
+      }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["admin"] });
     },

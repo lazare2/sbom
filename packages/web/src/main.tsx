@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AuthProvider } from "./auth/AuthProvider.tsx";
 import { RequireAdmin, RequireAuth } from "./auth/RequireAuth.tsx";
 import { Layout } from "./components/Layout.tsx";
+import { EnvironmentProvider } from "./environments/EnvironmentProvider.tsx";
 import { EmptyState, Card } from "./components/ui.tsx";
 import { MaliciousPage } from "./pages/MaliciousPage.tsx";
 import { AnalyticsPage } from "./pages/AnalyticsPage.tsx";
@@ -27,6 +28,7 @@ import { AdminPendingPage } from "./pages/admin/AdminPendingPage.tsx";
 import { AdminConfigurationPage } from "./pages/admin/AdminConfigurationPage.tsx";
 import { AdminReportsPage } from "./pages/admin/AdminReportsPage.tsx";
 import { AdminTokensPage } from "./pages/admin/AdminTokensPage.tsx";
+import { AdminEnvironmentsPage } from "./pages/admin/AdminEnvironmentsPage.tsx";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage.tsx";
 import { AdminVulnerabilitiesPage } from "./pages/admin/AdminVulnerabilitiesPage.tsx";
 import { AdminMaliciousPage } from "./pages/admin/AdminMaliciousPage.tsx";
@@ -69,10 +71,18 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/login" element={<LoginPage />} />
 
             {/* Authenticated */}
+            {/*
+              Inside RequireAuth: the environment list is itself an authenticated read, and
+              an account with a temporary password is still held on the change-password
+              screen. Outside the Layout it wraps, so the header switcher and every page
+              below it read the same selection.
+            */}
             <Route
               element={
                 <RequireAuth>
-                  <Layout />
+                  <EnvironmentProvider>
+                    <Layout />
+                  </EnvironmentProvider>
                 </RequireAuth>
               }
             >
@@ -119,6 +129,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="pending" element={<AdminPendingPage />} />
                 <Route path="groups" element={<AdminGroupsPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
+                <Route path="environments" element={<AdminEnvironmentsPage />} />
                 <Route path="attributes" element={<AdminAttributesPage />} />
                 <Route path="tokens" element={<AdminTokensPage />} />
                 <Route path="reports" element={<AdminReportsPage />} />

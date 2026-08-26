@@ -7,6 +7,7 @@ const TABS = [
   { to: "/admin/pending", label: "Awaiting confirmation", badge: "pending" as const },
   { to: "/admin/groups", label: "Groups" },
   { to: "/admin/users", label: "Users" },
+  { to: "/admin/environments", label: "Environments" },
   { to: "/admin/attributes", label: "Attributes" },
   { to: "/admin/tokens", label: "CI tokens" },
   { to: "/admin/vulnerabilities", label: "Vulnerability scanning" },

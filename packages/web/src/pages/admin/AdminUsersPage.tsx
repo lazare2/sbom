@@ -8,15 +8,17 @@ import {
   useCreateUser,
   useDeleteUser,
   useResetUserPassword,
+  useSetUserEnvironments,
   useUpdateUser,
 } from "../../lib/mutations.ts";
-import { useUsers } from "../../lib/queries.ts";
+import { useEnvironments, useUserEnvironments, useUsers } from "../../lib/queries.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../../lib/useUrlState.ts";
 import {
   Badge,
   Button,
   Card,
   CardHeader,
+  Checkbox,
   ConfirmDeleteModal,
   EmptyState,
   ErrorBanner,
@@ -60,6 +62,7 @@ export function AdminUsersPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<UserSummary | null>(null);
+  const [environmentTarget, setEnvironmentTarget] = useState<UserSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserSummary | null>(null);
   /** Shown once, after a create or reset. Cleared when the modal closes. */
   const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
@@ -160,6 +163,8 @@ export function AdminUsersPage() {
                     <Th onSort={() => sort.toggle("isActive")} sorted={sort.stateOf("isActive")}>
                       Status
                     </Th>
+                    {/* Not sortable: the grants are per user and not part of the list query. */}
+                    <Th>Environments</Th>
                     <Th onSort={() => sort.toggle("lastLoginAt")} sorted={sort.stateOf("lastLoginAt")}>
                       Last sign-in
                     </Th>
@@ -210,6 +215,15 @@ export function AdminUsersPage() {
                           ) : (
                             <Badge tone="danger">Deactivated</Badge>
                           )}
+                        </Td>
+                        <Td>
+                          <EnvironmentAccessCell
+                            user={u}
+                            onEdit={() => {
+                              setActionError(null);
+                              setEnvironmentTarget(u);
+                            }}
+                          />
                         </Td>
                         <Td title={u.lastLoginAt ?? ""}>{formatRelative(u.lastLoginAt)}</Td>
                         <Td align="right" className="nums">
@@ -280,6 +294,11 @@ export function AdminUsersPage() {
         )}
       </Card>
 
+      <UserEnvironmentsModal
+        target={environmentTarget}
+        onClose={() => setEnvironmentTarget(null)}
+      />
+
       <CreateUserModal
         open={createOpen}
         onClose={() => {
@@ -347,12 +366,23 @@ function CreateUserModal({
   const [role, setRole] = useState<"admin" | "user">("user");
   const [password, setPassword] = useState("");
   const [useOwnPassword, setUseOwnPassword] = useState(false);
+  const environments = useEnvironments();
+  const allEnvironments = environments.data?.environments ?? [];
+  /*
+    Null means "leave it to the platform", which grants every environment that exists at the
+    moment of creation. Kept distinct from an array holding those same ids so the request
+    omits the field entirely unless the admin actually narrowed it -- the server default is
+    then the one behaviour, rather than something this form re-implements and can drift from.
+  */
+  const [environmentIds, setEnvironmentIds] = useState<string[] | null>(null);
+  const chosenEnvironments = environmentIds ?? allEnvironments.map((e) => e.id);
 
   function reset() {
     setEmail("");
     setRole("user");
     setPassword("");
     setUseOwnPassword(false);
+    setEnvironmentIds(null);
     createUser.reset();
   }
 
@@ -364,6 +394,7 @@ function CreateUserModal({
         role,
         mustChangePassword: true,
         ...(useOwnPassword && password ? { password } : {}),
+        ...(environmentIds === null ? {} : { environmentIds }),
       });
       onIssued({ email: result.user.email, password: result.temporaryPassword });
     } catch {
@@ -450,6 +481,40 @@ function CreateUserModal({
               ]}
             />
           </FormRow>
+
+          {/*
+            Hidden for administrators, who reach every environment by role. Offering a
+            checklist that the role overrides would be a control that does nothing, and the
+            reasonable reading of an unticked box would be that access was withheld.
+          */}
+          {role === "user" ? (
+            <FormRow
+              label="Environments"
+              hint="Which estates this account can see. All of them by default."
+            >
+              <div className="flex flex-col gap-1.5">
+                {allEnvironments.map((environment) => (
+                  <Checkbox
+                    key={environment.id}
+                    checked={chosenEnvironments.includes(environment.id)}
+                    onChange={(checked) =>
+                      setEnvironmentIds(
+                        checked
+                          ? [...chosenEnvironments, environment.id]
+                          : chosenEnvironments.filter((id) => id !== environment.id),
+                      )
+                    }
+                    label={environment.name}
+                  />
+                ))}
+                {chosenEnvironments.length === 0 ? (
+                  <span className="text-[11px] text-warn">
+                    With none ticked the account will be able to sign in and see nothing.
+                  </span>
+                ) : null}
+              </div>
+            </FormRow>
+          ) : null}
 
           <label className="flex cursor-pointer items-center gap-2 text-sm text-text-muted select-none">
             <input
@@ -561,6 +626,141 @@ function ResetPasswordModal({
           </p>
         </div>
       )}
+    </Modal>
+  );
+}
+
+/**
+ * What this account can reach, in the list.
+ *
+ * An administrator is shown as reaching everything rather than as a list of ticked boxes,
+ * because that is what the role means: an admin gains an environment created tomorrow,
+ * whereas a user granted every environment today does not. Rendering the two identically
+ * would hide a difference that only shows up weeks later, when a new estate is invisible to
+ * half the people who expected to see it.
+ *
+ * The grants themselves are not in the list payload and are deliberately not fetched per
+ * row — twenty-five rows would mean twenty-five requests to render a column. They are read
+ * when the editor opens.
+ */
+function EnvironmentAccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void }) {
+  if (user.role === "admin") {
+    return (
+      <span
+        className="text-xs text-text-muted"
+        title="Administrators reach every environment, including ones created later."
+      >
+        All environments
+      </span>
+    );
+  }
+  return (
+    <Button size="sm" variant="ghost" onClick={onEdit}>
+      Choose…
+    </Button>
+  );
+}
+
+/**
+ * The per-user environment checklist.
+ *
+ * Saves the complete set rather than a delta, matching the API. Two administrators editing
+ * the same account at once would otherwise each apply their own change to a set the other
+ * had already altered, and whichever saved second would silently restore what the first
+ * removed.
+ *
+ * Granting nothing is permitted and is a real state — an account can exist before anyone
+ * has decided what it should reach — but it is called out, because a user in that state is
+ * refused every page on the platform and reports it as the platform being broken.
+ */
+function UserEnvironmentsModal({
+  target,
+  onClose,
+}: {
+  target: UserSummary | null;
+  onClose: () => void;
+}) {
+  const environments = useEnvironments();
+  const granted = useUserEnvironments(target?.id ?? null);
+  const save = useSetUserEnvironments();
+  const [selected, setSelected] = useState<string[] | null>(null);
+
+  // Server state is the starting point; local state only exists once something is ticked.
+  const current = selected ?? granted.data?.environmentIds ?? [];
+  const all = environments.data?.environments ?? [];
+  const dirty =
+    granted.data !== undefined &&
+    selected !== null &&
+    (selected.length !== granted.data.environmentIds.length ||
+      selected.some((id) => !granted.data.environmentIds.includes(id)));
+
+  function toggle(id: string, checked: boolean) {
+    setSelected(checked ? [...current, id] : current.filter((e) => e !== id));
+  }
+
+  function close() {
+    setSelected(null);
+    save.reset();
+    onClose();
+  }
+
+  return (
+    <Modal
+      open={target !== null}
+      onClose={close}
+      title={target ? `Environments for ${target.email}` : "Environments"}
+      footer={
+        <>
+          <Button onClick={close} disabled={save.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!dirty || save.isPending}
+            onClick={() => {
+              if (!target || selected === null) return;
+              save.mutate({ id: target.id, environmentIds: selected }, { onSuccess: close });
+            }}
+          >
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        <FormError error={save.error} />
+
+        {granted.isLoading || environments.isLoading ? (
+          <LoadingBlock label="Loading access" />
+        ) : (
+          <>
+            <div className="flex flex-col gap-2">
+              {all.map((environment) => (
+                <Checkbox
+                  key={environment.id}
+                  checked={current.includes(environment.id)}
+                  onChange={(checked) => toggle(environment.id, checked)}
+                  label={environment.name}
+                />
+              ))}
+            </div>
+
+            {current.length === 0 ? (
+              <div className="rounded-md border border-warn/40 bg-warn-subtle p-2.5 text-[11px] text-warn">
+                With no environments, this account can sign in and see nothing — every page
+                will report that it has no access. That is a valid state, but it is rarely the
+                intended one.
+              </div>
+            ) : null}
+
+            <p className="text-[11px] text-text-faint">
+              Applies to read-only accounts. Administrators reach every environment regardless
+              of what is ticked here, and these choices take effect if the account is later
+              made read-only.
+            </p>
+          </>
+        )}
+      </div>
     </Modal>
   );
 }

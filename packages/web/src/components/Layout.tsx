@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
+import { EnvironmentSwitcher } from "../environments/EnvironmentSwitcher.tsx";
 import { useMaliciousStatus, useVulnStatus } from "../lib/queries.ts";
 import { Badge, Button } from "./ui.tsx";
 
@@ -74,6 +75,11 @@ export function Layout() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
+            {/*
+              Beside the account rather than in the navigation, because it is not a place to
+              go -- it changes what every other item in the navigation means.
+            */}
+            <EnvironmentSwitcher />
             {user ? (
               <>
                 <span className="hidden items-center gap-2 sm:flex">
