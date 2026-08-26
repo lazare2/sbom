@@ -9,6 +9,7 @@ import {
   type ReportSnapshot,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import type { BlobStore } from "../../services/blob-store/index.js";
 import { ConflictError, isPgError, NotFoundError, PG_UNIQUE_VIOLATION } from "../../lib/errors.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
@@ -37,6 +38,8 @@ import type { SnapshotService } from "./snapshot.service.js";
  */
 
 export interface GenerateOptions {
+  /** The estate this report describes. One report per estate per month. */
+  scope: EnvironmentScope;
   kind: ReportKind;
   /** Injected so the scheduler and the tests can both decide what "now" means. */
   now?: Date;
@@ -124,6 +127,7 @@ export class ReportService {
     const delta = baseline ? computeDelta(baseline.snapshot, snapshot, previous?.snapshot) : null;
 
     const inserted = await this.insertRun({
+      scope: options.scope,
       kind: options.kind,
       period,
       timeZone,
@@ -397,6 +401,8 @@ export class ReportService {
    * that window gets hit, which is the duplicate send this was built to prevent.
    */
   private async insertRun(input: {
+    /* One report per estate per month: the partial unique index carries the estate too. */
+    scope: EnvironmentScope;
     kind: ReportKind;
     period: ReportPeriod;
     timeZone: string;
@@ -407,10 +413,12 @@ export class ReportService {
     try {
       const rows = await this.deps.db.execute<Row<StoredRun>>(sql`
         INSERT INTO report_run (
+          environment_id,
           kind, period_start, period_end, period_label, time_zone,
           generated_by_user_id, generated_by_email,
           baseline_run_id, vuln_db_built_at, detail_level, snapshot
         ) VALUES (
+          ${input.scope.id}::uuid,
           ${input.kind},
           ${input.period.start.toISOString()}::timestamptz,
           ${input.period.end.toISOString()}::timestamptz,

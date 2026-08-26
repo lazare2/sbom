@@ -8,6 +8,7 @@ import type {
   ScanSource,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import {
   application,
   applicationAlias,
@@ -58,6 +59,8 @@ export interface IngestInput {
   fields: IngestScanFields;
   rawSbom: Buffer;
   tokenName: string;
+  /** Decided by the route from the token's binding and the upload's environment field. */
+  scope: EnvironmentScope;
 }
 
 /** A signed-in user uploading an SBOM for an application they picked in the UI. */
@@ -85,7 +88,17 @@ interface ResolvedApplication {
  * user navigated to it.
  */
 type IngestTarget =
-  | { kind: "app_name"; appName: string }
+  /*
+    By name, which is how a pipeline uploads. The estate has to travel with the name because
+    the name alone is no longer unique -- `payments-api` exists in every environment that
+    deploys it, and the whole point is that those are different applications.
+  */
+  | { kind: "app_name"; appName: string; scope: EnvironmentScope }
+  /*
+    By id, which is how a person uploads from an application's own page. No scope: the
+    application is already in exactly one environment, and accepting one here would let a
+    caller assert an estate that disagrees with the record.
+  */
   | { kind: "application_id"; applicationId: string };
 
 /** The CI/CD-shaped metadata columns, normalised away from the two form shapes. */
@@ -140,11 +153,11 @@ export class IngestionService {
    * Thin wrapper over `store()`; the interesting behaviour is documented there.
    */
   async ingest(input: IngestInput): Promise<IngestScanResponse> {
-    const { fields, rawSbom, tokenName } = input;
+    const { fields, rawSbom, tokenName, scope } = input;
 
     const stored = await this.store({
       rawSbom,
-      target: { kind: "app_name", appName: fields.app_name },
+      target: { kind: "app_name", appName: fields.app_name, scope },
       metadata: {
         commitSha: fields.commit_sha ?? null,
         buildNumber: fields.build_number ?? null,
@@ -439,7 +452,7 @@ export class IngestionService {
    */
   private async resolveTarget(tx: Database, target: IngestTarget): Promise<ResolvedApplication> {
     if (target.kind === "app_name") {
-      return this.resolveApplication(tx, target.appName);
+      return this.resolveApplication(tx, target.appName, target.scope);
     }
 
     const [row] = await tx
@@ -465,14 +478,17 @@ export class IngestionService {
   private async resolveApplication(
     tx: Database,
     appName: string,
+    scope: EnvironmentScope,
   ): Promise<ResolvedApplication> {
-    const byName = await this.findByName(tx, appName);
+    const byName = await this.findByName(tx, appName, scope);
     if (byName) return { app: byName, created: false, redirectedFrom: null };
 
     const [alias] = await tx
       .select({ applicationId: applicationAlias.applicationId })
       .from(applicationAlias)
-      .where(sql`lower(${applicationAlias.aliasName}) = lower(${appName})`)
+      .where(
+        sql`lower(${applicationAlias.aliasName}) = lower(${appName}) AND ${applicationAlias.environmentId} = ${scope.id}::uuid`,
+      )
       .limit(1);
 
     if (alias) {
@@ -510,22 +526,28 @@ export class IngestionService {
      */
     const [created] = await tx
       .insert(application)
-      .values({ name: appName, status: "pending_confirmation" })
+      .values({ environmentId: scope.id, name: appName, status: "pending_confirmation" })
       .onConflictDoNothing()
       .returning();
     if (created) return { app: created, created: true, redirectedFrom: null };
 
-    const existing = await this.findByName(tx, appName);
+    const existing = await this.findByName(tx, appName, scope);
     if (existing) return { app: existing, created: false, redirectedFrom: null };
 
     throw new Error(`could not resolve or create application "${appName}"`);
   }
 
-  private async findByName(tx: Database, name: string): Promise<ApplicationRow | undefined> {
+  private async findByName(
+    tx: Database,
+    name: string,
+    scope: EnvironmentScope,
+  ): Promise<ApplicationRow | undefined> {
     const [row] = await tx
       .select()
       .from(application)
-      .where(sql`lower(${application.name}) = lower(${name})`)
+      .where(
+        sql`lower(${application.name}) = lower(${name}) AND ${application.environmentId} = ${scope.id}::uuid`,
+      )
       .limit(1);
     return row;
   }

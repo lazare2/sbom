@@ -6,6 +6,7 @@ import type {
   UpdateGroupRequest,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import { applicationGroup, applicationGroupMember } from "../../db/schema.js";
 import {
   BadRequestError,
@@ -35,7 +36,11 @@ export class GroupsAdminService {
     private readonly deps: { db: Database; audit: AuditService; groups: GroupsService },
   ) {}
 
-  async create(input: CreateGroupRequest, actor: Actor): Promise<ApplicationGroupDetail> {
+  async create(
+    input: CreateGroupRequest,
+    actor: Actor,
+    scope: EnvironmentScope,
+  ): Promise<ApplicationGroupDetail> {
     const applicationIds = input.applicationIds ?? [];
     // Verified before the insert so a bad id fails the whole request rather than leaving a
     // created group with silently missing members.
@@ -46,7 +51,11 @@ export class GroupsAdminService {
       try {
         [group] = await tx
           .insert(applicationGroup)
-          .values({ name: input.name, description: input.description ?? null })
+          .values({
+            environmentId: scope.id,
+            name: input.name,
+            description: input.description ?? null,
+          })
           .returning();
       } catch (err) {
         if (isPgError(err, PG_UNIQUE_VIOLATION)) {

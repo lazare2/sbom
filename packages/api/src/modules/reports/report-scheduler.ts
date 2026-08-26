@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
+import type { EnvironmentScope, EnvironmentService } from "../environments/environment.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { monthlyReportDue, previousMonthPeriod } from "./period.js";
 import type { ReportService } from "./report.service.js";
@@ -41,6 +42,7 @@ export class ReportScheduler {
     private readonly deps: {
       settings: SettingsService;
       reports: ReportService;
+      environments: EnvironmentService;
       logger: FastifyBaseLogger;
     },
   ) {}
@@ -80,11 +82,38 @@ export class ReportScheduler {
   }
 
   private async run(now: Date): Promise<void> {
-    const { settings, reports, logger } = this.deps;
+    const { settings, environments, logger } = this.deps;
     const config = await settings.getReportSettings();
 
     if (!config.enabled) return;
     if (!monthlyReportDue(now, config.timeZone, config.sendHour)) return;
+
+    /*
+      One report per estate, not one for the deployment.
+
+      A blended report would state a component count and a vulnerability total describing
+      neither environment -- and it would do it in the one artifact that goes to management,
+      where nobody can check it against the UI.
+
+      Each estate is attempted independently and a failure in one does not stop the others:
+      this runs on a timer with nothing to catch it, and a test environment with no builds
+      must not be able to stop production's report going out.
+    */
+    for (const scope of await environments.scopesFor({ all: true, environmentIds: [] })) {
+      try {
+        await this.runForEnvironment(now, config, scope);
+      } catch (err) {
+        logger.warn({ err, environment: scope.name }, "monthly report failed for environment");
+      }
+    }
+  }
+
+  private async runForEnvironment(
+    now: Date,
+    config: Awaited<ReturnType<SettingsService["getReportSettings"]>>,
+    scope: EnvironmentScope,
+  ): Promise<void> {
+    const { settings, reports, logger } = this.deps;
 
     /*
       Generation is idempotent by the unique index: the second call in a month returns the
@@ -92,10 +121,18 @@ export class ReportScheduler {
       heartbeat for the rest of the month without special-casing "have I already run".
     */
     const period = previousMonthPeriod(now, config.timeZone);
-    const result = await reports.generate({ kind: "monthly", now, timeZone: config.timeZone });
+    const result = await reports.generate({
+      scope,
+      kind: "monthly",
+      now,
+      timeZone: config.timeZone,
+    });
 
     if (!result.alreadyExisted) {
-      logger.info({ period: period.label, reportId: result.run.id }, "monthly report generated");
+      logger.info(
+        { period: period.label, reportId: result.run.id, environment: scope.name },
+        "monthly report generated",
+      );
     }
 
     // Already delivered, so there is nothing left to do this month. Checked after generation

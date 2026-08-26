@@ -1,3 +1,4 @@
+import { requireScope } from "../environments/scope.js";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -268,7 +269,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/suppressions", async (request, reply) => {
     const body = parseOrThrow(createSuppressionSchema, request.body);
     const actor = actorOf(request);
-    const created = await vulnerabilities.createSuppression(body, actor);
+    const created = await vulnerabilities.createSuppression(body, actor, await requireScope(request));
 
     await audit.record({
       actor,

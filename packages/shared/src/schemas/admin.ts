@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { paginationQuerySchema } from "./common.js";
+import { paginationQuerySchema, uuidSchema } from "./common.js";
 import { defineSortTable } from "./sort.js";
 
 // --- audit trail ------------------------------------------------------------
@@ -47,6 +47,20 @@ export const createIngestTokenRequestSchema = z.object({
     .min(1)
     .max(64)
     .regex(/^[a-z0-9][a-z0-9._-]*$/i, "letters, digits, dot, dash and underscore only"),
+  /**
+   * Which estate this token may upload to. Omitted means the environment the administrator
+   * is currently in, which is what makes the common case a one-field form.
+   */
+  environmentId: uuidSchema.optional(),
+  /**
+   * Opt in to a token with no estate at all: it may upload anywhere, and every upload must
+   * then name its environment.
+   *
+   * A separate flag rather than `environmentId: null`, because the two states must not be
+   * one field where forgetting to send it produces the broader of them. Asking for
+   * unrestricted reach should look like asking for it.
+   */
+  unrestricted: z.boolean().optional(),
 });
 export type CreateIngestTokenRequest = z.infer<typeof createIngestTokenRequestSchema>;
 

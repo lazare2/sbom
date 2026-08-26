@@ -25,6 +25,7 @@ import { MaliciousMatchService } from "./modules/malicious/malicious-match.servi
 import { MaliciousAlertService } from "./modules/malicious/malicious-alert.service.js";
 import { MaliciousWorker } from "./modules/malicious/malicious-worker.js";
 import { GroupsService } from "./modules/groups/groups.service.js";
+import { EnvironmentService } from "./modules/environments/environment.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
 import { SbomBackfillService } from "./modules/ingestion/sbom-backfill.service.js";
@@ -65,6 +66,11 @@ export interface AppContext {
   applications: ApplicationsService;
   /** Reads over named sets of applications. Counts distinct advisories, not summed findings. */
   groups: GroupsService;
+  /*
+   * Constructed before anything that reads the estate: every one of those services
+   * takes an EnvironmentScope, and a scope can only be produced here.
+   */
+  environments: EnvironmentService;
   scans: ScansService;
   components: ComponentsService;
   bulkSearch: BulkSearchService;
@@ -166,6 +172,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   // disagree about which applications are stale.
   const settings = new SettingsService({ db, config });
   const applications = new ApplicationsService({ db, config, settings });
+  const environments = new EnvironmentService({ db });
   const groups = new GroupsService({ db, settings });
   const scans = new ScansService({ db, blobStore });
   const components = new ComponentsService({ db });
@@ -184,7 +191,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const snapshots = new SnapshotService({ db });
   const mailer = new Mailer({ logger });
   const reports = new ReportService({ db, blobStore, snapshots, settings, mailer, logger });
-  const reportScheduler = new ReportScheduler({ settings, reports, logger });
+  const reportScheduler = new ReportScheduler({ settings, reports, environments, logger });
 
   // Vulnerability scanning. The scanner is a port so the wiring tests can supply a
   // fake and never spawn grype.
@@ -280,6 +287,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     sbomBackfill,
     applications,
     groups,
+    environments,
     scans,
     components,
     bulkSearch,

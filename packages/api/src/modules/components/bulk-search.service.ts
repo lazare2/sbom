@@ -11,6 +11,7 @@ import type {
 } from "@sbom/shared";
 import { BULK_MATCH_CAP_PER_ENTRY } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import { sha256Hex } from "../../lib/crypto.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
 import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
@@ -149,6 +150,7 @@ export class BulkSearchService {
     input: string;
     query: BulkSearchQuery;
     userId: string | null;
+    scope: EnvironmentScope;
   }): Promise<BulkSearchResult> {
     const { entries, summary } = parseBulkInput(args.input);
 
@@ -156,6 +158,7 @@ export class BulkSearchService {
       rawInput: args.input,
       entries,
       userId: args.userId,
+      scope: args.scope,
     });
 
     return this.run({ queryId, entries, parse: summary, query: args.query });
@@ -231,15 +234,21 @@ export class BulkSearchService {
     rawInput: string;
     entries: readonly BulkEntry[];
     userId: string | null;
+    scope: EnvironmentScope;
   }): Promise<string> {
     const fingerprint = args.entries.map(matchKeyOf).sort().join("\n");
     const inputHash = sha256Hex(Buffer.from(fingerprint, "utf8"));
 
     const rows = await this.deps.db.execute<Row<{ id: string }>>(sql`
-      INSERT INTO package_query (input_hash, raw_input, entry_count, created_by_user_id)
-      VALUES (${inputHash}, ${args.rawInput}, ${args.entries.length},
+      INSERT INTO package_query (environment_id, input_hash, raw_input, entry_count, created_by_user_id)
+      VALUES (${args.scope.id}::uuid, ${inputHash}, ${args.rawInput}, ${args.entries.length},
               ${args.userId}::uuid)
-      ON CONFLICT (input_hash) DO UPDATE
+      /*
+        The conflict target carries the estate, matching the unique index. Without it the
+        same package list saved in two environments would collide onto one row, and the
+        second person to run it would reopen the first one's results under their own link.
+      */
+      ON CONFLICT (environment_id, input_hash) DO UPDATE
         /*
          * Only the timestamp. raw_input is deliberately NOT overwritten: two
          * texts that parse to the same entries collide here, so updating it would

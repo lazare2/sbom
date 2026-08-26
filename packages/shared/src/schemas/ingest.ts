@@ -17,6 +17,20 @@ const optionalFormString = (max: number) =>
 
 export const ingestScanFieldsSchema = z.object({
   app_name: applicationNameSchema,
+  /**
+   * Which estate this build belongs to, by name.
+   *
+   * Optional, and what happens when it is absent depends on the token: one bound to an
+   * environment uses its own, which is what keeps every pipeline written before
+   * environments existed working unchanged. An unbound token has no such default and the
+   * upload is refused -- guessing whether an unlabelled build is production or test is not
+   * a mistake that can be found later.
+   *
+   * Supplying it with a bound token is allowed and checked. A mismatch is rejected rather
+   * than resolved in the token's favour, because a pipeline that names `production` and is
+   * quietly written to `test` reports success while putting the build in the wrong estate.
+   */
+  environment: optionalFormString(60),
   commit_sha: optionalFormString(255),
   build_number: optionalFormString(255),
   pipeline_id: optionalFormString(255),

@@ -134,6 +134,80 @@ export const session = pgTable(
  */
 
 // ---------------------------------------------------------------------------
+// Environments
+// ---------------------------------------------------------------------------
+
+/**
+ * An isolated estate. Everything an application, a build or a finding says about
+ * the software is scoped to exactly one of these, and nothing is ever counted
+ * across two.
+ *
+ * The motivating case: the same service exists in `test` and in `production` as
+ * two unrelated applications, because the test copy carries changes that have not
+ * shipped yet. Blending their component counts, their package usage or their
+ * vulnerability totals produces a number that describes neither estate.
+ *
+ * Deliberately NOT a tenant boundary in the SaaS sense. Users, the vulnerability
+ * database, the malicious-package feed and the attribute definitions are shared,
+ * because they describe either the people using the platform or the world outside
+ * it, and neither is a property of one estate. What is scoped is everything the
+ * platform observed: applications, their builds, the groups that organise them,
+ * the suppressions applied to their findings, and the reports about them.
+ *
+ * An application never moves between environments. That is what makes the
+ * denormalised environment_id on child rows safe to rely on: it cannot go stale,
+ * because nothing can change it.
+ */
+export const environment = pgTable(
+  "environment",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /**
+     * Also the ingest identifier. A pipeline names its environment in the upload,
+     * so this string appears in CI configuration -- which is why renaming one is
+     * warned about rather than treated as cosmetic.
+     */
+    name: text("name").notNull(),
+    /** Free text shown on the environment's admin row. What this estate is for. */
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Case-insensitive for the same reason application names are: ingest matches on
+    // this string, and Production and production must not be two estates.
+    uniqueIndex("environment_name_lower_uniq").on(sql`lower(${t.name})`),
+  ],
+);
+
+/**
+ * Which environments a non-admin user may see.
+ *
+ * Administrators are not listed here and are not consulted against it -- they see
+ * every environment by definition, so a row per admin per environment would be a
+ * second source of truth that could disagree with the role.
+ *
+ * A user with no rows sees nothing. That is a real state rather than a broken one:
+ * an account can be created before anyone decides what it should reach.
+ */
+export const userEnvironment = pgTable(
+  "user_environment",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environment.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "user_environment_pkey", columns: [t.userId, t.environmentId] }),
+    index("user_environment_env_idx").on(t.environmentId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Applications
 // ---------------------------------------------------------------------------
 
@@ -141,6 +215,9 @@ export const application = pgTable(
   "application",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environment.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     status: text("status").$type<ApplicationStatus>().notNull().default("active"),
     /**
@@ -165,7 +242,8 @@ export const application = pgTable(
   (t) => [
     // Ingest matches `app_name` case-insensitively, so uniqueness must be too:
     // `my-service` and `My-Service` are one application, not two.
-    uniqueIndex("application_name_lower_uniq").on(sql`lower(${t.name})`),
+    uniqueIndex("application_name_lower_uniq").on(t.environmentId, sql`lower(${t.name})`),
+    index("application_environment_idx").on(t.environmentId),
     index("application_status_idx").on(t.status),
     index("application_last_scan_at_idx").on(t.lastScanAt),
     /**
@@ -191,6 +269,9 @@ export const applicationAlias = pgTable(
   "application_alias",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environment.id, { onDelete: "cascade" }),
     aliasName: text("alias_name").notNull(),
     applicationId: uuid("application_id")
       .notNull()
@@ -199,7 +280,7 @@ export const applicationAlias = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("application_alias_name_lower_uniq").on(sql`lower(${t.aliasName})`),
+    uniqueIndex("application_alias_name_lower_uniq").on(t.environmentId, sql`lower(${t.aliasName})`),
     index("application_alias_app_idx").on(t.applicationId),
   ],
 );
@@ -229,6 +310,9 @@ export const applicationGroup = pgTable(
   "application_group",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environment.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     /** Free text shown on the group's page. What this group is for, in the owner's words. */
     description: text("description"),
@@ -239,7 +323,8 @@ export const applicationGroup = pgTable(
     // Case-insensitive, matching how application names are treated: "Public Facing" and
     // "public facing" are one group, and letting both exist would split its membership in
     // two while looking like a single group in every list.
-    uniqueIndex("application_group_name_lower_uniq").on(sql`lower(${t.name})`),
+    uniqueIndex("application_group_name_lower_uniq").on(t.environmentId, sql`lower(${t.name})`),
+    index("application_group_environment_idx").on(t.environmentId),
   ],
 );
 
@@ -712,6 +797,9 @@ export const packageQuery = pgTable(
   "package_query",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environment.id, { onDelete: "cascade" }),
     /**
      * SHA-256 of the normalised, deduplicated entry list.
      *
@@ -736,7 +824,7 @@ export const packageQuery = pgTable(
   (t) => [
     // Must be UNIQUE: the submit path upserts on this to make resubmission
     // idempotent.
-    uniqueIndex("package_query_input_hash_uniq").on(t.inputHash),
+    uniqueIndex("package_query_input_hash_uniq").on(t.environmentId, t.inputHash),
     index("package_query_last_accessed_idx").on(t.lastAccessedAt),
   ],
 );
@@ -761,6 +849,15 @@ export const ingestToken = pgTable(
   "ingest_token",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /**
+     * The estate this token may write to. NULL is the super token: it can write to
+     * any environment, and therefore has to name one on every upload -- an omitted
+     * name is refused rather than defaulted, because guessing which estate a
+     * production build belongs to is not a recoverable mistake.
+     */
+    environmentId: uuid("environment_id").references(() => environment.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     tokenHash: text("token_hash").notNull(),
     /** Last 4 characters of the plaintext, so the UI can tell tokens apart. */
@@ -797,6 +894,16 @@ export const auditLog = pgTable(
   "audit_log",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /**
+     * Which estate the action affected. NULL for platform-wide actions (user
+     * management, the vulnerability database) and for actions against an
+     * environment that has since been deleted -- set null rather than cascade,
+     * because a trail that erases itself along with its subject cannot answer the
+     * question it exists for.
+     */
+    environmentId: uuid("environment_id").references(() => environment.id, {
+      onDelete: "set null",
+    }),
     actorUserId: uuid("actor_user_id").references(() => user.id, { onDelete: "set null" }),
     actorEmail: text("actor_email"),
     /** e.g. `application.merge_always`, `user.deactivate`, `application.update`. */
@@ -1004,6 +1111,9 @@ export const vulnerabilitySuppression = pgTable(
   "vulnerability_suppression",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environment.id, { onDelete: "cascade" }),
     vulnerabilityId: text("vulnerability_id").notNull(),
     componentId: bigint("component_id", { mode: "number" }).references(() => component.id, {
       onDelete: "cascade",
@@ -1037,6 +1147,7 @@ export const vulnerabilitySuppression = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("vulnerability_suppression_env_idx").on(t.environmentId),
     index("vulnerability_suppression_vuln_idx").on(t.vulnerabilityId),
     index("vulnerability_suppression_component_idx").on(t.componentId),
     index("vulnerability_suppression_application_idx").on(t.applicationId),
@@ -1090,6 +1201,9 @@ export const reportRun = pgTable(
   "report_run",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environment.id, { onDelete: "cascade" }),
     /**
      * `monthly` is the scheduled series; `adhoc` is the button.
      *
@@ -1154,7 +1268,7 @@ export const reportRun = pgTable(
       twice in a month is a reasonable thing to do.
     */
     uniqueIndex("report_run_monthly_period_key")
-      .on(t.kind, t.periodStart)
+      .on(t.environmentId, t.kind, t.periodStart)
       .where(sql`kind = 'monthly'`),
     index("report_run_generated_at_idx").on(t.generatedAt),
   ],

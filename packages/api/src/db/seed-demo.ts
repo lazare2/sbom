@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getConfig } from "../config.js";
 import { IngestionService } from "../modules/ingestion/ingestion.service.js";
+import { EnvironmentService } from "../modules/environments/environment.service.js";
 import { createBlobStore } from "../services/blob-store/index.js";
 import { closeDb, getDb } from "./client.js";
 
@@ -435,6 +436,15 @@ async function main(): Promise<void> {
     warn: (obj: unknown, msg?: string) => console.warn("[warn]", msg ?? "", obj),
   };
   const ingestion = new IngestionService({ db, blobStore, logger });
+  /*
+    Seed data lands in the default environment -- the oldest, which on any database
+    that has run the environments migration is Production. A seed that created its own
+    estate would leave a demo environment behind on a real deployment.
+  */
+  const seedScope = await new EnvironmentService({ db }).requireDefault({
+    all: true,
+    environmentIds: [],
+  });
 
   console.log("[seed:demo] generating demo applications and scan history...");
 
@@ -473,6 +483,7 @@ async function main(): Promise<void> {
       });
 
       const result = await ingestion.ingest({
+        scope: seedScope,
         fields: {
           app_name: app.name,
           commit_sha: randomSha(),

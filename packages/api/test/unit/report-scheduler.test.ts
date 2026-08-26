@@ -1,3 +1,4 @@
+import type { EnvironmentService } from "../../src/modules/environments/environment.service.js";
 import { describe, expect, it, vi } from "vitest";
 import type { ReportSettings } from "@sbom/shared";
 import { ReportScheduler } from "../../src/modules/reports/report-scheduler.js";
@@ -31,8 +32,20 @@ function settingsOf(over: Partial<ReportSettings> = {}): ReportSettings {
   };
 }
 
-function harness(over: { settings?: Partial<ReportSettings>; sentAt?: string | null } = {}) {
+function harness(
+  over: {
+    settings?: Partial<ReportSettings>;
+    sentAt?: string | null;
+    /*
+      How many estates exist. Reports are per-environment, so the scheduler loops -- and the
+      count is an axis of this harness because "one report per estate" and "one report" are
+      indistinguishable until there is more than one.
+    */
+    environments?: Array<{ id: string; name: string }>;
+  } = {},
+) {
   const config = settingsOf(over.settings);
+  const environmentList = over.environments ?? [{ id: "env-1", name: "Production" }];
 
   const generate = vi.fn(async () => ({
     run: { id: "run-1", sentAt: over.sentAt ?? null },
@@ -48,13 +61,19 @@ function harness(over: { settings?: Partial<ReportSettings>; sentAt?: string | n
 
   const logger = { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() };
 
+  const environments = {
+    scopesFor: async () =>
+      environmentList.map((e) => ({ ...e, __environmentScope: true as const })),
+  } as unknown as EnvironmentService;
+
   const scheduler = new ReportScheduler({
     settings,
     reports: { generate, deliver } as unknown as ReportService,
+    environments,
     logger: logger as never,
   });
 
-  return { scheduler, generate, deliver, logger };
+  return { scheduler, generate, deliver, environmentList, logger };
 }
 
 // 09:00 local on Monday 3 August 2026, the first working day of that month.
@@ -143,6 +162,7 @@ describe("monthly report scheduler", () => {
         },
       } as unknown as SettingsService,
       reports: {} as unknown as ReportService,
+      environments: {} as unknown as EnvironmentService,
       logger: logger as never,
     });
 
@@ -150,6 +170,48 @@ describe("monthly report scheduler", () => {
     await expect(broken.tick(DUE)).resolves.toBeUndefined();
     expect(logger.warn).toHaveBeenCalled();
     expect(scheduler).toBeDefined();
+  });
+
+  it("generates one report per environment rather than one for the deployment", async () => {
+    const { scheduler, generate } = harness({
+      environments: [
+        { id: "env-prod", name: "Production" },
+        { id: "env-test", name: "Test" },
+      ],
+    });
+
+    await scheduler.tick(DUE);
+
+    /*
+      Two estates, two reports. A single blended report would state a component count and a
+      vulnerability total describing neither environment, in the one artifact that goes to
+      management and cannot be checked against the UI.
+    */
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls.map((c) => (c[0] as { scope: { name: string } }).scope.name)).toEqual(
+      ["Production", "Test"],
+    );
+  });
+
+  it("still reports the other environments when one of them fails", async () => {
+    const { scheduler, generate, deliver, logger } = harness({
+      environments: [
+        { id: "env-test", name: "Test" },
+        { id: "env-prod", name: "Production" },
+      ],
+    });
+
+    // Test is listed first and blows up. Production must still be reported: a test estate
+    // with no builds must never be able to stop production's report going to management.
+    generate.mockImplementationOnce(async () => {
+      throw new Error("no builds in this environment");
+    });
+
+    await expect(scheduler.tick(DUE)).resolves.toBeUndefined();
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalled();
   });
 });
 

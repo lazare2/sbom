@@ -9,6 +9,7 @@ import type {
   UpdateApplicationRequest,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import { application, applicationAlias, attributeDefinition } from "../../db/schema.js";
 import {
   BadRequestError,
@@ -46,14 +47,18 @@ export class AdminApplicationsService {
    * record instead of creating a `pending_confirmation` one somebody has to
    * triage.
    */
-  async create(input: CreateApplicationRequest, actor: Actor): Promise<ApplicationDetail> {
+  async create(
+    input: CreateApplicationRequest,
+    actor: Actor,
+    scope: EnvironmentScope,
+  ): Promise<ApplicationDetail> {
     const attributes = await this.validate(input.attributes);
 
     let created;
     try {
       [created] = await this.deps.db
         .insert(application)
-        .values({ name: input.name, status: input.status, attributes })
+        .values({ environmentId: scope.id, name: input.name, status: input.status, attributes })
         .returning();
     } catch (err) {
       if (isPgError(err, PG_UNIQUE_VIOLATION)) {
@@ -269,6 +274,10 @@ export class AdminApplicationsService {
           await tx
             .insert(applicationAlias)
             .values({
+              // The target's estate, not a passed-in one: an alias that resolved in a
+              // different environment from the application it points at would send a
+              // pipeline's build across the boundary.
+              environmentId: target.environmentId,
               aliasName: source.name,
               applicationId: target.id,
               createdByUserId: actor.id,
@@ -322,7 +331,7 @@ export class AdminApplicationsService {
   // -------------------------------------------------------------------------
 
   async addAlias(applicationId: string, aliasName: string, actor: Actor): Promise<void> {
-    await this.requireApplication(applicationId);
+    const app = await this.requireApplication(applicationId);
 
     // An alias that shadows a real application name is unreachable: ingest
     // matches names before aliases, so the scan would never get here. Rejecting
@@ -330,7 +339,14 @@ export class AdminApplicationsService {
     const [clash] = await this.deps.db
       .select({ id: application.id, name: application.name })
       .from(application)
-      .where(sql`lower(${application.name}) = lower(${aliasName})`)
+      /*
+        Scoped to the application's own estate. The same name in another environment is a
+        different application entirely, and refusing the alias because of it would block a
+        legitimate rename in test on the grounds that production has a service by that name.
+      */
+      .where(
+        sql`lower(${application.name}) = lower(${aliasName}) AND ${application.environmentId} = ${app.environmentId}::uuid`,
+      )
       .limit(1);
     if (clash) {
       throw new ConflictError(
@@ -340,6 +356,7 @@ export class AdminApplicationsService {
 
     try {
       await this.deps.db.insert(applicationAlias).values({
+        environmentId: app.environmentId,
         aliasName,
         applicationId,
         createdByUserId: actor.id,

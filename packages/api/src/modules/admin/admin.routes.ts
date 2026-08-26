@@ -1,3 +1,4 @@
+import { requireScope } from "../environments/scope.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
@@ -128,7 +129,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.post("/applications", async (request, reply) => {
     const body = parseOrThrow(createApplicationRequestSchema, request.body);
-    const created = await adminApplications.create(body, actorOf(request));
+    const created = await adminApplications.create(body, actorOf(request), await requireScope(request));
     return reply.status(201).send({ application: created });
   });
 
@@ -273,7 +274,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.post("/groups", async (request, reply) => {
     const body = parseOrThrow(createGroupRequestSchema, request.body);
-    return reply.status(201).send({ group: await adminGroups.create(body, actorOf(request)) });
+    const scope = await requireScope(request);
+    return reply
+      .status(201)
+      .send({ group: await adminGroups.create(body, actorOf(request), scope) });
   });
 
   fastify.patch("/groups/:id", async (request, reply) => {
@@ -376,7 +380,19 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.post("/ingest-tokens", async (request, reply) => {
     const body = parseOrThrow(createIngestTokenRequestSchema, request.body);
-    const created = await ingestTokens.create({ name: body.name, createdByUserId: getUser(request).id });
+    /*
+      A token reaches one estate unless somebody explicitly asked otherwise. Defaulting to
+      the administrator's current environment rather than to unrestricted means the easy
+      path is also the contained one.
+    */
+    const environmentId = body.unrestricted
+      ? null
+      : (body.environmentId ?? (await requireScope(request)).id);
+    const created = await ingestTokens.create({
+      name: body.name,
+      environmentId,
+      createdByUserId: getUser(request).id,
+    });
 
     await audit.record({
       actor: actorOf(request),

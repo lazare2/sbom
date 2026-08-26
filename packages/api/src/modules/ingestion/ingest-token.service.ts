@@ -9,6 +9,20 @@ export interface VerifiedIngestToken {
   /** Named token that authenticated the request, recorded on the scan row. */
   name: string;
   source: "env" | "db";
+  /**
+   * The one estate this token may write to, or null for a token that may write to any.
+   *
+   * An unbound token is the deliberate escape hatch for a single deployment-wide CI
+   * credential, and it is why the environment field on the upload exists at all. What it
+   * costs is that a leak is no longer contained to one estate, which is exactly the
+   * trade-off a bound token removes -- so the admin screen labels it plainly rather than
+   * offering it as just another option.
+   *
+   * Tokens configured in INGEST_TOKENS are always null here: they have no database row to
+   * carry a binding. They keep working against the default environment, because the
+   * alternative is that upgrading breaks every pipeline that predates environments.
+   */
+  environmentId: string | null;
 }
 
 /** Throttle for `last_used_at`: one write per token per minute, not one per scan. */
@@ -63,12 +77,12 @@ export class IngestTokenService {
     // timing because the hash is what is being matched, not the secret.
     for (const candidate of this.envTokenHashes) {
       if (safeCompareHex(candidate.hash, hash)) {
-        return { name: candidate.name, source: "env" };
+        return { name: candidate.name, source: "env", environmentId: null };
       }
     }
 
     const [row] = await this.deps.db
-      .select({ id: ingestToken.id, name: ingestToken.name })
+      .select({ id: ingestToken.id, name: ingestToken.name, environmentId: ingestToken.environmentId })
       .from(ingestToken)
       .where(and(eq(ingestToken.tokenHash, hash), eq(ingestToken.isActive, true)))
       .limit(1);
@@ -76,7 +90,7 @@ export class IngestTokenService {
     if (!row) return null;
 
     void this.recordUsage(row.id);
-    return { name: row.name, source: "db" };
+    return { name: row.name, source: "db", environmentId: row.environmentId };
   }
 
   /**
@@ -140,12 +154,25 @@ export class IngestTokenService {
    * Mint a new named token. The plaintext is returned exactly once — only its
    * hash is stored, so it cannot be recovered afterwards.
    */
-  async create(opts: { name: string; createdByUserId?: string | null }): Promise<{ token: string; id: string }> {
+  /**
+   * Mint a token.
+   *
+   * `environmentId` is required rather than optional, and null has to be written out. A
+   * token that may write to every estate is a different thing from one that may write to
+   * one, and defaulting to the broader of the two because a caller left a field off is how
+   * a deployment ends up with unrestricted credentials nobody chose.
+   */
+  async create(opts: {
+    name: string;
+    environmentId: string | null;
+    createdByUserId?: string | null;
+  }): Promise<{ token: string; id: string }> {
     const token = generateToken(32);
     const [row] = await this.deps.db
       .insert(ingestToken)
       .values({
         name: opts.name,
+        environmentId: opts.environmentId,
         tokenHash: sha256Hex(token),
         tokenSuffix: tokenSuffix(token),
         createdByUserId: opts.createdByUserId ?? null,

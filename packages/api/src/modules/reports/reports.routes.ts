@@ -1,3 +1,4 @@
+import { requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import {
   generateReportSchema,
@@ -130,6 +131,7 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
     const user = getUser(request);
 
     const result = await reports.generate({
+      scope: await requireScope(request),
       kind: body.kind,
       actor: { id: user.id, email: user.email },
     });

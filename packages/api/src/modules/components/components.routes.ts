@@ -1,3 +1,4 @@
+import { requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
@@ -73,7 +74,12 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
     const body = parseOrThrow(bulkSearchBodySchema, request.body, "Body");
     const { input, ...query } = body;
     return reply.send(
-      await bulkSearch.submit({ input, query, userId: getUser(request).id }),
+      await bulkSearch.submit({
+        input,
+        query,
+        userId: getUser(request).id,
+        scope: await requireScope(request),
+      }),
     );
   });
 

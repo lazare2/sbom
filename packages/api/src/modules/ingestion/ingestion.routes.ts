@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { ingestScanFieldsSchema, type IngestScanResponse } from "@sbom/shared";
-import { BadRequestError, UnauthorizedError, ValidationError } from "../../lib/errors.js";
+import { BadRequestError, ForbiddenError, UnauthorizedError, ValidationError } from "../../lib/errors.js";
+import type { EnvironmentScope, EnvironmentService } from "../environments/environment.service.js";
+import type { VerifiedIngestToken } from "./ingest-token.service.js";
 import { IngestTokenService } from "./ingest-token.service.js";
 
 /**
@@ -24,7 +26,8 @@ import { IngestTokenService } from "./ingest-token.service.js";
  * because nobody pre-registered the repo.
  */
 export async function ingestionRoutes(fastify: FastifyInstance): Promise<void> {
-  const { ingestTokens, ingestion, config, vulnWorker, maliciousWorker } = fastify.ctx;
+  const { ingestTokens, ingestion, config, vulnWorker, maliciousWorker, environments } =
+    fastify.ctx;
 
   fastify.post(
     "/scans",
@@ -109,11 +112,19 @@ export async function ingestionRoutes(fastify: FastifyInstance): Promise<void> {
         );
       }
 
+      // --- 3b. decide which estate this build belongs to -------------------
+      const scope = await resolveIngestScope(
+        environments,
+        verifiedToken,
+        parsedFields.data.environment ?? null,
+      );
+
       // --- 4. ingest ------------------------------------------------------
       const result: IngestScanResponse = await ingestion.ingest({
         fields: parsedFields.data,
         rawSbom: sbomBuffer,
         tokenName: verifiedToken.name,
+        scope,
       });
 
       request.log.info(
@@ -149,5 +160,62 @@ export async function ingestionRoutes(fastify: FastifyInstance): Promise<void> {
 
       return reply.status(201).send(result);
     },
+  );
+}
+
+/**
+ * Which estate an upload belongs to.
+ *
+ * The table this implements, and the reason each row is what it is:
+ *
+ *   bound token, no environment named   -> the token's own estate.
+ *       Every pipeline written before environments existed sends no environment, and the
+ *       migration bound every existing token, so those keep working untouched.
+ *
+ *   bound token, matching name          -> accepted.
+ *       Naming the estate you are already restricted to is redundant but honest, and a
+ *       pipeline that states its intent should not be punished for it.
+ *
+ *   bound token, different name         -> refused, 403.
+ *       The one row that matters. Honouring the token and ignoring the field would write a
+ *       production build into test and return 201, and CI would go green. A pipeline that
+ *       says `production` must never be silently redirected.
+ *
+ *   unbound token, environment named    -> that estate.
+ *
+ *   unbound token, nothing named        -> refused, 400 -- unless the token came from
+ *       INGEST_TOKENS, which has no database row to carry a binding and therefore falls
+ *       back to the default estate rather than breaking a deployment on upgrade.
+ */
+async function resolveIngestScope(
+  environments: EnvironmentService,
+  token: VerifiedIngestToken,
+  requested: string | null,
+): Promise<EnvironmentScope> {
+  // An ingest token is not a user session: it is trusted for whichever estate it names or
+  // is bound to, so access is evaluated as unrestricted here and narrowed by the rules below.
+  const unrestricted = { all: true, environmentIds: [] };
+
+  if (token.environmentId) {
+    const bound = await environments.resolve(token.environmentId, unrestricted);
+    if (requested) {
+      const asked = await environments.resolve(requested, unrestricted);
+      if (asked.id !== bound.id) {
+        throw new ForbiddenError(
+          `This token may only upload to "${bound.name}", but the scan named "${asked.name}". ` +
+            "Either use a token for that environment or remove the environment field.",
+        );
+      }
+    }
+    return bound;
+  }
+
+  if (requested) return environments.resolve(requested, unrestricted);
+
+  if (token.source === "env") return environments.requireDefault(unrestricted);
+
+  throw new BadRequestError(
+    "This token can upload to any environment, so the scan must say which one. " +
+      "Add an `environment` field naming the target environment.",
   );
 }
