@@ -88,7 +88,13 @@ packages/
     nginx.conf            Serves the SPA and proxies /api in production
 ci-templates/
   jenkins/vars/sbomScan.groovy         Shared-library step
+  jenkins/vars/sastScan.groovy         Shared-library step (sast-scan/, see below)
   gitlab/sbom-scan.gitlab-ci.yml       Includable CI template
+  gitlab/sast-scan.gitlab-ci.yml       Includable CI template (sast-scan/, see below)
+sast-scan/                Standalone Python SAST tool — see "Static analysis (SAST)"
+  sast/                   scanner.py, analyzer.py, engine.py, secrets.py, report.py, cli.py
+  sast/rules/python.yaml  YAML rule definitions (AST rules + taint sources/sinks/sanitizers)
+  tests/                  64 tests: vulnerable_samples/ + safe_samples/ per rule, end-to-end CLI
 deploy/                   Copied verbatim into the offline bundle
   docker-compose.yml      Image-only compose, no build contexts
   start.ps1 / start.sh    Target-side installer: load, generate secrets, start
@@ -1269,6 +1275,64 @@ be reported yet, so an empty result renders as *"no known malicious packages, as
 never as a clean bill of health.
 
 **Not a build gate.** Ingest never rejects a scan because of what is in it.
+
+---
+
+## Static analysis (SAST)
+
+A different problem again from either of the above. Grype and the malicious-packages feed both
+reason about *dependencies* — packages this application pulled in. `sast-scan/` reasons about the
+application's *own* source: `eval`/`exec`, unsafe `pickle` and `yaml.load`, `subprocess`
+`shell=True`, weak hashes and weak `random` use, security checks written as `assert` (stripped by
+`-O`), hardcoded secrets, and a basic intra-procedural taint analysis — `input()` / `sys.argv` /
+`os.environ` / `request.args`/`.form` reaching a command, `eval`, or a database cursor's `execute`
+without passing through a sanitizer or a parameterized query first.
+
+It ships as a vendored, standalone Python project at [`sast-scan/`](sast-scan/), with its own
+[README](sast-scan/README.md) and its own test suite (64 tests: every rule has a vulnerable sample
+that triggers it and a safe sample that doesn't).
+
+### Why it is not wired into the platform
+
+The same reason there is no plugin system for a second vulnerability scanner (see "Vulnerability
+scanning" above): findings are stored keyed to Grype's output, and `component_vulnerability`,
+the ingestion pipeline, and the dashboard all assume that shape. A SAST finding — a line in a
+file, not a package/version pair — doesn't fit it, and forcing it in would mean the same
+refactor the Grype section already says this platform doesn't do for configuration alone.
+
+So `sast-scan/` stays outside that boundary on purpose. It runs as its own CI job, independent of
+`POST /api/v1/scans`, and produces a SARIF file as its output rather than a database row:
+
+```
+include:
+  - project: 'platform/ci-templates'
+    ref: main
+    file: '/sast-scan.gitlab-ci.yml'
+
+sast:scan:
+  extends: .sast_scan
+```
+
+or, from a Jenkinsfile, `sastScan()`. Both templates archive the SARIF report as a build artifact
+and fail the job on any HIGH/CRITICAL finding — off by default in the sense that
+`SAST_ALLOW_FAILURE` / `required: true` let a project roll it out without breaking today's
+pipeline first, the same pattern `SBOM_REQUIRED` and Grype's own default-off use elsewhere in this
+repo. See [`ci-templates/gitlab/sast-scan.gitlab-ci.yml`](ci-templates/gitlab/sast-scan.gitlab-ci.yml)
+and [`ci-templates/jenkins/vars/sastScan.groovy`](ci-templates/jenkins/vars/sastScan.groovy).
+
+### What this is not
+
+**Not persisted.** A finding lives in the SARIF artifact for that one build; there is no history,
+no diffing between builds, and nothing queryable from the dashboard or the API. Re-running the scan
+is the only way to see current findings.
+
+**Not multi-language.** Python source only, via the standard library's `ast` module. A repo with a
+non-Python component gets no coverage for it from this job.
+
+**Not a taint analysis that understands your whole call graph.** Taint tracking is
+intra-procedural — it follows a value through one function's assignments, concatenation and
+f-strings, but not across a call into another function. A source read in one function and passed
+as an argument to a sink in another will not be flagged.
 
 ---
 

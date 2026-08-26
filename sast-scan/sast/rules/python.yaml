@@ -1,0 +1,173 @@
+# SAST rules for Python source code.
+#
+# `rules` are matched generically by sast/engine.py against every ast.Call /
+# ast.Assert node in a file. `taint` configures the intra-procedural taint
+# analysis in sast/analyzer.py. Adding, removing, or tuning a rule here never
+# requires touching engine.py or analyzer.py.
+
+rules:
+  - id: PY-EVAL-001
+    severity: HIGH
+    cwe: 95
+    message: >-
+      Use of eval() can execute arbitrary code if any part of its input is
+      influenced by an untrusted source.
+    pattern:
+      node: call
+      call_names: [eval]
+
+  - id: PY-EXEC-001
+    severity: HIGH
+    cwe: 95
+    message: >-
+      Use of exec() can execute arbitrary code if any part of its input is
+      influenced by an untrusted source.
+    pattern:
+      node: call
+      call_names: [exec]
+
+  - id: PY-PICKLE-UNSAFE-DESERIALIZATION-001
+    severity: HIGH
+    cwe: 502
+    message: >-
+      pickle.load/loads on non-literal (e.g. externally-sourced) data can lead
+      to arbitrary code execution during deserialization.
+    pattern:
+      node: call
+      qualified_names: [pickle.loads, pickle.load]
+      non_literal_positional: [0]
+
+  - id: PY-SUBPROCESS-SHELL-TRUE-001
+    severity: HIGH
+    cwe: 78
+    message: >-
+      Calling subprocess.* with shell=True can lead to OS command injection
+      if any part of the command is influenced by untrusted input.
+    pattern:
+      node: call
+      module_wildcard: subprocess
+      keywords:
+        - name: shell
+          equals: true
+
+  - id: PY-YAML-UNSAFE-LOAD-001
+    severity: HIGH
+    cwe: 502
+    message: >-
+      yaml.load() without Loader=SafeLoader (or CSafeLoader) can instantiate
+      arbitrary Python objects and lead to code execution on untrusted input.
+    pattern:
+      node: call
+      qualified_names: [yaml.load]
+      keyword_unsafe:
+        name: Loader
+        positional_index: 1
+        safe_values: [SafeLoader, CSafeLoader]
+
+  - id: PY-WEAK-HASH-MD5-001
+    severity: MEDIUM
+    cwe: 327
+    message: >-
+      MD5 is cryptographically broken and unsuitable for security purposes
+      (password hashing, integrity, signatures).
+    pattern:
+      node: call
+      qualified_names: [hashlib.md5]
+
+  - id: PY-WEAK-HASH-SHA1-001
+    severity: MEDIUM
+    cwe: 327
+    message: >-
+      SHA-1 is cryptographically broken and unsuitable for security purposes
+      (password hashing, integrity, signatures).
+    pattern:
+      node: call
+      qualified_names: [hashlib.sha1]
+
+  - id: PY-WEAK-RANDOM-001
+    severity: LOW
+    cwe: 330
+    message: >-
+      The random module is not cryptographically secure; use the `secrets`
+      module for tokens, passwords, or other security-sensitive values.
+    pattern:
+      node: call
+      module_wildcard: random
+
+  - id: PY-ASSERT-SECURITY-CHECK-001
+    severity: LOW
+    cwe: 703
+    message: >-
+      A security check implemented with assert is removed when Python runs
+      with optimizations (-O / PYTHONOPTIMIZE), silently disabling the check.
+    pattern:
+      node: assert
+      contains_any:
+        - admin
+        - auth
+        - permission
+        - password
+        - role
+        - login
+        - access
+        - secure
+        - credential
+        - token
+        - superuser
+        - privilege
+
+taint:
+  sources:
+    - name: input
+      match_type: call
+    - name: sys.argv
+      match_type: attr
+    - name: os.environ
+      match_type: attr
+    - name: request.args
+      match_type: attr
+    - name: request.form
+      match_type: attr
+
+  sinks:
+    - name: os.system
+      match_type: qualified
+      cwe: 78
+      severity: HIGH
+      message: >-
+        Tainted data reaches os.system(), which can lead to OS command
+        injection.
+    - name: "subprocess."
+      match_type: prefix
+      cwe: 78
+      severity: HIGH
+      message: >-
+        Tainted data reaches a subprocess call, which can lead to OS command
+        injection.
+    - name: eval
+      match_type: qualified
+      cwe: 95
+      severity: HIGH
+      message: >-
+        Tainted data reaches eval(), which can lead to arbitrary code
+        execution.
+    - name: exec
+      match_type: qualified
+      cwe: 95
+      severity: HIGH
+      message: >-
+        Tainted data reaches exec(), which can lead to arbitrary code
+        execution.
+    - name: execute
+      match_type: attr
+      cwe: 89
+      severity: HIGH
+      check_args: first
+      message: >-
+        Tainted data reaches a database cursor's execute() call via string
+        building, which can lead to SQL injection. Use parameterized queries
+        instead.
+
+  sanitizers:
+    - shlex.quote
+    - int
