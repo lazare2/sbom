@@ -134,3 +134,42 @@ export const environmentRefSchema = z.string().trim().min(1).max(60);
 export const environmentQuerySchema = z.object({
   environment: environmentRefSchema.optional(),
 });
+
+/**
+ * One estate's figures, for the side-by-side admin view.
+ *
+ * Deliberately a list of rows rather than a payload with totals. There is no total: adding
+ * a test estate's package count to production's produces a number that describes neither,
+ * and the moment such a field exists somebody will render it. The comparison exists so the
+ * two can be read against each other, not combined.
+ *
+ * `vulnerabilities` is null when scanning is off or nothing has been assessed — never a
+ * block of zeros, which would read as "this estate is clean".
+ */
+export interface EnvironmentComparisonRow {
+  id: string;
+  name: string;
+  applications: { total: number; active: number; stale: number; neverScanned: number };
+  scans: { total: number; last7d: number; latestAt: string | null };
+  /** Distinct packages across the current build of every application in this estate. */
+  packagesInUse: number;
+  vulnerabilities: {
+    /** Applications whose current build has been assessed. The denominator for the rest. */
+    assessedApplications: number;
+    critical: number;
+    high: number;
+    /** Findings in packages the application brought itself, not its base image. */
+    appFindings: number;
+    baseImageFindings: number;
+  } | null;
+}
+
+export interface EnvironmentComparison {
+  environments: EnvironmentComparisonRow[];
+  /**
+   * False when vulnerability scanning is off platform-wide. The rows still carry every
+   * other figure, and every `vulnerabilities` block is null — so the page can say "not
+   * assessed" once, rather than repeating it per estate.
+   */
+  vulnerabilityScanningEnabled: boolean;
+}

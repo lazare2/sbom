@@ -85,6 +85,19 @@ export function readEnumList<T extends string>(
   return values.length > 0 ? values : fallback;
 }
 
+/**
+ * Reads a repeated param with no fixed allowed set.
+ *
+ * `readEnumList` cannot be used where the valid values come from the server -- environment
+ * ids, for instance -- because the list is not known when the URL is parsed. An id that is
+ * not real is left in state and refused by the API, which is the right place for that
+ * decision: silently dropping it here would run the search across estates the URL did not
+ * ask for and present the result as if it had.
+ */
+export function readStringList(params: URLSearchParams, key: string): string[] {
+  return params.getAll(key).filter((v) => v !== "");
+}
+
 export function readEnum<T extends string>(
   params: URLSearchParams,
   key: string,

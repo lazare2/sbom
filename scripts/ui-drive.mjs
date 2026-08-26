@@ -78,8 +78,15 @@ function watch(target, prefix = "") {
      * filter would also swallow a genuine conflict from anywhere else in the app,
      * and 409 is the status this codebase uses for real, reportable collisions
      * (duplicate application name, duplicate attribute key).
+     *
+     * The path may be followed by a query string. Every request the SPA makes now carries
+     * `?environment=`, and this pattern was anchored on the end of the path -- so it
+     * silently stopped matching, and a deliberate failure began reporting as a defect.
      */
-    if (/409/.test(msg.text()) && /\/applications\/[0-9a-f-]+\/scans$/.test(msg.location()?.url ?? "")) {
+    if (
+      /409/.test(msg.text()) &&
+      /\/applications\/[0-9a-f-]+\/scans(\?|$)/.test(msg.location()?.url ?? "")
+    ) {
       return;
     }
     /*
@@ -89,7 +96,10 @@ function watch(target, prefix = "") {
      * would hide a genuine bad request from anywhere else, and being refused is the exact
      * behaviour that step is there to prove.
      */
-    if (/400/.test(msg.text()) && /\/admin\/reports\/settings$/.test(msg.location()?.url ?? "")) {
+    if (
+      /400/.test(msg.text()) &&
+      /\/admin\/reports\/settings(\?|$)/.test(msg.location()?.url ?? "")
+    ) {
       return;
     }
     problems.push(`${prefix}console.error: ${msg.text()}`);
@@ -775,6 +785,125 @@ await page.waitForTimeout(800);
 await page.waitForLoadState("networkidle");
 await expectText("temp password", "the must-change-password badge");
 await shot("admin-users-after-create");
+
+// --- 18b. environments: the switcher, the comparison, and isolation in a browser
+//
+// The API-level proof that estates do not blend lives in the smoke test. What that cannot
+// reach is the half of the promise a person actually experiences: a control in the header
+// that changes what every page below it means. Two things go wrong here and neither is a
+// console error — the switcher renders but the pages keep showing the previous estate's
+// cached rows, or it switches and the pages never refetch.
+//
+// So this creates a real second estate, switches to it, and checks that an application
+// which is plainly visible in the first one is *absent* — then switches back and checks it
+// returns. An empty list is a weak assertion on its own, which is why both directions are
+// driven.
+log("18b. admin panel, environments");
+const UI_ENV = `ui-drive-env-${SUFFIX}`;
+{
+  await page.getByRole("link", { name: "Environments" }).click();
+  await page.waitForURL(/\/admin\/environments/, { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+  await expectText("Side by side");
+  await expectText("Packages in use");
+  await shot("admin-environments");
+
+  // The switcher is in the header on every page, so it has to be here too.
+  const switcher = page.getByLabel("Environment", { exact: true });
+  await switcher.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+  if ((await switcher.count()) === 0) {
+    problems.push("the header has no environment switcher");
+  }
+  const startingEnv = await switcher.inputValue().catch(() => null);
+
+  log("18c. creating a second estate through the UI");
+  await page.getByRole("button", { name: "New environment" }).click();
+  await page.waitForTimeout(400);
+  await page.getByLabel("Name").fill(UI_ENV);
+  await page.locator("dialog").getByRole("button", { name: "Create environment" }).click();
+  await page.waitForTimeout(1200);
+  await page.waitForLoadState("networkidle");
+  /*
+    Asserted against the table row, not with a bare text match.
+
+    The header switcher renders the same name as an <option>, and it comes first in the
+    DOM -- so `getByText(...).first()` resolves to the option, which never reports as
+    visible, and the assertion times out while the row is sitting there in plain sight.
+  */
+  const newRow = page.locator("tbody tr", { hasText: UI_ENV });
+  await newRow.first().waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+  if ((await newRow.count()) === 0) {
+    problems.push("the new environment is not listed in the environments table");
+  } else {
+    log(`  OK   sees "${UI_ENV}" in the environments table`);
+  }
+
+  // Present in the switcher, not only in the table it was created from.
+  const options = await switcher.locator("option").allInnerTexts();
+  if (!options.includes(UI_ENV)) {
+    problems.push(`the new environment is not offered in the switcher: ${options.join(", ")}`);
+  }
+
+  log("18d. switching estate changes what every page shows");
+  const newValue = await switcher
+    .locator("option", { hasText: UI_ENV })
+    .first()
+    .getAttribute("value");
+  await switcher.selectOption(newValue ?? "");
+  await page.waitForTimeout(600);
+
+  await page.goto(`${BASE}/applications`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(800);
+  // The estate was created seconds ago and nothing has ever been uploaded to it. An
+  // application appearing here is data from the other estate that was never dropped.
+  await expectText("No applications match these filters", "the empty new estate");
+  await expectHidden(TEST_APP, "the other estate's application");
+  await shot("applications-empty-estate");
+
+  log("18e. switching back restores the original estate");
+  await page.getByLabel("Environment", { exact: true }).selectOption(startingEnv ?? "");
+  await page.waitForTimeout(600);
+  await page.goto(`${BASE}/applications`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(800);
+  await expectText(TEST_APP, "the original estate's application after switching back");
+
+  log("18f. deleting the estate requires its name typed back");
+  await page.goto(`${BASE}/admin/environments`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  await page
+    .locator("tbody tr", { hasText: UI_ENV })
+    .getByRole("button", { name: "Delete" })
+    .first()
+    .click();
+  await page.waitForTimeout(500);
+  await expectText("There is no undo", "the deletion warning");
+
+  const confirmDelete = page.locator("dialog").getByRole("button", { name: "Delete" });
+  // Armed only by the typed name. A dialog whose confirm button works before anything is
+  // typed is a confirmation in appearance only.
+  if (await confirmDelete.isEnabled()) {
+    problems.push("the delete button is armed before the environment name is typed");
+  }
+  await shot("admin-environment-delete");
+
+  await page.locator("#confirm-word").fill(UI_ENV);
+  await confirmDelete.click();
+  await page.waitForTimeout(1200);
+  await page.waitForLoadState("networkidle");
+  if ((await page.locator("tbody tr", { hasText: UI_ENV }).count()) > 0) {
+    problems.push("the deleted environment is still listed in the environments table");
+  } else {
+    log(`  OK   "${UI_ENV}" is gone from the environments table`);
+  }
+
+  const afterOptions = await page
+    .getByLabel("Environment", { exact: true })
+    .locator("option")
+    .allInnerTexts();
+  if (afterOptions.includes(UI_ENV)) {
+    problems.push("the deleted environment is still offered in the switcher");
+  }
+}
 
 // --- 19. admin: pending queue ----------------------------------------------
 log("19. admin panel, pending confirmation queue");

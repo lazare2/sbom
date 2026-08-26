@@ -9,6 +9,38 @@ import type { ApiErrorBody } from "@sbom/shared";
  */
 const BASE = "/api/v1";
 
+/*
+ * The estate every request is about.
+ *
+ * Held in a module variable rather than threaded through each call, because the alternative
+ * is adding an argument to roughly ninety call sites and relying on nobody ever forgetting
+ * one. A request that goes out without it is answered from the caller's default environment,
+ * which is a plausible-looking answer about the wrong estate -- the exact failure this whole
+ * feature exists to prevent. Setting it in one place means it cannot be omitted.
+ *
+ * Endpoints that are not estate-scoped -- the session, user administration, the
+ * vulnerability database -- ignore the parameter, so sending it everywhere costs nothing and
+ * removes the need for a list of which paths need it and which do not. Such a list would be
+ * wrong the first time somebody adds a scoped endpoint without updating it.
+ */
+let currentEnvironmentId: string | null = null;
+
+export function setRequestEnvironment(id: string | null): void {
+  currentEnvironmentId = id;
+}
+
+/**
+ * A path that already names an environment keeps it. Package search is the one caller that
+ * does: it selects estates explicitly, and overwriting that with the header's selection
+ * would silently narrow a deliberately cross-estate search back to one.
+ */
+function withEnvironment(path: string): string {
+  if (currentEnvironmentId === null) return path;
+  if (/[?&]environments?=/.test(path)) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}environment=${encodeURIComponent(currentEnvironmentId)}`;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -43,7 +75,7 @@ interface RequestOptions {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, signal } = options;
 
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetch(`${BASE}${withEnvironment(path)}`, {
     method,
     // Sends and accepts the session cookie.
     credentials: "same-origin",
@@ -105,7 +137,7 @@ export function toQueryString(params: Record<string, unknown>): string {
  * exactly like every other call — which the duplicate-SBOM 409 relies on.
  */
 async function upload<T>(path: string, form: FormData): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetch(`${BASE}${withEnvironment(path)}`, {
     method: "POST",
     credentials: "same-origin",
     body: form,
@@ -137,5 +169,12 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  /**
+   * DELETE carrying a body, for a destruction that has to be confirmed.
+   *
+   * Separate from `delete` rather than an optional argument, so that the ordinary case
+   * stays a one-word call and the exception is visible at the call site.
+   */
+  deleteWithBody: <T>(path: string, body: unknown) => request<T>(path, { method: "DELETE", body }),
   upload,
 };
