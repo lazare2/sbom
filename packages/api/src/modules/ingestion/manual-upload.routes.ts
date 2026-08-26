@@ -3,6 +3,7 @@ import { idParamSchema, manualUploadFieldsSchema, type ManualUploadResponse } fr
 import { BadRequestError, ValidationError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
+import { environmentAccess } from "../environments/scope.js";
 
 /**
  * `POST /api/v1/applications/:id/scans` — manual SBOM upload.
@@ -35,7 +36,7 @@ import { getUser } from "../../plugins/auth.plugin.js";
  * scope-wide in the same way every other guard in this codebase is.
  */
 export async function manualUploadRoutes(fastify: FastifyInstance): Promise<void> {
-  const { ingestion, audit, config, vulnWorker, maliciousWorker } = fastify.ctx;
+  const { ingestion, applications, audit, config, vulnWorker, maliciousWorker } = fastify.ctx;
 
   /*
    * `requireAuth`, not `requireAdmin`.
@@ -68,6 +69,23 @@ export async function manualUploadRoutes(fastify: FastifyInstance): Promise<void
     async (request, reply) => {
       const { id } = parseOrThrow(idParamSchema, request.params, "Params");
       const user = getUser(request);
+
+      /*
+        The target has to be an application this caller may read, checked before a byte of
+        the body is consumed.
+
+        Nothing downstream does this. `ingestManual` takes an application id and trusts it,
+        because the CI path reaches it through a token that was already bound to an estate.
+        On this path the only thing between a user and any application in the deployment is
+        this line -- without it, an account granted `test` alone could post a build into a
+        production application by pasting its id, and the scan would be indistinguishable
+        from a real one.
+
+        A 404 rather than a 403, for the same reason as everywhere else: refusing by
+        confirming the application exists tells the caller about an estate they were not
+        granted.
+      */
+      await applications.getById(id, await environmentAccess(request));
 
       if (!request.isMultipart()) {
         return reply.status(415).send({

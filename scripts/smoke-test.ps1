@@ -3146,6 +3146,394 @@ try {
     }
 
     # ======================================================================
+    <#
+      Environment isolation.
+
+      Everything above this point runs against one estate, so it proves the platform still
+      works -- not that environments actually separate anything. This section is the only
+      place that answers the question the feature exists for, and it does it the one way
+      that counts: two estates holding *deliberately colliding* data. Same application name,
+      same packages, same versions. If any endpoint blends them, a count comes back doubled
+      or a row appears under the wrong estate, and one of these assertions fails.
+
+      Colliding on purpose matters. Two estates holding different applications would pass
+      these checks even if the scoping were removed entirely, because the numbers would
+      differ anyway and nothing would look wrong.
+    #>
+    Write-Host ""
+    Write-Host "Environment isolation" -ForegroundColor Cyan
+
+    $isoSuffix = [guid]::NewGuid().ToString('N').Substring(0, 6)
+    $envAName = "smoke-env-a-$isoSuffix"
+    $envBName = "smoke-env-b-$isoSuffix"
+    # One name, two estates. The whole section rests on this being legal.
+    $isoAppName = "smoke-test-app-iso-$isoSuffix"
+
+    $isoUserEmail = "smoke-user-iso-$isoSuffix@sbom.local"
+    $isoUserPassword = "smoke-iso-password-$isoSuffix"
+    $isoJar = Join-Path $workDir "iso-cookies.txt"
+
+    $script:envAId = $null
+    $script:envBId = $null
+    $script:isoUserId = $null
+    $script:isoTokenA = $null
+    $script:isoTokenB = $null
+    $script:isoAppAId = $null
+    $script:isoAppBId = $null
+
+    <#
+      The read-only account is created FIRST, before the two estates exist, and that order is
+      the assertion rather than setup convenience. "Granted every environment" is a set fixed
+      at creation; an estate made afterwards must not appear in it. An administrator, whose
+      access is a role rather than a stored list, does gain it -- and the pair of behaviours
+      is only visible if the account predates the estate.
+
+      Its own account rather than the read-only user from earlier: that one's session is
+      deliberately destroyed by the password-reset test above.
+    #>
+    Assert-That "creates a read-only account while only the existing estates exist" {
+        $p = New-JsonFile -Name "iso-user.json" -Data @{
+            email = $isoUserEmail; role = "user"; password = $isoUserPassword; mustChangePassword = $false
+        }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/users", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        Show-Body $r 201
+        if ($r.Status -ne 201) { return $false }
+        $script:isoUserId = $r.Json.user.id
+
+        $lp = New-JsonFile -Name "iso-login.json" -Data @{ email = $isoUserEmail; password = $isoUserPassword }
+        $l = Invoke-Api @("-X", "POST", $loginUrl, "-H", $jsonCt, "--data-binary", "@$lp", "-c", $isoJar)
+        Show-Body $l 200
+        return $l.Status -eq 200
+    }
+
+    Assert-That "creates two environments" {
+        $pa = New-JsonFile -Name "env-a.json" -Data @{ name = $envAName; description = "smoke isolation A" }
+        $ra = Invoke-Api @("-X", "POST", "$adminUrl/environments", "-H", $jsonCt, "--data-binary", "@$pa", "-b", $readJar)
+        Show-Body $ra 201
+        if ($ra.Status -ne 201) { return $false }
+        $script:envAId = $ra.Json.environment.id
+
+        $pb = New-JsonFile -Name "env-b.json" -Data @{ name = $envBName }
+        $rb = Invoke-Api @("-X", "POST", "$adminUrl/environments", "-H", $jsonCt, "--data-binary", "@$pb", "-b", $readJar)
+        Show-Body $rb 201
+        if ($rb.Status -ne 201) { return $false }
+        $script:envBId = $rb.Json.environment.id
+
+        return $script:envAId -and $script:envBId -and $script:envAId -ne $script:envBId
+    }
+
+    Assert-That "refuses a second environment with the same name (409)" {
+        # Case-insensitively, because the name is an ingest identifier: two estates whose
+        # names differ only in case would make an upload's target a coin toss.
+        $p = New-JsonFile -Name "env-dup.json" -Data @{ name = $envAName.ToUpper() }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/environments", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        $r.Status -eq 409
+    }
+
+    Assert-That "issues an ingest token bound to each environment" {
+        $pa = New-JsonFile -Name "tok-a.json" -Data @{ name = "smoke-iso-a-$isoSuffix"; environmentId = $script:envAId }
+        $ra = Invoke-Api @("-X", "POST", "$adminUrl/ingest-tokens", "-H", $jsonCt, "--data-binary", "@$pa", "-b", $readJar)
+        Show-Body $ra 201
+        if ($ra.Status -ne 201) { return $false }
+        $script:isoTokenA = $ra.Json.plaintext
+
+        $pb = New-JsonFile -Name "tok-b.json" -Data @{ name = "smoke-iso-b-$isoSuffix"; environmentId = $script:envBId }
+        $rb = Invoke-Api @("-X", "POST", "$adminUrl/ingest-tokens", "-H", $jsonCt, "--data-binary", "@$pb", "-b", $readJar)
+        Show-Body $rb 201
+        if ($rb.Status -ne 201) { return $false }
+        $script:isoTokenB = $rb.Json.plaintext
+
+        return $script:isoTokenA -and $script:isoTokenB
+    }
+
+    Assert-That "the same application name is accepted in both estates, as two applications" {
+        # Neither upload names an environment. A bound token uploading to its own estate is
+        # exactly what every pipeline written before environments existed does.
+        $ra = Invoke-Api @("-X", "POST", $scansUrl, "-H", "Authorization: Bearer $($script:isoTokenA)",
+            "-F", "sbom=@$sbomPath", "-F", "app_name=$isoAppName", "-F", "build_number=1")
+        Show-Body $ra 201
+        if ($ra.Status -ne 201) { return $false }
+        $script:isoAppAId = $ra.Json.applicationId
+
+        $rb = Invoke-Api @("-X", "POST", $scansUrl, "-H", "Authorization: Bearer $($script:isoTokenB)",
+            "-F", "sbom=@$sbomPath", "-F", "app_name=$isoAppName", "-F", "build_number=1")
+        Show-Body $rb 201
+        if ($rb.Status -ne 201) { return $false }
+        $script:isoAppBId = $rb.Json.applicationId
+
+        # Two ids for one name. Under the old global unique index the second upload would
+        # have been filed against the first application, and a test build would have become
+        # part of production's history.
+        return $script:isoAppAId -and $script:isoAppBId -and $script:isoAppAId -ne $script:isoAppBId
+    }
+
+    Assert-That "a token bound to one estate cannot upload to another (403)" {
+        <#
+          The assertion this whole section is built around. Honouring the token and ignoring
+          the field would file a production build into test and return 201 -- CI goes green,
+          the SBOM is stored, and the only sign of trouble is a number that is quietly wrong
+          in two places at once.
+        #>
+        $r = Invoke-Api @("-X", "POST", $scansUrl, "-H", "Authorization: Bearer $($script:isoTokenA)",
+            "-F", "sbom=@$sbomPath", "-F", "app_name=$isoAppName", "-F", "environment=$envBName")
+        if ($r.Status -ne 403) { Show-Body $r 403 }
+        return $r.Status -eq 403
+    }
+
+    Assert-That "an application list scoped to one estate shows only that estate's copy" {
+        $ra = Invoke-Api @("$BaseUrl/api/v1/applications?search=$isoAppName&environment=$($script:envAId)&status=active&status=inactive&status=pending_confirmation", "-b", $readJar)
+        if ($ra.Status -ne 200) { Show-Body $ra 200; return $false }
+        $namedA = @($ra.Json.items | Where-Object { $_.name -eq $isoAppName })
+        if ($namedA.Count -ne 1) {
+            Write-Host "        estate A returned $($namedA.Count) copies of $isoAppName" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $rb = Invoke-Api @("$BaseUrl/api/v1/applications?search=$isoAppName&environment=$($script:envBId)&status=active&status=inactive&status=pending_confirmation", "-b", $readJar)
+        if ($rb.Status -ne 200) { Show-Body $rb 200; return $false }
+        $namedB = @($rb.Json.items | Where-Object { $_.name -eq $isoAppName })
+        if ($namedB.Count -ne 1) {
+            Write-Host "        estate B returned $($namedB.Count) copies of $isoAppName" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        # Same name, different rows. One list showing two entries, or both lists showing the
+        # same id, are the two ways this can be wrong.
+        return $namedA[0].id -eq $script:isoAppAId -and $namedB[0].id -eq $script:isoAppBId
+    }
+
+    Assert-That "a build belongs to its own estate's application only" {
+        $ra = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:isoAppAId)", "-b", $readJar)
+        if ($ra.Status -ne 200) { Show-Body $ra 200; return $false }
+        # One upload each. A scan history of two would mean the second upload was filed
+        # against the first application.
+        return [int]$ra.Json.scanCount -eq 1
+    }
+
+    Assert-That "each estate's dashboard counts itself, never the pair" {
+        $da = Invoke-Api @("$BaseUrl/api/v1/dashboard/stats?environment=$($script:envAId)", "-b", $readJar)
+        $db = Invoke-Api @("$BaseUrl/api/v1/dashboard/stats?environment=$($script:envBId)", "-b", $readJar)
+        if ($da.Status -ne 200 -or $db.Status -ne 200) { return $false }
+
+        # Each estate holds exactly the one application this section put there.
+        if ([int]$da.Json.applications.total -ne 1 -or [int]$db.Json.applications.total -ne 1) {
+            Write-Host "        A total=$($da.Json.applications.total) B total=$($db.Json.applications.total), expected 1 and 1" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        <#
+          Packages are the figure most likely to leak, because `component` is a shared
+          catalogue keyed on package identity: both estates ingested the SAME SBOM, so every
+          component row is literally the same row. A query that counted the catalogue rather
+          than what each estate shipped would still return an identical number here -- so the
+          check is against the SBOM's own package count, not against A equalling B.
+        #>
+        $distinctA = [int]$da.Json.components.distinct
+        if ($distinctA -lt 1 -or $distinctA -gt 12) {
+            Write-Host "        estate A reports $distinctA distinct packages; the fixture has 7" -ForegroundColor DarkYellow
+            return $false
+        }
+        return $true
+    }
+
+    Assert-That "a group in one estate is invisible in the other" {
+        $gp = New-JsonFile -Name "iso-group.json" -Data @{ name = "smoke-iso-group-$isoSuffix" }
+        # Created while the request names estate A, so the group belongs to A.
+        $c = Invoke-Api @("-X", "POST", "$adminUrl/groups?environment=$($script:envAId)", "-H", $jsonCt, "--data-binary", "@$gp", "-b", $readJar)
+        if ($c.Status -ne 201) { Show-Body $c 201; return $false }
+
+        $inA = Invoke-Api @("$BaseUrl/api/v1/groups?environment=$($script:envAId)&pageSize=200", "-b", $readJar)
+        $inB = Invoke-Api @("$BaseUrl/api/v1/groups?environment=$($script:envBId)&pageSize=200", "-b", $readJar)
+        $seenA = @($inA.Json.items | Where-Object { $_.name -eq "smoke-iso-group-$isoSuffix" }).Count
+        $seenB = @($inB.Json.items | Where-Object { $_.name -eq "smoke-iso-group-$isoSuffix" }).Count
+
+        # Groups organise applications, and applications never cross estates. A group offered
+        # in the other estate would be a group whose members are all unreachable.
+        return $seenA -eq 1 -and $seenB -eq 0
+    }
+
+    Assert-That "package search spans estates and names the estate on every row" {
+        $r = Invoke-Api @("$BaseUrl/api/v1/components/search?name=express&match=exact&scope=all&pageSize=200&environments=$($script:envAId)&environments=$($script:envBId)", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+
+        $mine = @($r.Json.items | Where-Object { $_.applicationName -eq $isoAppName })
+        if ($mine.Count -ne 2) {
+            Write-Host "        expected the package in both estates, got $($mine.Count) rows" -ForegroundColor DarkYellow
+            return $false
+        }
+        # The label is what keeps this within the never-mix rule: the same package under the
+        # same application name in two estates is only readable because each row says which.
+        $names = @($mine.environmentName | Sort-Object -Unique)
+        return $names.Count -eq 2 -and ($names -contains $envAName) -and ($names -contains $envBName)
+    }
+
+    Assert-That "package search narrowed to one estate returns only that estate" {
+        $r = Invoke-Api @("$BaseUrl/api/v1/components/search?name=express&match=exact&scope=all&pageSize=200&environments=$($script:envAId)", "-b", $readJar)
+        if ($r.Status -ne 200) { return $false }
+        $mine = @($r.Json.items | Where-Object { $_.applicationName -eq $isoAppName })
+        return $mine.Count -eq 1 -and $mine[0].environmentName -eq $envAName
+    }
+
+    Assert-That "the comparison reports every estate separately and totals nothing" {
+        $r = Invoke-Api @("$adminUrl/environments/comparison", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+
+        $a = @($r.Json.environments | Where-Object { $_.name -eq $envAName })
+        $b = @($r.Json.environments | Where-Object { $_.name -eq $envBName })
+        if ($a.Count -ne 1 -or $b.Count -ne 1) { return $false }
+        if ([int]$a[0].applications.total -ne 1 -or [int]$b[0].applications.total -ne 1) {
+            Write-Host "        A=$($a[0].applications.total) B=$($b[0].applications.total), expected 1 and 1" -ForegroundColor DarkYellow
+            return $false
+        }
+        # No summed field exists, and this pins that: a `total` appearing on the payload later
+        # is a number describing no estate, and somebody will render it.
+        return $null -eq $r.Json.total
+    }
+
+    Assert-That "an unassessed estate reports no vulnerability block, not a block of zeroes" {
+        <#
+          The platform's load-bearing rule, in the one place it is easiest to break. A column
+          of zeroes beside another estate's real findings reads as a clean bill of health --
+          a stronger claim than the truth, made about an estate nobody has scanned.
+
+          Written as an invariant over every row rather than as "this estate is null",
+          because whether the sweep has reached these two builds yet is a matter of timing.
+          Either the block is absent, or it says how many applications it is speaking for.
+        #>
+        $r = Invoke-Api @("$adminUrl/environments/comparison", "-b", $readJar)
+        if ($r.Status -ne 200) { return $false }
+        foreach ($row in @($r.Json.environments)) {
+            if ($null -eq $row.vulnerabilities) { continue }
+            if ([int]$row.vulnerabilities.assessedApplications -lt 1) {
+                Write-Host "        $($row.name) reports figures for 0 assessed applications" -ForegroundColor DarkYellow
+                return $false
+            }
+        }
+        return $true
+    }
+
+    # --- what a read-only account can reach ----------------------------------
+    <#
+      Driven as the read-only account created at the top of this section, which predates
+      both estates. Everything below is what a granted-a-subset user can and cannot reach.
+    #>
+    Assert-That "an account granted every estate at creation does not gain later ones" {
+        $r = Invoke-Api @("$BaseUrl/api/v1/environments", "-b", $isoJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        $named = @($r.Json.environments | Where-Object { $_.name -eq $envAName -or $_.name -eq $envBName })
+        return $named.Count -eq 0
+    }
+
+    Assert-That "an admin can grant one estate to that account" {
+        $p = New-JsonFile -Name "grant-a.json" -Data @{ environmentIds = @($script:envAId) }
+        $r = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:isoUserId)/environments", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        Show-Body $r 200
+        if ($r.Status -ne 200) { return $false }
+
+        $back = Invoke-Api @("$adminUrl/users/$($script:isoUserId)/environments", "-b", $readJar)
+        # The complete set, not a delta: the earlier grants are gone rather than merged.
+        return $back.Status -eq 200 -and @($back.Json.environmentIds).Count -eq 1 -and $back.Json.environmentIds[0] -eq $script:envAId
+    }
+
+    Assert-That "that account now sees one estate and reads it by default" {
+        $list = Invoke-Api @("$BaseUrl/api/v1/environments", "-b", $isoJar)
+        if ($list.Status -ne 200) { return $false }
+        if (@($list.Json.environments).Count -ne 1) {
+            Write-Host "        sees $(@($list.Json.environments).Count) environments, expected 1" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        # No environment named, so the request falls back to the only estate it can reach --
+        # which is what an API client written before environments existed sends.
+        $apps = Invoke-Api @("$BaseUrl/api/v1/applications?pageSize=200&status=active&status=inactive&status=pending_confirmation", "-b", $isoJar)
+        if ($apps.Status -ne 200) { return $false }
+        $seen = @($apps.Json.items | Where-Object { $_.name -eq $isoAppName })
+        return $seen.Count -eq 1 -and $seen[0].id -eq $script:isoAppAId
+    }
+
+    Assert-That "an estate it was not granted reads as absent, not as forbidden" {
+        # 404 rather than 403 on purpose: a 403 confirms that an estate exists which this
+        # account is not allowed to know about.
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications?environment=$($script:envBId)", "-b", $isoJar)
+        if ($r.Status -ne 404) { Show-Body $r 404 }
+        return $r.Status -eq 404
+    }
+
+    Assert-That "a cross-estate search naming an ungranted estate is refused, not trimmed" {
+        # Silently dropping it would answer a question about two estates with data from one
+        # and present it as complete -- the reader would conclude the package is not in B.
+        $r = Invoke-Api @("$BaseUrl/api/v1/components/search?name=express&environments=$($script:envAId)&environments=$($script:envBId)", "-b", $isoJar)
+        return $r.Status -eq 404
+    }
+
+    Assert-That "the other estate's application is not readable by id either" {
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:isoAppBId)", "-b", $isoJar)
+        return $r.Status -eq 404
+    }
+
+    # --- deletion -------------------------------------------------------------
+    Assert-That "deleting an environment requires its name typed back exactly" {
+        $p = New-JsonFile -Name "del-wrong.json" -Data @{ confirmName = "not-the-name" }
+        $r = Invoke-Api @("-X", "DELETE", "$adminUrl/environments/$($script:envAId)", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($r.Status -ne 400) { Show-Body $r 400 }
+        return $r.Status -eq 400
+    }
+
+    Assert-That "deleting an environment destroys its estate and leaves the other intact" {
+        $p = New-JsonFile -Name "del-a.json" -Data @{ confirmName = $envAName }
+        $r = Invoke-Api @("-X", "DELETE", "$adminUrl/environments/$($script:envAId)", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        Show-Body $r 204
+        if ($r.Status -ne 204) { return $false }
+
+        # A's application is gone.
+        $gone = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:isoAppAId)", "-b", $readJar)
+        if ($gone.Status -ne 404) {
+            Write-Host "        estate A's application survived its environment ($($gone.Status))" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        # B's is untouched, and still the only copy of that name in B. The cascade reaching
+        # further than its own estate is the failure worth catching here.
+        $kept = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:isoAppBId)", "-b", $readJar)
+        if ($kept.Status -ne 200) {
+            Write-Host "        estate B's application was destroyed with A ($($kept.Status))" -ForegroundColor DarkYellow
+            return $false
+        }
+        return $kept.Json.name -eq $isoAppName
+    }
+
+    Assert-That "the audit trail records the deletion and what it destroyed" {
+        # The only remaining evidence that the estate ever existed.
+        $r = Invoke-Api @("$adminUrl/audit-log?action=environment.delete&pageSize=50", "-b", $readJar)
+        if ($r.Status -ne 200) { return $false }
+        $row = @($r.Json.items | Where-Object { $_.metadata.name -eq $envAName })
+        return $row.Count -eq 1 -and [int]$row[0].metadata.applications -eq 1
+    }
+
+    Assert-That "removes the second environment" {
+        $p = New-JsonFile -Name "del-b.json" -Data @{ confirmName = $envBName }
+        $r = Invoke-Api @("-X", "DELETE", "$adminUrl/environments/$($script:envBId)", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        Show-Body $r 204
+        return $r.Status -eq 204
+    }
+
+    Assert-That "removes the account this section created" {
+        if (-not $script:isoUserId) { return $true }
+        $r = Invoke-Api @("-X", "DELETE", "$adminUrl/users/$($script:isoUserId)", "-b", $readJar)
+        Show-Body $r 204
+        return $r.Status -eq 204
+    }
+
+    Assert-That "leaves no environments behind" {
+        $r = Invoke-Api @("$BaseUrl/api/v1/environments", "-b", $readJar)
+        $stray = @($r.Json.environments | Where-Object { $_.name -like "smoke-env-*" })
+        if ($stray.Count -gt 0) {
+            Write-Host "        left behind: $($stray.name -join ', ')" -ForegroundColor DarkYellow
+        }
+        return $r.Status -eq 200 -and $stray.Count -eq 0
+    }
+
+    # ======================================================================
     Write-Host ""
     Write-Host "Error handling" -ForegroundColor Cyan
 

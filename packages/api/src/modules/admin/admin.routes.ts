@@ -16,6 +16,7 @@ import {
   mergeApplicationRequestSchema,
   resetUserPasswordRequestSchema,
   setGroupMembersRequestSchema,
+  setUserEnvironmentsRequestSchema,
   updateGroupRequestSchema,
   updateMaliciousSettingsSchema,
   updateApplicationRequestSchema,
@@ -66,6 +67,7 @@ const aliasBodySchema = z.object({
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   const {
     adminUsers,
+    environments,
     adminApplications,
     adminGroups,
     adminScans,
@@ -121,6 +123,63 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     await adminUsers.remove(id, actorOf(request));
     return reply.status(204).send();
+  });
+
+  /**
+   * Which estates a read-only account may see.
+   *
+   * Returned for administrators too, even though the role already grants everything. The
+   * rows exist and are simply not consulted while the account is an admin -- hiding them
+   * would mean an admin screen that shows nothing for an admin, and a demotion to a
+   * read-only role that silently hands over whichever estates happened to be stored.
+   */
+  fastify.get("/users/:id/environments", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    // Through the users service so a missing account is a 404 rather than an empty list.
+    await adminUsers.getById(id);
+    return reply.send({ environmentIds: await environments.environmentsForUser(id) });
+  });
+
+  /**
+   * PUT, not PATCH, because the body is the complete set rather than a delta.
+   *
+   * The screen edits a checklist, so the whole set is what it knows. Two admins editing at
+   * once would otherwise each apply their delta to a set the other had already changed, and
+   * the loser's removal would come back.
+   */
+  fastify.put("/users/:id/environments", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setUserEnvironmentsRequestSchema, request.body);
+    await adminUsers.getById(id);
+
+    /*
+      Every id has to name an environment that exists. Accepting an unknown one would
+      silently drop it -- the checklist would come back with a box unticked and no
+      explanation, which reads as the save having failed for a different reason.
+    */
+    const known = new Set(await environments.allIds());
+    const unknown = body.environmentIds.filter((envId) => !known.has(envId));
+    if (unknown.length > 0) {
+      throw new NotFoundError("Environment");
+    }
+
+    const before = await environments.environmentsForUser(id);
+    await environments.setEnvironmentsForUser(id, body.environmentIds);
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "user.environments_set",
+      targetType: "user",
+      targetId: id,
+      // Ids and counts. A name can change and the trail still has to say which estate.
+      metadata: {
+        from: before,
+        to: body.environmentIds,
+        count: { from: before.length, to: body.environmentIds.length },
+      },
+    });
+
+    return reply.send({ environmentIds: body.environmentIds });
   });
 
   // -------------------------------------------------------------------------

@@ -16,6 +16,8 @@ import type {
   ComponentSuggestion,
   DashboardStats,
   EcosystemBreakdownEntry,
+  Environment,
+  EnvironmentComparison,
   GroupAdvisory,
   IngestTokenSummary,
   NameMatchMode,
@@ -93,6 +95,15 @@ export const queryKeys = {
     ["components", "bulk-search", id, params] as const,
   bulkSearchLists: ["components", "bulk-search", "recent"] as const,
   users: (params: Record<string, unknown>) => ["admin", "users", params] as const,
+  /*
+    Environments sit outside the "admin" namespace even though only an admin can write
+    them, because the switcher reads the same list on every page. Under "admin" it would be
+    dropped by an admin-wide invalidation and refetched on a page that has nothing to do
+    with administration.
+  */
+  environments: ["environments"] as const,
+  userEnvironments: (id: string) => ["admin", "user-environments", id] as const,
+  environmentComparison: ["admin", "environment-comparison"] as const,
   auditLog: (params: Record<string, unknown>) => ["admin", "audit-log", params] as const,
   ingestTokens: ["admin", "ingest-tokens"] as const,
   // --- vulnerabilities ---
@@ -518,6 +529,36 @@ export function useUsers(params: Record<string, unknown>) {
     queryKey: queryKeys.users(params),
     queryFn: () => api.get<Paginated<UserSummary>>(`/admin/users${toQueryString(params)}`),
     placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * The estates this account may read.
+ *
+ * Shares its key with the fetch inside `EnvironmentProvider`, so the switcher and the
+ * admin screen are the same list rather than two that can disagree after a rename.
+ */
+export function useEnvironments() {
+  return useQuery({
+    queryKey: queryKeys.environments,
+    queryFn: () => api.get<{ environments: Environment[] }>("/environments"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUserEnvironments(id: string | null) {
+  return useQuery({
+    queryKey: queryKeys.userEnvironments(id ?? ""),
+    queryFn: () => api.get<{ environmentIds: string[] }>(`/admin/users/${id}/environments`),
+    enabled: id !== null,
+  });
+}
+
+/** Every estate's figures side by side. Admin only, and never summed — see the API. */
+export function useEnvironmentComparison() {
+  return useQuery({
+    queryKey: queryKeys.environmentComparison,
+    queryFn: () => api.get<EnvironmentComparison>("/admin/environments/comparison"),
   });
 }
 
