@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from sast.models import Severity
+from sast.models import Category, Severity
 
 DEFAULT_RULES_PATH: Path = Path(__file__).parent / "rules" / "python.yaml"
 
@@ -27,6 +27,8 @@ class Rule:
     cwe: int
     message: str
     pattern: dict[str, Any]
+    category: Category = Category.AST
+    remediation: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +45,7 @@ class TaintSink:
     message: str
     severity: Severity = Severity.HIGH
     check_args: str = "all"  # "all" | "first" (e.g. cursor.execute(query, params))
+    remediation: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +72,8 @@ def load_rules(path: Path = DEFAULT_RULES_PATH) -> list[Rule]:
             cwe=int(raw["cwe"]),
             message=raw["message"],
             pattern=raw.get("pattern", {}) or {},
+            category=Category(raw.get("category", "ast")),
+            remediation=raw.get("remediation", "") or "",
         )
         for raw in data.get("rules", []) or []
     ]
@@ -90,6 +95,7 @@ def load_taint_config(path: Path = DEFAULT_RULES_PATH) -> TaintConfig:
             message=s["message"],
             severity=Severity(s.get("severity", "HIGH")),
             check_args=s.get("check_args", "all"),
+            remediation=s.get("remediation", "") or "",
         )
         for s in taint.get("sinks", []) or []
     )

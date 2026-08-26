@@ -95,7 +95,8 @@ sast-scan/                Standalone Python SAST tool — see "Static analysis (
   sast/                   scanner.py, analyzer.py, engine.py, secrets.py, report.py, cli.py
   sast/rules/python.yaml  YAML rule definitions (AST rules + taint sources/sinks/sanitizers)
   ci_ingest_payload.py    Builds the POST /api/v1/sast body, shared by both CI templates
-  tests/                  68 tests: vulnerable_samples/ + safe_samples/ per rule, end-to-end CLI
+  USAGE.md                How to run it: locally, in CI, and into the platform
+  tests/                  73 tests: vulnerable_samples/ + safe_samples/ per rule, end-to-end CLI
 deploy/                   Copied verbatim into the offline bundle
   docker-compose.yml      Image-only compose, no build contexts
   start.ps1 / start.sh    Target-side installer: load, generate secrets, start
@@ -1290,7 +1291,7 @@ application's *own* source: `eval`/`exec`, unsafe `pickle` and `yaml.load`, `sub
 without passing through a sanitizer or a parameterized query first.
 
 It ships as a vendored, standalone Python project at [`sast-scan/`](sast-scan/), with its own
-[README](sast-scan/README.md) and its own test suite (68 tests: every rule has a vulnerable sample
+[README](sast-scan/README.md) and its own test suite (73 tests: every rule has a vulnerable sample
 that triggers it and a safe sample that doesn't).
 
 ### Parallel to Grype, not merged into it
@@ -1332,20 +1333,34 @@ same pattern as Grype's own default-off. See
 [`ci-templates/gitlab/sast-scan.gitlab-ci.yml`](ci-templates/gitlab/sast-scan.gitlab-ci.yml) and
 [`ci-templates/jenkins/vars/sastScan.groovy`](ci-templates/jenkins/vars/sastScan.groovy).
 
+### What a finding carries
+
+Beyond the location and the rule that fired, every finding records **how to fix it** and **which
+of the three detection methods found it** — both supplied by the scanner rather than mapped here,
+so a `--rules` file this platform has never seen still renders its own guidance (and honestly says
+so when it ships none). The tab filters on severity and on method, searches by file/rule/CWE, and
+expands a finding for the full message, the remediation, and a link to the CWE entry.
+
+The three methods fail differently and the filter exists so they can be read apart: **secrets** is
+regex over lines and flags fixtures as readily as real keys; **code patterns** proves a dangerous
+call is present, not that it is reachable; **taint** follows untrusted input into a sink but stops
+at the function boundary. `sast-scan/USAGE.md` has the worked examples.
+
 ### What this is not
 
-**Not versioned history the way scans are.** `sast_run` keeps every run it is sent — nothing is
-deleted — but the read side (and the tab) shows only the latest one per application. A project that
-wants to compare today's findings against last week's is reading the SARIF artifacts from those
-two builds, not this platform, for now.
+**Not a whole-call-graph taint analysis.** Tracking is intra-procedural — a source read in one
+function and passed as an argument into another is not followed. A clean taint result means no
+injection is visible *within a single function*, which is not the same as no injection.
+
+**Not suppressible per finding.** There is no inline pragma and no "accepted risk" state for SAST
+the way there is for vulnerabilities. A rule that is wrong for a project is narrowed with
+`--exclude` or replaced with a custom `--rules` file. Adding acknowledgement here would mean
+deciding whether an acknowledgement survives the line moving, which is exactly the design question
+the vulnerability side already answers differently (it keys on package, which has no line to move).
 
 **Not multi-language.** Python source only, via the standard library's `ast` module. A repo with a
 non-Python component gets no coverage for it from this job.
 
-**Not a taint analysis that understands your whole call graph.** Taint tracking is
-intra-procedural — it follows a value through one function's assignments, concatenation and
-f-strings, but not across a call into another function. A source read in one function and passed
-as an argument to a sink in another will not be flagged.
 
 ---
 

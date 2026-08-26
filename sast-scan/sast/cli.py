@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-color", action="store_true", help="Disable colored console output"
     )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Print how to fix each finding under it (console output only)",
+    )
     return parser
 
 
@@ -70,7 +75,11 @@ def run(argv: list[str] | None = None) -> int:
     filtered.sort(key=lambda f: (f.file, f.line, f.col))
 
     if args.format == "console":
-        print(format_console(filtered, use_color=not args.no_color))
+        print(
+            format_console(
+                filtered, use_color=not args.no_color, show_remediation=args.explain
+            )
+        )
     elif args.format == "json":
         print(format_json(filtered))
     elif args.format == "sarif":

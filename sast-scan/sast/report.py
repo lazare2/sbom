@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import textwrap
 from typing import Iterable
 
 from sast.models import Finding, Severity, severity_rank
@@ -25,8 +26,16 @@ def _group_by_file(findings: Iterable[Finding]) -> dict[str, list[Finding]]:
     return grouped
 
 
-def format_console(findings: list[Finding], use_color: bool = True) -> str:
-    """Render findings grouped by file, color-coded by severity."""
+def format_console(
+    findings: list[Finding], use_color: bool = True, show_remediation: bool = False
+) -> str:
+    """Render findings grouped by file, color-coded by severity.
+
+    ``show_remediation`` prints each rule's fix guidance under the finding. Off
+    by default because the usual caller is a CI log, where the same paragraph
+    repeated once per finding buries the list it is annotating. A developer
+    reading the output by hand passes ``--explain`` and wants exactly that.
+    """
     if not findings:
         return "No findings."
 
@@ -41,6 +50,12 @@ def format_console(findings: list[Finding], use_color: bool = True) -> str:
                 f"  {color}[{finding.severity.value}]{reset} {finding.rule_id} "
                 f"line {finding.line}:{finding.col} (CWE-{finding.cwe}) - {finding.message}"
             )
+            if show_remediation and finding.remediation:
+                dim = "\033[2m" if use_color else ""
+                wrapped = textwrap.wrap(finding.remediation, width=72)
+                for i, chunk in enumerate(wrapped):
+                    label = "fix: " if i == 0 else "     "
+                    lines.append(f"      {dim}{label}{chunk}{reset}")
 
     total = len(findings)
     by_severity = {s: sum(1 for f in findings if f.severity == s) for s in Severity}
@@ -61,6 +76,8 @@ def format_json(findings: list[Finding]) -> str:
                 "file": f.file,
                 "line": f.line,
                 "col": f.col,
+                "category": f.category.value,
+                "remediation": f.remediation,
             }
             for f in findings
         ],
@@ -88,9 +105,13 @@ def format_sarif(
             {
                 "id": rule_id,
                 "shortDescription": {"text": sample.message},
+                # SARIF's conventional home for "what do I do about it" -- GitHub
+                # code scanning and VS Code both surface `help` beside the result.
+                **({"help": {"text": sample.remediation}} if sample.remediation else {}),
                 "properties": {
                     "cwe": f"CWE-{sample.cwe}",
                     "security-severity": sample.severity.value,
+                    "category": sample.category.value,
                 },
             }
         )

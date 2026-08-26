@@ -21,6 +21,10 @@ Runs standalone with nothing configured — a SARIF artifact is always produced
 (or `SAST_PLATFORM_URL`/`SAST_INGEST_TOKEN`) are set. See the CI templates
 below for both.
 
+**[USAGE.md](USAGE.md)** is the practical guide: running it locally, wiring it
+into CI, posting findings to the platform, what each detection method is weak
+at, and how to add a rule.
+
 ## Using it
 
 ```bash
@@ -50,7 +54,7 @@ pip install pyyaml pytest
 pytest -q
 ```
 
-68 tests: every rule has a vulnerable sample that triggers it and a safe
+73 tests: every rule has a vulnerable sample that triggers it and a safe
 sample that doesn't (`tests/vulnerable_samples/`, `tests/safe_samples/`), an
 end-to-end run of `python -m sast` against both directories checking exit
 codes and finding counts, and `ci_ingest_payload.py`'s own tests.

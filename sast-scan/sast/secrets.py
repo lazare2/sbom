@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from sast.models import Finding, Severity
+from sast.models import Category, Finding, Severity
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +16,7 @@ class SecretPattern:
     severity: Severity
     cwe: int
     message: str
+    remediation: str
 
 
 SECRET_PATTERNS: tuple[SecretPattern, ...] = (
@@ -25,6 +26,11 @@ SECRET_PATTERNS: tuple[SecretPattern, ...] = (
         severity=Severity.CRITICAL,
         cwe=798,
         message="Hardcoded AWS access key ID detected.",
+        remediation=(
+            "Treat this key as compromised and rotate it now -- it is in git history even "
+            "if you delete the line. Then load it from the environment or an instance role, "
+            "never from source."
+        ),
     ),
     SecretPattern(
         id="SECRET-PRIVATE-KEY",
@@ -32,6 +38,11 @@ SECRET_PATTERNS: tuple[SecretPattern, ...] = (
         severity=Severity.CRITICAL,
         cwe=321,
         message="Hardcoded private key material detected in source.",
+        remediation=(
+            "Rotate the key pair immediately; a private key committed to a repository is "
+            "compromised regardless of who could read it. Load the key from a file path or "
+            "secret store given at deploy time."
+        ),
     ),
     SecretPattern(
         id="SECRET-HARDCODED-PASSWORD",
@@ -39,6 +50,11 @@ SECRET_PATTERNS: tuple[SecretPattern, ...] = (
         severity=Severity.HIGH,
         cwe=798,
         message="Hardcoded password detected in source code.",
+        remediation=(
+            "Move the value to an environment variable or secret store and rotate it. "
+            "Anything committed once stays in git history, so changing the line is not "
+            "enough on its own."
+        ),
     ),
     SecretPattern(
         id="SECRET-GENERIC-API-KEY",
@@ -49,6 +65,11 @@ SECRET_PATTERNS: tuple[SecretPattern, ...] = (
         severity=Severity.MEDIUM,
         cwe=798,
         message="Hardcoded API key or token detected in source code.",
+        remediation=(
+            "Revoke and reissue the token, then read it from the environment at "
+            "startup. If this is a placeholder or test fixture, an obviously fake "
+            "value keeps the scanner quiet without weakening the rule."
+        ),
     ),
 )
 
@@ -74,6 +95,8 @@ def scan_file(path: Path) -> list[Finding]:
                         file=str(path),
                         line=lineno,
                         col=match.start() + 1,
+                        category=Category.SECRETS,
+                        remediation=pattern.remediation,
                     )
                 )
     return findings

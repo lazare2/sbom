@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { ingestSastRequestSchema, idParamSchema } from "@sbom/shared";
-import { UnauthorizedError } from "../../lib/errors.js";
+import { z } from "zod";
+import { ingestSastRequestSchema, idParamSchema, uuidSchema } from "@sbom/shared";
+import { NotFoundError, UnauthorizedError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { IngestTokenService } from "../ingestion/ingest-token.service.js";
 import { resolveIngestScope } from "../ingestion/ingestion.routes.js";
@@ -90,7 +91,41 @@ export async function sastRoutes(fastify: FastifyInstance): Promise<void> {
     // that returns just a yes/no would mean adding one.
     await applications.getById(id, await environmentAccess(request));
 
-    const run = await sast.getLatestForApplication(id);
+    /*
+     * `?run=<id>` selects one historical run; without it the latest is
+     * returned. A query parameter rather than a second path because both
+     * answer the same question ("show me a run of this application") and the
+     * client swaps between them without changing which endpoint it calls.
+     */
+    const { run: runId } = parseOrThrow(
+      z.object({ run: uuidSchema.optional() }),
+      request.query,
+      "Query",
+    );
+
+    const run = runId
+      ? await sast.getRun(id, runId)
+      : await sast.getLatestForApplication(id);
+
+    // A run id that names nothing under this application is a 404 rather than
+    // a silent fall back to the latest: quietly showing different findings
+    // than the ones asked for is worse than an error.
+    if (runId && !run) throw new NotFoundError("SAST run");
+
     return reply.send({ run });
+  });
+
+  /** Run history for an application, newest first. Header rows only. */
+  fastify.get("/applications/:id/runs", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const { limit } = parseOrThrow(
+      z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) }),
+      request.query,
+      "Query",
+    );
+
+    await applications.getById(id, await environmentAccess(request));
+
+    return reply.send({ runs: await sast.listRuns(id, limit) });
   });
 }

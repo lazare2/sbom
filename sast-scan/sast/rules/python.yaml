@@ -9,6 +9,11 @@ rules:
   - id: PY-EVAL-001
     severity: HIGH
     cwe: 95
+    category: ast
+    remediation: >-
+      Replace eval() with ast.literal_eval() if you only need to parse a literal
+      (numbers, lists, dicts). If you need real dispatch, map the input to a
+      fixed set of allowed operations explicitly.
     message: >-
       Use of eval() can execute arbitrary code if any part of its input is
       influenced by an untrusted source.
@@ -19,6 +24,10 @@ rules:
   - id: PY-EXEC-001
     severity: HIGH
     cwe: 95
+    category: ast
+    remediation: >-
+      Remove exec(). Whatever it is doing dynamically can almost always be a
+      function, a dict of handlers, or importlib for a known module name.
     message: >-
       Use of exec() can execute arbitrary code if any part of its input is
       influenced by an untrusted source.
@@ -29,6 +38,11 @@ rules:
   - id: PY-PICKLE-UNSAFE-DESERIALIZATION-001
     severity: HIGH
     cwe: 502
+    category: ast
+    remediation: >-
+      Use json for data you did not produce yourself. If the format must stay
+      pickle, sign the payload (hmac) and verify before unpickling -- pickle
+      executes code during load, so validating afterwards is too late.
     message: >-
       pickle.load/loads on non-literal (e.g. externally-sourced) data can lead
       to arbitrary code execution during deserialization.
@@ -40,6 +54,11 @@ rules:
   - id: PY-SUBPROCESS-SHELL-TRUE-001
     severity: HIGH
     cwe: 78
+    category: ast
+    remediation: >-
+      Drop shell=True and pass the command as a list: subprocess.run(["ls",
+      path]). If a shell feature is genuinely required, quote every interpolated
+      value with shlex.quote().
     message: >-
       Calling subprocess.* with shell=True can lead to OS command injection
       if any part of the command is influenced by untrusted input.
@@ -53,6 +72,11 @@ rules:
   - id: PY-YAML-UNSAFE-LOAD-001
     severity: HIGH
     cwe: 502
+    category: ast
+    remediation: >-
+      Use yaml.safe_load(), or pass Loader=yaml.SafeLoader explicitly.
+      SafeLoader refuses the tags that let a YAML document construct arbitrary
+      Python objects.
     message: >-
       yaml.load() without Loader=SafeLoader (or CSafeLoader) can instantiate
       arbitrary Python objects and lead to code execution on untrusted input.
@@ -67,6 +91,11 @@ rules:
   - id: PY-WEAK-HASH-MD5-001
     severity: MEDIUM
     cwe: 327
+    category: ast
+    remediation: >-
+      Use hashlib.sha256() for integrity. For passwords a plain hash of any kind
+      is wrong -- use hashlib.scrypt(), argon2 or bcrypt, which are deliberately
+      slow.
     message: >-
       MD5 is cryptographically broken and unsuitable for security purposes
       (password hashing, integrity, signatures).
@@ -77,6 +106,11 @@ rules:
   - id: PY-WEAK-HASH-SHA1-001
     severity: MEDIUM
     cwe: 327
+    category: ast
+    remediation: >-
+      Use hashlib.sha256() for integrity. For passwords a plain hash of any kind
+      is wrong -- use hashlib.scrypt(), argon2 or bcrypt, which are deliberately
+      slow.
     message: >-
       SHA-1 is cryptographically broken and unsuitable for security purposes
       (password hashing, integrity, signatures).
@@ -87,6 +121,11 @@ rules:
   - id: PY-WEAK-RANDOM-001
     severity: LOW
     cwe: 330
+    category: ast
+    remediation: >-
+      For anything security-sensitive use the secrets module:
+      secrets.token_urlsafe() for tokens, secrets.choice() for picks. Keep
+      random for simulations and sampling, where predictability does not matter.
     message: >-
       The random module is not cryptographically secure; use the `secrets`
       module for tokens, passwords, or other security-sensitive values.
@@ -97,6 +136,11 @@ rules:
   - id: PY-ASSERT-SECURITY-CHECK-001
     severity: LOW
     cwe: 703
+    category: ast
+    remediation: >-
+      Replace the assert with an explicit check that raises: if not
+      user.is_admin: raise PermissionError(...). Keep assert for invariants you
+      are willing to lose under python -O.
     message: >-
       A security check implemented with assert is removed when Python runs
       with optimizations (-O / PYTHONOPTIMIZE), silently disabling the check.
@@ -137,6 +181,11 @@ taint:
       message: >-
         Tainted data reaches os.system(), which can lead to OS command
         injection.
+      remediation: >-
+        Trace the value back to its source and stop building a shell string
+        from it. subprocess.run([...]) with a list takes no shell, so nothing
+        in the value can be interpreted as syntax. If it must stay a string,
+        wrap the interpolated part in shlex.quote().
     - name: "subprocess."
       match_type: prefix
       cwe: 78
@@ -144,6 +193,10 @@ taint:
       message: >-
         Tainted data reaches a subprocess call, which can lead to OS command
         injection.
+      remediation: >-
+        Pass the command as a list rather than a string and leave shell=False
+        (the default). With no shell involved, a value containing ; or $() is
+        an argument, not a new command.
     - name: eval
       match_type: qualified
       cwe: 95
@@ -151,6 +204,10 @@ taint:
       message: >-
         Tainted data reaches eval(), which can lead to arbitrary code
         execution.
+      remediation: >-
+        This is the most direct form of remote code execution there is. Use
+        ast.literal_eval() for literals, or map the input onto an explicit
+        table of permitted operations.
     - name: exec
       match_type: qualified
       cwe: 95
@@ -158,6 +215,10 @@ taint:
       message: >-
         Tainted data reaches exec(), which can lead to arbitrary code
         execution.
+      remediation: >-
+        Untrusted input reaching exec() is remote code execution. Replace the
+        dynamic code with a function or a dict of handlers keyed by the
+        input.
     - name: execute
       match_type: attr
       cwe: 89
@@ -167,6 +228,12 @@ taint:
         Tainted data reaches a database cursor's execute() call via string
         building, which can lead to SQL injection. Use parameterized queries
         instead.
+      remediation: >-
+        Pass the values as bound parameters instead of formatting them into
+        the SQL: cursor.execute("SELECT ... WHERE name = %s", (name,)). The
+        driver then sends data and query separately, so the value can never
+        become syntax. Note table and column names cannot be parameterised --
+        those must come from an allow-list.
 
   sanitizers:
     - shlex.quote

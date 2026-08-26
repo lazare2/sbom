@@ -28,7 +28,7 @@ from sast.engine import (
     call_dotted_name,
     matches,
 )
-from sast.models import Finding
+from sast.models import Category, Finding
 
 
 def analyze_file(path: Path, rules: list[Rule], taint_cfg: TaintConfig) -> list[Finding]:
@@ -58,6 +58,8 @@ def analyze_file(path: Path, rules: list[Rule], taint_cfg: TaintConfig) -> list[
                             file=str(path),
                             line=node.lineno,
                             col=node.col_offset + 1,
+                            category=rule.category,
+                            remediation=rule.remediation,
                         )
                     )
 
@@ -194,6 +196,8 @@ def _scan_expr_for_sinks(
                     file=str(path),
                     line=sub.lineno,
                     col=sub.col_offset + 1,
+                    category=Category.TAINT,
+                    remediation=sink.remediation,
                 )
             )
     return findings

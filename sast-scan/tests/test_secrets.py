@@ -54,3 +54,11 @@ def test_findings_have_correct_location(tmp_path: Path) -> None:
     assert len(findings) == 1
     assert findings[0].line == 2
     assert findings[0].file == str(sample)
+
+
+def test_secret_findings_carry_category_and_remediation(vulnerable_dir: Path) -> None:
+    findings = scan_file(vulnerable_dir / "secrets_aws.py")
+    assert findings
+    for f in findings:
+        assert f.category.value == "secrets"
+        assert f.remediation, f"{f.rule_id} has no remediation"

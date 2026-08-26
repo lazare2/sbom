@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import type { ScanSummary, SortDirection } from "@sbom/shared";
 import { componentListSort, removedComponentSort, scanHistorySort } from "@sbom/shared";
@@ -34,8 +34,18 @@ import {
   type FindingsFilters,
 } from "../components/Findings.tsx";
 import { ScanningDisabledNotice, SeverityBadge, SeverityBar } from "../components/Severity.tsx";
-import { useApplicationSast, useApplicationVulnerabilities, useVulnStatus } from "../lib/queries.ts";
-import { EMPTY_SEVERITY_COUNTS, type SastSeverity, type SeverityCounts } from "@sbom/shared";
+import {
+  useApplicationSast,
+  useApplicationSastRuns,
+  useApplicationVulnerabilities,
+  useVulnStatus,
+} from "../lib/queries.ts";
+import {
+  EMPTY_SEVERITY_COUNTS,
+  type SastCategory,
+  type SastSeverity,
+  type SeverityCounts,
+} from "@sbom/shared";
 import {
   Badge,
   Button,
@@ -965,28 +975,87 @@ function HistoryTab({
     </>
   );
 }
-
 /** Highest first, same convention as Severity.tsx's SEVERITY_ORDER. */
 const SAST_SEVERITY_ORDER: SastSeverity[] = ["critical", "high", "medium", "low"];
 
+const SAST_CATEGORY_LABEL: Record<SastCategory, string> = {
+  secrets: "Secrets",
+  ast: "Code patterns",
+  taint: "Taint",
+};
+
 /**
- * sast-scan findings for this application's most recent run — see "Static
- * analysis (SAST)" in the top-level README.
+ * What each detection method actually does, shown as the category filter's
+ * tooltip. Three very different techniques share this tab, and "why did this
+ * one get found and that one not" is otherwise guesswork.
+ */
+const SAST_CATEGORY_HINT: Record<SastCategory, string> = {
+  secrets: "Line-by-line regex: credentials committed to source.",
+  ast: "Parsed syntax tree: dangerous calls, matched by name rather than by text.",
+  taint: "Untrusted input followed through a function into a dangerous call.",
+};
+
+/**
+ * sast-scan findings for one run — see "Static analysis (SAST)" in the
+ * top-level README.
  *
  * Unlike the Vulnerabilities tab above, this is not live against the current
- * build: it is a snapshot of whatever `sast-scan`'s CI job last posted to
- * `POST /api/v1/sast`, which only runs when that pipeline runs. Two scans
- * with the same code can show different runs simply because one's pipeline
- * hasn't executed yet — the "Run" line below exists so that is never mistaken
- * for the finding count having changed.
+ * build: it is whatever sast-scan's CI job last posted to `POST /api/v1/sast`,
+ * which only moves when that pipeline runs. The run selector is there so that
+ * is never mistaken for the findings themselves having changed — two
+ * applications differing here may just have differently-recent pipelines.
  */
 function SastTab({ applicationId }: { applicationId: string }) {
-  const { data, isLoading, error, refetch } = useApplicationSast(applicationId);
+  const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
+  const [severityFilter, setSeverityFilter] = useState<Set<SastSeverity>>(new Set());
+  const [categoryFilter, setCategoryFilter] = useState<Set<SastCategory>>(new Set());
+  const [searchInput, setSearchInput] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const search = useDebounced(searchInput, 200);
+
+  const { data, isLoading, isFetching, error, refetch } = useApplicationSast(
+    applicationId,
+    selectedRunId,
+  );
+  const { data: runsData } = useApplicationSastRuns(applicationId);
+
+  const run = data?.run ?? null;
+  const runs = runsData?.runs ?? [];
+
+  const visible = useMemo(() => {
+    if (!run) return [];
+    const needle = search.trim().toLowerCase();
+    return run.findings.filter((f) => {
+      if (severityFilter.size > 0 && !severityFilter.has(f.severity)) return false;
+      if (categoryFilter.size > 0 && !categoryFilter.has(f.category)) return false;
+      if (needle) {
+        const haystack = `${f.file} ${f.ruleId} ${f.message} cwe-${f.cwe}`.toLowerCase();
+        if (!haystack.includes(needle)) return false;
+      }
+      return true;
+    });
+  }, [run, severityFilter, categoryFilter, search]);
+
+  /** Grouped by file, because that is the unit someone actually opens to fix. */
+  const byFile = useMemo(() => {
+    const groups = new Map<string, typeof visible>();
+    for (const f of visible) {
+      const existing = groups.get(f.file);
+      if (existing) existing.push(f);
+      else groups.set(f.file, [f]);
+    }
+    for (const items of groups.values()) {
+      items.sort(
+        (a, b) =>
+          SAST_SEVERITY_ORDER.indexOf(a.severity) - SAST_SEVERITY_ORDER.indexOf(b.severity) ||
+          a.line - b.line,
+      );
+    }
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [visible]);
 
   if (isLoading) return <LoadingBlock label="Loading SAST findings" />;
   if (error) return <ErrorBanner error={error} onRetry={() => void refetch()} />;
-
-  const run = data?.run ?? null;
 
   if (!run) {
     return (
@@ -1005,6 +1074,20 @@ function SastTab({ applicationId }: { applicationId: string }) {
   }
 
   const counts: SeverityCounts = { ...EMPTY_SEVERITY_COUNTS, ...run.severityCounts };
+  const categoryCounts = run.findings.reduce<Record<string, number>>((acc, f) => {
+    acc[f.category] = (acc[f.category] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const toggle = <T,>(set: Set<T>, value: T): Set<T> => {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    return next;
+  };
+
+  const filtersActive =
+    severityFilter.size > 0 || categoryFilter.size > 0 || search.trim().length > 0;
 
   return (
     <Card>
@@ -1015,48 +1098,239 @@ function SastTab({ applicationId }: { applicationId: string }) {
             <span title={formatDateTime(run.createdAt)}>Run {formatRelative(run.createdAt)}</span>
             {run.commitSha ? <span>{shortSha(run.commitSha)}</span> : null}
             {run.branch ? <span>{run.branch}</span> : null}
+            {runs.length > 1 && runs[0]?.runId !== run.runId ? (
+              <Badge tone="warn" title="You are looking at an older run, not the most recent one.">
+                Historical run
+              </Badge>
+            ) : null}
           </span>
         }
-        actions={run.findingCount > 0 ? <SeverityBar counts={counts} className="w-40" /> : null}
+        actions={
+          <>
+            {runs.length > 1 ? (
+              <div className="w-64">
+                <Select
+                  value={selectedRunId ?? runs[0]?.runId ?? ""}
+                  onChange={(v) => {
+                    setSelectedRunId(v);
+                    setExpanded(new Set());
+                  }}
+                  ariaLabel="Choose which SAST run to view"
+                  options={runs.map((r) => ({
+                    value: r.runId,
+                    label: `${formatDateTime(r.createdAt)} — ${r.findingCount} finding${
+                      r.findingCount === 1 ? "" : "s"
+                    }${r.commitSha ? ` (${shortSha(r.commitSha)})` : ""}${
+                      r.isLatest ? " · latest" : ""
+                    }`,
+                  }))}
+                />
+              </div>
+            ) : null}
+            {run.findingCount > 0 ? <SeverityBar counts={counts} className="w-40" /> : null}
+          </>
+        }
       />
 
       {run.findingCount === 0 ? (
-        <EmptyState title="Clean run" hint="No findings in the most recent scan." />
+        <EmptyState title="Clean run" hint="No findings in this scan." />
       ) : (
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr>
-                <Th width="90px">Severity</Th>
-                <Th>Rule</Th>
-                <Th width="90px">CWE</Th>
-                <Th>Location</Th>
-                <Th>Message</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...run.findings]
-                .sort(
-                  (a, b) =>
-                    SAST_SEVERITY_ORDER.indexOf(a.severity) - SAST_SEVERITY_ORDER.indexOf(b.severity),
-                )
-                .map((f) => (
-                  <Tr key={f.id}>
-                    <Td>
-                      <SeverityBadge severity={f.severity} />
-                    </Td>
-                    <Td className="font-mono text-xs">{f.ruleId}</Td>
-                    <Td className="nums text-xs text-text-muted">CWE-{f.cwe}</Td>
-                    <Td className="max-w-[280px] truncate font-mono text-xs text-text-muted" title={f.file}>
-                      {f.file}:{f.line}
-                    </Td>
-                    <Td className="max-w-[480px] text-xs text-text-muted">{f.message}</Td>
-                  </Tr>
+        <>
+          <div className="flex flex-wrap items-center gap-2 border-b border-border-base px-4 py-3">
+            <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by severity">
+              {SAST_SEVERITY_ORDER.filter((s) => (run.severityCounts[s] ?? 0) > 0).map((s) => (
+                <FilterChip
+                  key={s}
+                  active={severityFilter.has(s)}
+                  onClick={() => setSeverityFilter(toggle(severityFilter, s))}
+                  label={`${s} ${run.severityCounts[s]}`}
+                />
+              ))}
+            </div>
+
+            <span className="h-4 w-px bg-border-base" aria-hidden="true" />
+
+            <div
+              className="flex flex-wrap gap-1"
+              role="group"
+              aria-label="Filter by detection method"
+            >
+              {(Object.keys(SAST_CATEGORY_LABEL) as SastCategory[])
+                .filter((c) => (categoryCounts[c] ?? 0) > 0)
+                .map((c) => (
+                  <FilterChip
+                    key={c}
+                    active={categoryFilter.has(c)}
+                    onClick={() => setCategoryFilter(toggle(categoryFilter, c))}
+                    label={`${SAST_CATEGORY_LABEL[c]} ${categoryCounts[c]}`}
+                    title={SAST_CATEGORY_HINT[c]}
+                  />
                 ))}
-            </tbody>
-          </Table>
-        </TableWrap>
+            </div>
+
+            <div className="ml-auto w-56">
+              <TextInput
+                value={searchInput}
+                onChange={setSearchInput}
+                placeholder="Filter by file, rule, CWE…"
+                ariaLabel="Filter findings"
+              />
+            </div>
+          </div>
+
+          {filtersActive ? (
+            <div className="border-b border-border-base px-4 py-2 text-xs text-text-muted">
+              Showing {formatNumber(visible.length)} of {formatNumber(run.findingCount)} findings.{" "}
+              <button
+                type="button"
+                className="text-accent hover:underline"
+                onClick={() => {
+                  setSeverityFilter(new Set());
+                  setCategoryFilter(new Set());
+                  setSearchInput("");
+                }}
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : null}
+
+          {visible.length === 0 ? (
+            <EmptyState
+              title="No findings match these filters"
+              hint="Clear a filter to widen the search."
+            />
+          ) : (
+            <div className={isFetching ? "opacity-60 transition-opacity" : undefined}>
+              {byFile.map(([file, items]) => (
+                <div key={file}>
+                  <div className="flex items-baseline gap-2 border-b border-border-base bg-bg-subtle px-4 py-2">
+                    <span className="font-mono text-xs font-medium text-text-base">{file}</span>
+                    <span className="text-xs text-text-muted">
+                      {items.length} finding{items.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <ul>
+                    {items.map((f) => {
+                      const isOpen = expanded.has(f.id);
+                      return (
+                        <li key={f.id} className="border-b border-border-base last:border-b-0">
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            onClick={() => setExpanded(toggle(expanded, f.id))}
+                            className="flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left hover:bg-bg-subtle"
+                          >
+                            <SeverityBadge severity={f.severity} />
+                            <span className="font-mono text-xs text-text-base">{f.ruleId}</span>
+                            <span className="nums font-mono text-xs text-text-muted">
+                              :{f.line}
+                            </span>
+                            <span className="truncate text-xs text-text-muted">{f.message}</span>
+                            <span className="ml-auto flex items-center gap-2">
+                              <Badge tone="neutral" title={SAST_CATEGORY_HINT[f.category]}>
+                                {SAST_CATEGORY_LABEL[f.category]}
+                              </Badge>
+                              <span className="nums text-xs text-text-faint">CWE-{f.cwe}</span>
+                              <span className="text-xs text-text-faint" aria-hidden="true">
+                                {isOpen ? "▾" : "▸"}
+                              </span>
+                            </span>
+                          </button>
+
+                          {isOpen ? (
+                            <div className="space-y-3 border-t border-border-base bg-bg-subtle px-4 py-3">
+                              <DetailBlock label="What was found">{f.message}</DetailBlock>
+                              <DetailBlock label="How to fix it">
+                                {f.remediation || (
+                                  <span className="text-text-faint">
+                                    This rule ships no guidance — likely from a custom rules file.
+                                  </span>
+                                )}
+                              </DetailBlock>
+                              <div className="flex flex-wrap gap-x-8 gap-y-3">
+                                <DetailBlock label="Location">
+                                  <Mono>
+                                    {f.file}:{f.line}:{f.col}
+                                  </Mono>
+                                </DetailBlock>
+                                <DetailBlock label="Reference">
+                                  <a
+                                    className="text-accent hover:underline"
+                                    href={`https://cwe.mitre.org/data/definitions/${f.cwe}.html`}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                  >
+                                    CWE-{f.cwe} on cwe.mitre.org
+                                  </a>
+                                </DetailBlock>
+                              </div>
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </Card>
+  );
+}
+
+/**
+ * A label/value pair inside an expanded finding.
+ *
+ * Not ui.tsx's `Field`, which truncates its value to a single line and emits
+ * dt/dd expecting a `dl` ancestor. The remediation here is a paragraph and has
+ * to wrap, which is the whole reason the row expands.
+ */
+function DetailBlock({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-text-faint">
+        {label}
+      </div>
+      <div className="mt-0.5 max-w-3xl text-xs leading-relaxed text-text-muted">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * A toggle chip for the filter rows above.
+ *
+ * Local to this tab rather than added to ui.tsx: the other pages here filter
+ * with selects and checkboxes, and promoting a one-off into the shared kit
+ * before a second caller exists is how a component library grows things nobody
+ * asked for.
+ */
+function FilterChip({
+  active,
+  onClick,
+  label,
+  title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={title}
+      className={`rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors ${
+        active
+          ? "border-accent bg-accent text-white"
+          : "border-border-base bg-bg-base text-text-muted hover:border-accent"
+      }`}
+    >
+      {label}
+    </button>
   );
 }

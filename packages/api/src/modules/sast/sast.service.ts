@@ -1,14 +1,16 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type {
   IngestSastRequest,
   IngestSastResponse,
   SastFinding,
+  SastRunListEntry,
   SastRunSummary,
   SastSeverityCounts,
 } from "@sbom/shared";
 import { emptySastSeverityCounts } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { application, sastFinding, sastRun } from "../../db/schema.js";
+import type { SastRunRow } from "../../db/schema.js";
 import { NotFoundError } from "../../lib/errors.js";
 import type { EnvironmentScope } from "../environments/environment.service.js";
 
@@ -87,8 +89,10 @@ export class SastService {
             runId: run.id,
             ruleId: f.rule_id,
             severity: f.severity,
+            category: f.category,
             cwe: f.cwe,
             message: f.message,
+            remediation: f.remediation,
             file: f.file,
             line: f.line,
             col: f.col,
@@ -128,6 +132,90 @@ export class SastService {
       .limit(1);
 
     if (!run) return null;
+    return this.summaryOf(run);
+  }
+
+  /**
+   * One specific run of an application, by id.
+   *
+   * Scoped to the application rather than looked up by run id alone: the
+   * caller has already been authorised for the application, and a bare run-id
+   * lookup would let that authorisation be spent on a run belonging to a
+   * different one.
+   */
+  async getRun(applicationId: string, runId: string): Promise<SastRunSummary | null> {
+    const { db } = this.deps;
+
+    const [run] = await db
+      .select()
+      .from(sastRun)
+      .where(and(eq(sastRun.applicationId, applicationId), eq(sastRun.id, runId)))
+      .limit(1);
+
+    if (!run) return null;
+    return this.summaryOf(run);
+  }
+
+  /**
+   * An application's run history, newest first.
+   *
+   * Header rows only — no findings — so this stays one query no matter how
+   * many runs are retained. Severity counts come from the denormalised columns
+   * on `sast_run` rather than a per-run aggregate over `sast_finding`, which
+   * is the reason those columns exist.
+   */
+  async listRuns(applicationId: string, limit = 30): Promise<SastRunListEntry[]> {
+    const { db } = this.deps;
+
+    const runs = await db
+      .select()
+      .from(sastRun)
+      .where(eq(sastRun.applicationId, applicationId))
+      .orderBy(desc(sastRun.createdAt))
+      .limit(limit);
+
+    if (runs.length === 0) return [];
+
+    /*
+     * Per-severity counts for the listed runs in one grouped query rather than
+     * one query per run. `sast_run` denormalises the total and the
+     * high-or-critical total, but not the full breakdown, and a history table
+     * that shows a severity bar needs all four.
+     */
+    const runIds = runs.map((r) => r.id);
+    const breakdown = await db
+      .select({
+        runId: sastFinding.runId,
+        severity: sastFinding.severity,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(sastFinding)
+      .where(inArray(sastFinding.runId, runIds))
+      .groupBy(sastFinding.runId, sastFinding.severity);
+
+    const countsByRun = new Map<string, SastSeverityCounts>();
+    for (const row of breakdown) {
+      const counts = countsByRun.get(row.runId) ?? emptySastSeverityCounts();
+      counts[row.severity] = row.count;
+      countsByRun.set(row.runId, counts);
+    }
+
+    return runs.map((run, index) => ({
+      runId: run.id,
+      commitSha: run.commitSha,
+      branch: run.branch,
+      createdAt: run.createdAt.toISOString(),
+      findingCount: run.findingCount,
+      severityCounts: countsByRun.get(run.id) ?? emptySastSeverityCounts(),
+      // The list is ordered newest-first and unfiltered, so the first row is
+      // the run the tab shows by default.
+      isLatest: index === 0,
+    }));
+  }
+
+  /** Shared by `getLatestForApplication` and `getRun`: a run row plus its findings. */
+  private async summaryOf(run: SastRunRow): Promise<SastRunSummary> {
+    const { db } = this.deps;
 
     const findingRows = await db
       .select()
@@ -142,8 +230,10 @@ export class SastService {
         id: row.id,
         ruleId: row.ruleId,
         severity: row.severity,
+        category: row.category,
         cwe: row.cwe,
         message: row.message,
+        remediation: row.remediation,
         file: row.file,
         line: row.line,
         col: row.col,

@@ -14,6 +14,17 @@ export const sastSeverities = ["low", "medium", "high", "critical"] as const;
 export const sastSeveritySchema = z.enum(sastSeverities);
 export type SastSeverity = z.infer<typeof sastSeveritySchema>;
 
+/**
+ * Which of sast-scan's three detection methods produced a finding.
+ *
+ * Stored rather than inferred from the rule id's prefix: a custom rules file
+ * may use any id it likes, and the UI's category filter must keep working for
+ * rules this platform has never seen.
+ */
+export const sastCategories = ["secrets", "ast", "taint"] as const;
+export const sastCategorySchema = z.enum(sastCategories);
+export type SastCategory = z.infer<typeof sastCategorySchema>;
+
 /** Display order and sort weight — highest first, same convention as SEVERITY_ORDER. */
 export const SAST_SEVERITY_ORDER: Record<SastSeverity, number> = {
   critical: 4,
@@ -40,6 +51,14 @@ export const sastFindingInputSchema = z.object({
   file: z.string().trim().min(1).max(1024),
   line: z.number().int().positive(),
   col: z.number().int().positive(),
+  /*
+   * Both optional: a pipeline pinned to an older sast-scan predates them, and
+   * refusing that upload would turn a scanner upgrade into a coordinated
+   * deploy. Absent category defaults to `ast` (what the bundled rules mostly
+   * are); absent remediation renders as "no guidance for this rule".
+   */
+  category: sastCategorySchema.default("ast"),
+  remediation: z.string().trim().max(2000).default(""),
 });
 export type SastFindingInput = z.infer<typeof sastFindingInputSchema>;
 
@@ -87,6 +106,9 @@ export interface SastFinding {
   file: string;
   line: number;
   col: number;
+  category: SastCategory;
+  /** Empty when the rule that produced this finding shipped no guidance. */
+  remediation: string;
 }
 
 /**
@@ -97,6 +119,24 @@ export interface SastFinding {
  * one is a few dozen — small enough that a second request for "page 2" would
  * cost more than sending the rest up front.
  */
+/**
+ * One row of an application's SAST run history.
+ *
+ * Header fields only -- deliberately without `findings`, so the history list
+ * stays one small query. The findings come from asking for that run
+ * specifically.
+ */
+export interface SastRunListEntry {
+  runId: string;
+  commitSha: string | null;
+  branch: string | null;
+  createdAt: string;
+  findingCount: number;
+  severityCounts: SastSeverityCounts;
+  /** True for the run the application's Static analysis tab shows by default. */
+  isLatest: boolean;
+}
+
 export interface SastRunSummary {
   runId: string;
   applicationId: string;

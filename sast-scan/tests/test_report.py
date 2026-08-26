@@ -85,3 +85,69 @@ def test_has_blocking_findings_false_when_only_low_medium() -> None:
 
 def test_has_blocking_findings_false_for_empty() -> None:
     assert has_blocking_findings([]) is False
+
+
+def test_json_includes_category_and_remediation() -> None:
+    from sast.models import Category
+
+    findings = [
+        Finding(
+            rule_id="PY-EVAL-001",
+            severity=Severity.HIGH,
+            cwe=95,
+            message="eval is dangerous",
+            file="a.py",
+            line=1,
+            col=1,
+            category=Category.AST,
+            remediation="Use ast.literal_eval().",
+        )
+    ]
+    entry = json.loads(format_json(findings))[0]
+    assert entry["category"] == "ast"
+    assert entry["remediation"] == "Use ast.literal_eval()."
+
+
+def test_console_hides_remediation_by_default_and_shows_it_with_flag() -> None:
+    from sast.models import Category
+
+    findings = [
+        Finding(
+            rule_id="PY-EVAL-001",
+            severity=Severity.HIGH,
+            cwe=95,
+            message="eval is dangerous",
+            file="a.py",
+            line=1,
+            col=1,
+            category=Category.AST,
+            remediation="Use ast dot literal underscore eval instead.",
+        )
+    ]
+    default = format_console(findings, use_color=False)
+    assert "fix:" not in default
+
+    explained = format_console(findings, use_color=False, show_remediation=True)
+    assert "fix:" in explained
+    assert "literal" in explained
+
+
+def test_sarif_puts_remediation_in_rule_help() -> None:
+    from sast.models import Category
+
+    findings = [
+        Finding(
+            rule_id="PY-EVAL-001",
+            severity=Severity.HIGH,
+            cwe=95,
+            message="eval is dangerous",
+            file="a.py",
+            line=1,
+            col=1,
+            category=Category.AST,
+            remediation="Use ast.literal_eval().",
+        )
+    ]
+    rule = json.loads(format_sarif(findings))["runs"][0]["tool"]["driver"]["rules"][0]
+    assert rule["help"]["text"] == "Use ast.literal_eval()."
+    assert rule["properties"]["category"] == "ast"

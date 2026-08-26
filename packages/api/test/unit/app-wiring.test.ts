@@ -399,12 +399,43 @@ describe("app wiring", () => {
     expect(Object.keys(badBody.json().error.details)).toContain("app_name");
   });
 
-  it("guards the SAST read endpoint behind a session", async () => {
+  it("guards every SAST read endpoint behind a session", async () => {
+    for (const url of [
+      "/api/v1/sast/applications/00000000-0000-4000-8000-000000000000",
+      "/api/v1/sast/applications/00000000-0000-4000-8000-000000000000?run=00000000-0000-4000-8000-000000000001",
+      "/api/v1/sast/applications/00000000-0000-4000-8000-000000000000/runs",
+    ]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode, url).toBe(401);
+    }
+  });
+
+  it("validates the SAST ingest body's optional detail fields", async () => {
+    // category and remediation are optional (an older sast-scan sends neither),
+    // but a category outside the enum is a mistake worth naming rather than
+    // silently coercing to the default.
     const res = await app.inject({
-      method: "GET",
-      url: "/api/v1/sast/applications/00000000-0000-4000-8000-000000000000",
+      method: "POST",
+      url: "/api/v1/sast",
+      headers: { authorization: "Bearer super-secret-ci-token", "content-type": "application/json" },
+      payload: {
+        app_name: "anything",
+        findings: [
+          {
+            rule_id: "X-1",
+            severity: "high",
+            cwe: 1,
+            message: "m",
+            file: "a.py",
+            line: 1,
+            col: 1,
+            category: "not-a-real-category",
+          },
+        ],
+      },
     });
-    expect(res.statusCode).toBe(401);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe("validation_failed");
   });
 
   it("requires authentication on the session-protected routes", async () => {

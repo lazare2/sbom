@@ -43,6 +43,7 @@ import type {
   PlatformSettings,
   ReportRunSummary,
   ReportSettings,
+  SastRunListEntry,
   SastRunSummary,
 } from "@sbom/shared";
 import type { componentSearchSort } from "@sbom/shared";
@@ -112,7 +113,8 @@ export const queryKeys = {
     ["applications", id, "vulnerabilities", params] as const,
   scanVulnerabilities: (id: string, params: Record<string, unknown>) =>
     ["scans", id, "vulnerabilities", params] as const,
-  applicationSast: (id: string) => ["applications", id, "sast"] as const,
+  applicationSast: (id: string, runId: string) => ["applications", id, "sast", runId] as const,
+  applicationSastRuns: (id: string) => ["applications", id, "sast", "runs"] as const,
 };
 
 // --- auth ------------------------------------------------------------------
@@ -753,10 +755,25 @@ export interface SastRunResponse {
  * paginated: `ingestSastRequestSchema` caps a run at 5000 findings, and a real
  * one is a few dozen.
  */
-export function useApplicationSast(id: string | undefined) {
+export function useApplicationSast(id: string | undefined, runId?: string) {
   return useQuery({
-    queryKey: queryKeys.applicationSast(id ?? ""),
-    queryFn: () => api.get<SastRunResponse>(`/sast/applications/${id}`),
+    queryKey: queryKeys.applicationSast(id ?? "", runId ?? ""),
+    queryFn: () =>
+      api.get<SastRunResponse>(`/sast/applications/${id}${toQueryString({ run: runId })}`),
+    enabled: Boolean(id),
+    placeholderData: (previous) => previous,
+  });
+}
+
+export interface SastRunsResponse {
+  runs: SastRunListEntry[];
+}
+
+/** An application's SAST run history — header rows only, newest first. */
+export function useApplicationSastRuns(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.applicationSastRuns(id ?? ""),
+    queryFn: () => api.get<SastRunsResponse>(`/sast/applications/${id}/runs`),
     enabled: Boolean(id),
   });
 }

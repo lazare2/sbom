@@ -25,6 +25,7 @@ import type {
   MaliciousFeedOutcome,
   MaliciousFeedTrigger,
   MaliciousMatchMode,
+  SastCategory,
   SastSeverity,
   ScanSource,
   ScanVulnStatus,
@@ -1600,8 +1601,18 @@ export const sastFinding = pgTable(
     /** e.g. `PY-EVAL-001`, `SECRET-AWS-ACCESS-KEY`, `TAINT-OS-SYSTEM` — see sast-scan's rules YAML. */
     ruleId: text("rule_id").notNull(),
     severity: text("severity").$type<SastSeverity>().notNull(),
+    /** Which detection method found it: secrets | ast | taint. */
+    category: text("category").$type<SastCategory>().notNull().default("ast"),
     cwe: integer("cwe").notNull(),
     message: text("message").notNull(),
+    /*
+     * How to fix it, denormalised onto every finding rather than held once per
+     * rule. There is no rule table to hold it: the rules live in sast-scan's
+     * YAML, a --rules flag can point at someone else's file entirely, and the
+     * platform must render guidance for rules it has never seen. Runs are
+     * capped at 5000 findings, so the duplication is bounded.
+     */
+    remediation: text("remediation").notNull().default(""),
     file: text("file").notNull(),
     line: integer("line").notNull(),
     col: integer("col").notNull(),

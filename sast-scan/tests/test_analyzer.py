@@ -103,3 +103,22 @@ def test_taint_propagates_through_fstring(tmp_path: Path, rules, taint_cfg) -> N
     )
     findings = analyze_file(sample, rules, taint_cfg)
     assert any(f.rule_id == "TAINT-OS-SYSTEM" for f in findings)
+
+
+def test_findings_carry_category_and_remediation(vulnerable_dir, rules, taint_cfg) -> None:
+    """Every bundled rule ships fix guidance, and labels which method found it."""
+    ast_findings = analyze_file(vulnerable_dir / "eval_exec.py", rules, taint_cfg)
+    assert ast_findings
+    for f in ast_findings:
+        assert f.category.value == "ast"
+        assert f.remediation, f"{f.rule_id} has no remediation"
+
+    taint_findings = [
+        f
+        for f in analyze_file(vulnerable_dir / "taint_command_injection.py", rules, taint_cfg)
+        if f.rule_id.startswith("TAINT-")
+    ]
+    assert taint_findings
+    for f in taint_findings:
+        assert f.category.value == "taint"
+        assert f.remediation, f"{f.rule_id} has no remediation"
