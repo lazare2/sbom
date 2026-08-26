@@ -9,9 +9,10 @@ import type {
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
+import { inScope, type EnvironmentScope } from "../environments/environment.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
-import { groupMemberPredicate } from "../vulnerabilities/scope.js";
+import { applicationScopePredicate } from "../vulnerabilities/scope.js";
 
 /**
  * Estate-wide aggregates for the landing page.
@@ -32,7 +33,7 @@ export class DashboardService {
     private readonly deps: { db: Database; config: Config; settings: SettingsService },
   ) {}
 
-  async stats(): Promise<DashboardStats> {
+  async stats(scope: EnvironmentScope): Promise<DashboardStats> {
     const { db, settings } = this.deps;
     // One definition of "stale", shared with the applications list and the analytics
     // report. Resolved once here so every aggregate in this query agrees.
@@ -42,25 +43,58 @@ export class DashboardService {
     // One round trip. These are independent aggregates over three tables, and
     // issuing them separately would cost three pool checkouts to build a single
     // screen.
+    //
+    // Two spellings of the same filter because the subqueries differ in whether they
+    // alias the table: `env` for the bare `FROM application`, `scopedA` where it is joined
+    // as `a`. Both are the estate filter and both must be present on every line.
+    const env = inScope("environment_id", scope);
+    const scopedA = inScope("a.environment_id", scope);
     const rows = await db.execute<Row<StatsRow>>(sql`
       SELECT
-        (SELECT count(*) FROM application)::int AS app_total,
-        (SELECT count(*) FROM application WHERE status = 'active')::int AS app_active,
-        (SELECT count(*) FROM application WHERE status = 'inactive')::int AS app_inactive,
-        (SELECT count(*) FROM application WHERE status = 'pending_confirmation')::int AS app_pending,
+        (SELECT count(*) FROM application WHERE ${env})::int AS app_total,
+        (SELECT count(*) FROM application WHERE status = 'active' AND ${env})::int AS app_active,
+        (SELECT count(*) FROM application WHERE status = 'inactive' AND ${env})::int AS app_inactive,
+        (SELECT count(*) FROM application
+          WHERE status = 'pending_confirmation' AND ${env})::int AS app_pending,
         (SELECT count(*) FROM application
           WHERE status = 'active'
             AND last_scan_at IS NOT NULL
-            AND last_scan_at < now() - ${staleInterval})::int AS app_stale,
-        (SELECT count(*) FROM application WHERE latest_scan_id IS NULL)::int AS app_never_scanned,
-        (SELECT count(*) FROM scan)::int AS scan_total,
-        (SELECT count(*) FROM scan WHERE created_at > now() - interval '24 hours')::int AS scan_24h,
-        (SELECT count(*) FROM scan WHERE created_at > now() - interval '7 days')::int AS scan_7d,
-        (SELECT max(created_at) FROM scan) AS scan_latest_at,
-        (SELECT count(*) FROM component)::int AS component_total,
+            AND last_scan_at < now() - ${staleInterval}
+            AND ${env})::int AS app_stale,
+        (SELECT count(*) FROM application
+          WHERE latest_scan_id IS NULL AND ${env})::int AS app_never_scanned,
+        /*
+          Builds reach their estate through their application. scan carries no environment of
+          its own -- an application cannot move between estates, so the join is the identity
+          rather than a lookup that could disagree.
+        */
+        (SELECT count(*) FROM scan s
+           JOIN application a ON a.id = s.application_id
+           WHERE ${scopedA})::int AS scan_total,
+        (SELECT count(*) FROM scan s
+           JOIN application a ON a.id = s.application_id
+           WHERE s.created_at > now() - interval '24 hours' AND ${scopedA})::int AS scan_24h,
+        (SELECT count(*) FROM scan s
+           JOIN application a ON a.id = s.application_id
+           WHERE s.created_at > now() - interval '7 days' AND ${scopedA})::int AS scan_7d,
+        (SELECT max(s.created_at) FROM scan s
+           JOIN application a ON a.id = s.application_id
+           WHERE ${scopedA}) AS scan_latest_at,
+        /*
+          Packages this estate has ever shipped, not every package the platform knows about.
+
+          The component table is a shared catalogue keyed on identity, so counting it directly
+          would report the same figure in every environment -- a number that grows when an
+          unrelated estate ingests something, on a page claiming to describe this one.
+        */
         (SELECT count(DISTINCT sc.component_id)
            FROM scan_component sc
-           JOIN application a ON a.latest_scan_id = sc.scan_id)::int AS component_current
+           JOIN application a ON a.id = sc.application_id
+           WHERE ${scopedA})::int AS component_total,
+        (SELECT count(DISTINCT sc.component_id)
+           FROM scan_component sc
+           JOIN application a ON a.latest_scan_id = sc.scan_id
+           WHERE ${scopedA})::int AS component_current
     `);
 
     const r = rowsOf(rows)[0];
@@ -102,9 +136,12 @@ export class DashboardService {
    * numbers legitimately sum to more than the application total for an image
    * carrying both Node and Python.
    */
-  async platforms(groupId: string | null = null): Promise<PlatformBreakdown> {
+  async platforms(
+    scope: EnvironmentScope,
+    groupId: string | null = null,
+  ): Promise<PlatformBreakdown> {
     const { db } = this.deps;
-    const inGroup = groupMemberPredicate(groupId);
+    const inGroup = applicationScopePredicate(groupId, scope);
 
     const osRows = await db.execute<Row<OsRow>>(sql`
       SELECT s.os_name AS name, s.os_version AS version, count(*)::int AS applications,
@@ -180,8 +217,11 @@ export class DashboardService {
   }
 
   /** Ecosystem mix across every application's current state. */
-  async ecosystems(groupId: string | null = null): Promise<EcosystemBreakdownEntry[]> {
-    const inGroup = groupMemberPredicate(groupId);
+  async ecosystems(
+    scope: EnvironmentScope,
+    groupId: string | null = null,
+  ): Promise<EcosystemBreakdownEntry[]> {
+    const inGroup = applicationScopePredicate(groupId, scope);
     const rows = await this.deps.db.execute<Row<EcosystemRow>>(sql`
       SELECT
         c.ecosystem,
@@ -218,8 +258,9 @@ export class DashboardService {
    */
   async topComponents(
     query: TopComponentsQuery & { groupId?: string | null },
+    scope: EnvironmentScope,
   ): Promise<TopComponentEntry[]> {
-    const inGroup = groupMemberPredicate(query.groupId ?? null);
+    const inGroup = applicationScopePredicate(query.groupId ?? null, scope);
     const rows = query.groupByName
       ? await this.deps.db.execute<Row<TopRow>>(sql`
           SELECT

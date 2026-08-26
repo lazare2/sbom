@@ -261,7 +261,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
 
   // Write side.
   const audit = new AuditService({ db });
-  const adminUsers = new AdminUsersService({ db, sessions, audit });
+  const adminUsers = new AdminUsersService({ db, sessions, audit, environments });
   const adminApplications = new AdminApplicationsService({ db, audit, applications });
   const adminGroups = new GroupsAdminService({ db, audit, groups });
   const adminMalicious = new MaliciousAdminService({

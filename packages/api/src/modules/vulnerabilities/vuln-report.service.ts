@@ -1,3 +1,4 @@
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import {
   EXPANDABLE_LIST_CAP,
@@ -15,7 +16,7 @@ import {
 import type { Database } from "../../db/client.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 import {
-  groupMemberPredicate,
+  applicationScopePredicate,
   NOT_SUPPRESSED,
   SCOPE_GROUP_EXPR,
   scopePredicate,
@@ -113,7 +114,11 @@ interface TopApplicationRow {
 export class VulnReportService {
   constructor(private readonly deps: { db: Database }) {}
 
-  async report(filter: VulnFilterState, limit: number): Promise<VulnerabilityReport> {
+  async report(
+    filter: VulnFilterState,
+    limit: number,
+    scope: EnvironmentScope,
+  ): Promise<VulnerabilityReport> {
     /*
      * With base image selected alone there is no application half to rank, so the
      * rankings switch to it. With anything else — including "all packages" — they stay on
@@ -123,12 +128,14 @@ export class VulnReportService {
 
     const [meta, counts, findingSide, topVulnerableApplications, topVulnerablePackages, exposure] =
       await Promise.all([
-        this.snapshotMeta(filter),
-        this.severityCounts(filter),
-        this.findingTotals(filter),
-        this.topApplications(filter, rankedScope, limit),
-        this.topPackages(filter, rankedScope, limit),
-        scopeIncludes(filter.scope, "os") ? this.baseImageExposure(filter) : Promise.resolve(null),
+        this.snapshotMeta(filter, scope),
+        this.severityCounts(filter, scope),
+        this.findingTotals(filter, scope),
+        this.topApplications(filter, rankedScope, limit, scope),
+        this.topPackages(filter, rankedScope, limit, scope),
+        scopeIncludes(filter.scope, "os")
+          ? this.baseImageExposure(filter, scope)
+          : Promise.resolve(null),
       ]);
 
     const builtAt = meta.dbBuiltAt;
@@ -174,14 +181,17 @@ export class VulnReportService {
    * estate's totals are a floor, and a catch-up in progress would otherwise read as an
    * improvement in exposure.
    */
-  private async snapshotMeta(filter: VulnFilterState): Promise<{
+  private async snapshotMeta(
+    filter: VulnFilterState,
+    scope: EnvironmentScope,
+  ): Promise<{
     dbBuiltAt: string | null;
     applicationsScanned: number;
     applicationsPending: number;
     applicationsAffected: number;
   }> {
     const severities = severitiesForBuckets(filter.severities);
-    const groupIn = groupMemberPredicate(filter.group);
+    const groupIn = applicationScopePredicate(filter.group, scope);
 
     /*
      * "Reached by the filter" means at least one finding in a selected severity, on a
@@ -228,12 +238,15 @@ export class VulnReportService {
    * Both come from the same rows, so the filtered figures and the reference figures they
    * are compared against cannot be computed over different populations.
    */
-  private async severityCounts(filter: VulnFilterState): Promise<{
+  private async severityCounts(
+    filter: VulnFilterState,
+    scope: EnvironmentScope,
+  ): Promise<{
     filtered: { app: SeverityCounts; os: SeverityCounts };
     unfiltered: { app: SeverityCounts; os: SeverityCounts };
   }> {
     const selected = new Set(severitiesForBuckets(filter.severities));
-    const groupIn = groupMemberPredicate(filter.group);
+    const groupIn = applicationScopePredicate(filter.group, scope);
 
 
     const columns = (["app", "os"] as const).flatMap((group) =>
@@ -278,10 +291,13 @@ export class VulnReportService {
    * been paid for, and computing them together means the two halves are always counted
    * over one population.
    */
-  private async findingTotals(filter: VulnFilterState): Promise<
+  private async findingTotals(
+    filter: VulnFilterState,
+    scope: EnvironmentScope,
+  ): Promise<
     Record<"app" | "os", { fixable: number; knownExploited: number; affectedPackages: number }>
   > {
-    const groupIn = groupMemberPredicate(filter.group);
+    const groupIn = applicationScopePredicate(filter.group, scope);
     const rows = await this.deps.db.execute<
       Row<{
         scope_group: string;
@@ -334,11 +350,12 @@ export class VulnReportService {
     filter: VulnFilterState,
     rankedScope: "app" | "os",
     limit: number,
+    scope: EnvironmentScope,
   ): Promise<TopVulnerableApplication[]> {
     const rows =
       filter.severities.length === 0
-        ? await this.topApplicationsFromSnapshot(rankedScope, limit, filter.group)
-        : await this.topApplicationsFromFindings(filter, rankedScope, limit);
+        ? await this.topApplicationsFromSnapshot(rankedScope, limit, scope, filter.group)
+        : await this.topApplicationsFromFindings(filter, rankedScope, limit, scope);
 
     return rows.map((row) => ({
       applicationId: row.application_id,
@@ -370,9 +387,10 @@ export class VulnReportService {
       filter and must narrow this path too, or selecting a group would leave the ranking
       showing the whole estate while every other card on the page was scoped.
     */
+    scope: EnvironmentScope,
     groupId: string | null,
   ): Promise<TopApplicationRow[]> {
-    const groupIn = groupMemberPredicate(groupId);
+    const groupIn = applicationScopePredicate(groupId, scope);
     // Column set for the ranked half. The snapshot is symmetric, so this is a choice of
     // prefix rather than two separate queries.
     const ranked =
@@ -416,8 +434,9 @@ export class VulnReportService {
     filter: VulnFilterState,
     rankedScope: "app" | "os",
     limit: number,
+    scope: EnvironmentScope,
   ): Promise<TopApplicationRow[]> {
-    const groupIn = groupMemberPredicate(filter.group);
+    const groupIn = applicationScopePredicate(filter.group, scope);
     const rows = await this.deps.db.execute<Row<TopApplicationRow>>(sql`
       WITH matched AS (
         SELECT
@@ -465,8 +484,9 @@ export class VulnReportService {
     filter: VulnFilterState,
     rankedScope: "app" | "os",
     limit: number,
+    scope: EnvironmentScope,
   ): Promise<TopVulnerablePackage[]> {
-    const groupIn = groupMemberPredicate(filter.group);
+    const groupIn = applicationScopePredicate(filter.group, scope);
     const rows = await this.deps.db.execute<
       Row<{
         component_id: number | string;
@@ -542,9 +562,10 @@ export class VulnReportService {
    */
   private async baseImageExposure(
     filter: VulnFilterState,
+    scope: EnvironmentScope,
   ): Promise<NonNullable<VulnerabilityReport["baseImageExposure"]>> {
     const severities = severitiesForBuckets(filter.severities);
-    const groupIn = groupMemberPredicate(filter.group);
+    const groupIn = applicationScopePredicate(filter.group, scope);
     const selected = jsonbSeveritySum("os", severities);
     const critical = jsonbSeveritySum("os", severities.includes("critical") ? ["critical"] : []);
     const high = jsonbSeveritySum("os", severities.includes("high") ? ["high"] : []);

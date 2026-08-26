@@ -19,7 +19,8 @@ import { rowsOf, toIso, type Row } from "../applications/applications.service.js
 import type { DashboardService } from "../dashboard/dashboard.service.js";
 import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 import type { SettingsService } from "../settings/settings.service.js";
-import { groupMemberPredicate } from "../vulnerabilities/scope.js";
+import { applicationScopePredicate } from "../vulnerabilities/scope.js";
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import type { VulnReportService } from "../vulnerabilities/vuln-report.service.js";
 
 /**
@@ -77,6 +78,8 @@ export class AnalyticsService {
      * every filter — and the page states that rather than leaving it to be inferred.
      */
     vulnFilter?: VulnFilterState;
+    /** Every section below describes one estate. There is no all-environments report. */
+    scope: EnvironmentScope;
   }): Promise<AnalyticsReport> {
     const limit = args.limit ?? 10;
     const vulnFilter = args.vulnFilter ?? INERT_VULN_FILTER;
@@ -105,16 +108,16 @@ export class AnalyticsService {
       ecosystems,
       platforms,
     ] = await Promise.all([
-      this.totals(periodStart, groupId),
-      this.coverage(limit, groupId),
-      this.deps.dashboard.topComponents({ limit, groupByName: false, groupId }),
-      this.topProjects(limit, groupId),
-      this.fragmentation(limit, groupId),
-      this.newPackages(periodStart, limit, groupId),
-      this.velocity(periodStart, groupId),
-      this.activity(periodStart, args.periodDays, groupId),
-      this.deps.dashboard.ecosystems(groupId),
-      this.deps.dashboard.platforms(groupId),
+      this.totals(periodStart, args.scope, groupId),
+      this.coverage(limit, args.scope, groupId),
+      this.deps.dashboard.topComponents({ limit, groupByName: false, groupId }, args.scope),
+      this.topProjects(limit, args.scope, groupId),
+      this.fragmentation(limit, args.scope, groupId),
+      this.newPackages(periodStart, limit, args.scope, groupId),
+      this.velocity(periodStart, args.scope, groupId),
+      this.activity(periodStart, args.periodDays, args.scope, groupId),
+      this.deps.dashboard.ecosystems(args.scope, groupId),
+      this.deps.dashboard.platforms(args.scope, groupId),
     ]);
 
     /*
@@ -126,7 +129,7 @@ export class AnalyticsService {
      * use the feature would be pure cost.
      */
     const vulnerabilities = (await this.deps.settings.vulnScanningEnabled())
-      ? await this.vulnerabilities(vulnFilter, limit)
+      ? await this.vulnerabilities(vulnFilter, limit, args.scope)
       : null;
 
     const meta: ReportMeta = {
@@ -160,14 +163,22 @@ export class AnalyticsService {
    * SBOMs contain, and they are the only part of this report a filter can narrow. The
    * queries live beside the app/base-image split they depend on.
    */
-  async vulnerabilities(filter: VulnFilterState, limit: number): Promise<VulnerabilityReport> {
-    return this.deps.vulnReport.report(filter, limit);
+  async vulnerabilities(
+    filter: VulnFilterState,
+    limit: number,
+    scope: EnvironmentScope,
+  ): Promise<VulnerabilityReport> {
+    return this.deps.vulnReport.report(filter, limit, scope);
   }
 
 
   /** Whole-estate counters. Deliberately identical to the dashboard's, plus the window. */
-  async totals(periodStart: Date, groupId: string | null = null): Promise<EstateTotals> {
-    const inGroup = groupMemberPredicate(groupId);
+  async totals(
+    periodStart: Date,
+    scope: EnvironmentScope,
+    groupId: string | null = null,
+  ): Promise<EstateTotals> {
+    const inGroup = applicationScopePredicate(groupId, scope);
     const rows = await this.deps.db.execute<Row<TotalsRow>>(sql`
       SELECT
         (SELECT count(*) FROM application a WHERE ${inGroup})::int AS app_total,
@@ -220,8 +231,12 @@ export class AnalyticsService {
    * active with no scan at all, which belongs in neither bucket, and computing
    * one from the other would quietly absorb those into "covered".
    */
-  async coverage(limit: number, groupId: string | null = null): Promise<CoverageReport> {
-    const inGroup = groupMemberPredicate(groupId);
+  async coverage(
+    limit: number,
+    scope: EnvironmentScope,
+    groupId: string | null = null,
+  ): Promise<CoverageReport> {
+    const inGroup = applicationScopePredicate(groupId, scope);
     const { db, config } = this.deps;
     const staleInterval = await this.deps.settings.staleInterval();
 
@@ -293,8 +308,12 @@ export class AnalyticsService {
    * and the recent-scans list already show, and a report that disagrees with the
    * screen about an application's package count is a bug report waiting to happen.
    */
-  async topProjects(limit: number, groupId: string | null = null): Promise<TopProjectEntry[]> {
-    const inGroup = groupMemberPredicate(groupId);
+  async topProjects(
+    limit: number,
+    scope: EnvironmentScope,
+    groupId: string | null = null,
+  ): Promise<TopProjectEntry[]> {
+    const inGroup = applicationScopePredicate(groupId, scope);
     const rows = await this.deps.db.execute<Row<TopProjectRow>>(sql`
       SELECT
         a.id,
@@ -325,8 +344,12 @@ export class AnalyticsService {
    * group-by-name mode, so `React` and `react` are one package rather than two
    * single-version rows that never surface here.
    */
-  async fragmentation(limit: number, groupId: string | null = null): Promise<FragmentationEntry[]> {
-    const inGroup = groupMemberPredicate(groupId);
+  async fragmentation(
+    limit: number,
+    scope: EnvironmentScope,
+    groupId: string | null = null,
+  ): Promise<FragmentationEntry[]> {
+    const inGroup = applicationScopePredicate(groupId, scope);
     const rows = await this.deps.db.execute<Row<FragmentationRow>>(sql`
       WITH current_components AS (
         SELECT DISTINCT sc.component_id, sc.application_id
@@ -379,12 +402,13 @@ export class AnalyticsService {
   async newPackages(
     periodStart: Date,
     limit: number,
+    scope: EnvironmentScope,
     groupId: string | null = null,
   ): Promise<NewPackageEntry[]> {
-    const inGroup = groupMemberPredicate(groupId);
+    const inGroup = applicationScopePredicate(groupId, scope);
     // The self-join below compares against a second application row, so it needs its own
     // predicate bound to that alias rather than a reused one silently pointing at `a`.
-    const inGroup2 = groupMemberPredicate(groupId, "a2");
+    const inGroup2 = applicationScopePredicate(groupId, scope, "a2");
     const rows = await this.deps.db.execute<Row<NewPackageRow>>(sql`
       WITH current_components AS (
         SELECT DISTINCT sc.component_id
@@ -440,8 +464,12 @@ export class AnalyticsService {
    *     separately. Their entire package list would otherwise land in `added`,
    *     and one newly onboarded service would dominate the estate's churn.
    */
-  async velocity(periodStart: Date, groupId: string | null = null): Promise<VelocitySummary> {
-    const inGroup = groupMemberPredicate(groupId);
+  async velocity(
+    periodStart: Date,
+    scope: EnvironmentScope,
+    groupId: string | null = null,
+  ): Promise<VelocitySummary> {
+    const inGroup = applicationScopePredicate(groupId, scope);
     const rows = await this.deps.db.execute<Row<VelocityRow>>(sql`
       WITH baseline AS (
         -- Each application's last build strictly before the window.
@@ -544,9 +572,10 @@ export class AnalyticsService {
   async activity(
     periodStart: Date,
     periodDays: number,
+    scope: EnvironmentScope,
     groupId: string | null = null,
   ): Promise<ActivityBucket[]> {
-    const inGroup = groupMemberPredicate(groupId);
+    const inGroup = applicationScopePredicate(groupId, scope);
     // Daily for windows a reader can still take in as bars, weekly beyond that.
     // Interpolated into the SQL rather than bound, because `date_trunc` and
     // `generate_series` need literals — hence the fixed strings, not the input.

@@ -1,3 +1,4 @@
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import type {
   ComponentSearchHit,
@@ -54,8 +55,20 @@ export class ComponentsService {
    * removed, its most recent occurrence is necessarily some earlier build. No
    * second query, no NOT EXISTS subquery over the large table.
    */
-  async search(query: ComponentSearchQuery): Promise<ComponentSearchResult> {
+  /**
+   * Search every estate the caller selected, labelling each row with the one it came from.
+   *
+   * `scopes` is a list rather than a single estate because this is the one view that spans
+   * them deliberately -- see ComponentSearchHit. An empty list would silently return
+   * nothing, so the caller resolves it before getting here and the route refuses a
+   * selection naming an estate the caller cannot reach.
+   */
+  async search(
+    query: ComponentSearchQuery,
+    scopes: EnvironmentScope[],
+  ): Promise<ComponentSearchResult> {
     const { db } = this.deps;
+    const environmentIds = scopes.map((s) => s.id);
 
     const nameCondition =
       query.match === "exact"
@@ -107,6 +120,8 @@ export class ComponentsService {
       )
       SELECT
         a.id      AS application_id,
+        a.environment_id,
+        e.name    AS environment_name,
         a.name    AS application_name,
         a.status  AS application_status,
         m.id      AS component_id,
@@ -123,8 +138,10 @@ export class ComponentsService {
       FROM usage u
       JOIN matched m     ON m.id = u.component_id
       JOIN application a ON a.id = u.application_id
+      JOIN environment e ON e.id = a.environment_id
       JOIN scan s        ON s.id = u.last_seen_scan_id
-      WHERE true ${scopeCondition} ${statusCondition}
+      WHERE a.environment_id = ANY(${sql.param(environmentIds)}::uuid[])
+        ${scopeCondition} ${statusCondition}
       ${searchOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
     `);
@@ -189,7 +206,10 @@ export class ComponentsService {
    * Every version of a package that appears anywhere, with how many applications
    * currently ship each one. Drives the "which version is where" view.
    */
-  async listVersions(name: string): Promise<
+  async listVersions(
+    name: string,
+    scopes: EnvironmentScope[],
+  ): Promise<
     Array<{ componentId: string; version: string | null; ecosystem: string; currentApplications: number; totalApplications: number }>
   > {
     const rows = await this.deps.db.execute<Row<{
@@ -217,7 +237,13 @@ export class ComponentsService {
         count(*)::int AS total_applications
       FROM matched m
       LEFT JOIN usage u ON u.component_id = m.id
+      /*
+        Counted per estate selection, matching the search this panel sits beside. Left as a
+        LEFT JOIN so a version that exists in the catalogue but is deployed nowhere the
+        caller can see still appears, with a count of zero rather than vanishing.
+      */
       LEFT JOIN application a ON a.id = u.application_id
+        AND a.environment_id = ANY(${sql.param(scopes.map((sc) => sc.id))}::uuid[])
       GROUP BY m.id, m.version, m.ecosystem
       ORDER BY m.version DESC NULLS LAST
     `);
@@ -234,6 +260,8 @@ export class ComponentsService {
 
 interface SearchRow {
   application_id: string;
+  environment_id: string;
+  environment_name: string;
   application_name: string;
   application_status: "active" | "inactive" | "pending_confirmation";
   component_id: number | string;
@@ -292,6 +320,8 @@ function searchOrderBy(sortBy: ComponentSearchQuery["sortBy"], dir: SortDirectio
 function toSearchHit(row: SearchRow): ComponentSearchHit {
   return {
     applicationId: row.application_id,
+    environmentId: row.environment_id,
+    environmentName: row.environment_name,
     applicationName: row.application_name,
     applicationStatus: row.application_status,
     componentId: String(row.component_id),

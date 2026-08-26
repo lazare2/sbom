@@ -6,7 +6,7 @@ import type {
   UpdateGroupRequest,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import { UNRESTRICTED_ACCESS, type EnvironmentScope } from "../environments/environment.service.js";
 import { applicationGroup, applicationGroupMember } from "../../db/schema.js";
 import {
   BadRequestError,
@@ -87,7 +87,8 @@ export class GroupsAdminService {
       return group;
     });
 
-    return this.deps.groups.getById(created.id);
+    // Behind requireAdmin, so every estate is already readable by this caller.
+    return this.deps.groups.getById(created.id, UNRESTRICTED_ACCESS);
   }
 
   async update(
@@ -120,7 +121,7 @@ export class GroupsAdminService {
       metadata: { from: { name: existing.name }, to: { name: input.name ?? existing.name } },
     });
 
-    return this.deps.groups.getById(id);
+    return this.deps.groups.getById(id, UNRESTRICTED_ACCESS);
   }
 
   /**
@@ -184,7 +185,7 @@ export class GroupsAdminService {
 
     });
 
-    return this.deps.groups.getById(id);
+    return this.deps.groups.getById(id, UNRESTRICTED_ACCESS);
   }
 
   /**

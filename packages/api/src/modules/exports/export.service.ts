@@ -1,3 +1,5 @@
+import type { EnvironmentAccess } from "@sbom/shared";
+import { readableBy } from "../environments/environment.service.js";
 import { sql } from "drizzle-orm";
 import {
   classifyComponentOrigin,
@@ -45,35 +47,50 @@ import type {
 export class ExportService {
   constructor(private readonly deps: { db: Database; settings: SettingsService }) {}
 
-  async forScan(scanId: string, flavour: ExportFlavour): Promise<ExportDocument> {
-    const { subject, scanIds } = await this.scanSubject(scanId);
+  async forScan(
+    scanId: string,
+    flavour: ExportFlavour,
+    access: EnvironmentAccess,
+  ): Promise<ExportDocument> {
+    const { subject, scanIds } = await this.scanSubject(scanId, access);
     return this.assemble(subject, scanIds, flavour);
   }
 
-  async forApplication(applicationId: string, flavour: ExportFlavour): Promise<ExportDocument> {
-    const { subject, scanIds } = await this.applicationSubject(applicationId);
+  async forApplication(
+    applicationId: string,
+    flavour: ExportFlavour,
+    access: EnvironmentAccess,
+  ): Promise<ExportDocument> {
+    const { subject, scanIds } = await this.applicationSubject(applicationId, access);
     return this.assemble(subject, scanIds, flavour);
   }
 
   // --- VEX -----------------------------------------------------------------
 
-  async vexForApplication(applicationId: string): Promise<VexDocument> {
-    const { subject, scanIds } = await this.applicationSubject(applicationId);
+  async vexForApplication(
+    applicationId: string,
+    access: EnvironmentAccess,
+  ): Promise<VexDocument> {
+    const { subject, scanIds } = await this.applicationSubject(applicationId, access);
     return this.assembleVex(subject, scanIds);
   }
 
-  async vexForScan(scanId: string): Promise<VexDocument> {
-    const { subject, scanIds } = await this.scanSubject(scanId);
+  async vexForScan(scanId: string, access: EnvironmentAccess): Promise<VexDocument> {
+    const { subject, scanIds } = await this.scanSubject(scanId, access);
     return this.assembleVex(subject, scanIds);
   }
 
-  async vexForGroup(groupId: string): Promise<VexDocument> {
-    const { subject, scanIds } = await this.groupSubject(groupId);
+  async vexForGroup(groupId: string, access: EnvironmentAccess): Promise<VexDocument> {
+    const { subject, scanIds } = await this.groupSubject(groupId, access);
     return this.assembleVex(subject, scanIds);
   }
 
-  async forGroup(groupId: string, flavour: ExportFlavour): Promise<ExportDocument> {
-    const { subject, scanIds } = await this.groupSubject(groupId);
+  async forGroup(
+    groupId: string,
+    flavour: ExportFlavour,
+    access: EnvironmentAccess,
+  ): Promise<ExportDocument> {
+    const { subject, scanIds } = await this.groupSubject(groupId, access);
     return this.assemble(subject, scanIds, flavour);
   }
 
@@ -85,10 +102,12 @@ export class ExportService {
 
   private async applicationSubject(
     applicationId: string,
+    access: EnvironmentAccess,
   ): Promise<{ subject: ExportSubject; scanIds: string[] }> {
     const rows = rowsOf(
       await this.deps.db.execute<Row<{ id: string; name: string; latest_scan_id: string | null }>>(
-        sql`SELECT id, name, latest_scan_id FROM application WHERE id = ${applicationId}::uuid`,
+        sql`SELECT id, name, latest_scan_id FROM application a WHERE a.id = ${applicationId}::uuid
+             AND ${readableBy("a.environment_id", access)}`,
       ),
     );
     const app = rows[0];
@@ -105,14 +124,17 @@ export class ExportService {
         kind: "application",
         id: app.id,
         name: app.name,
-        sources: await this.sourcesForScans(scanIds),
+        sources: await this.sourcesForScans(scanIds, access),
       },
       scanIds,
     };
   }
 
-  private async scanSubject(scanId: string): Promise<{ subject: ExportSubject; scanIds: string[] }> {
-    const sources = await this.sourcesForScans([scanId]);
+  private async scanSubject(
+    scanId: string,
+    access: EnvironmentAccess,
+  ): Promise<{ subject: ExportSubject; scanIds: string[] }> {
+    const sources = await this.sourcesForScans([scanId], access);
     if (sources.length === 0) throw new NotFoundError("Scan not found");
     const source = sources[0]!;
     return {
@@ -127,10 +149,14 @@ export class ExportService {
     };
   }
 
-  private async groupSubject(groupId: string): Promise<{ subject: ExportSubject; scanIds: string[] }> {
+  private async groupSubject(
+    groupId: string,
+    access: EnvironmentAccess,
+  ): Promise<{ subject: ExportSubject; scanIds: string[] }> {
     const groups = rowsOf(
       await this.deps.db.execute<Row<{ id: string; name: string }>>(
-        sql`SELECT id, name FROM application_group WHERE id = ${groupId}::uuid`,
+        sql`SELECT id, name FROM application_group g WHERE g.id = ${groupId}::uuid
+             AND ${readableBy("g.environment_id", access)}`,
       ),
     );
     const group = groups[0];
@@ -155,7 +181,7 @@ export class ExportService {
         kind: "group",
         id: group.id,
         name: group.name,
-        sources: await this.sourcesForScans(scanIds),
+        sources: await this.sourcesForScans(scanIds, access),
       },
       scanIds,
     };
@@ -163,7 +189,14 @@ export class ExportService {
 
   // -------------------------------------------------------------------------
 
-  private async sourcesForScans(scanIds: string[]): Promise<ExportSource[]> {
+  /*
+    Every export -- by scan, by application, by group -- resolves its builds here, which
+    makes this the one place the estate has to be enforced for the whole module.
+  */
+  private async sourcesForScans(
+    scanIds: string[],
+    access: EnvironmentAccess,
+  ): Promise<ExportSource[]> {
     if (scanIds.length === 0) return [];
     const rows = rowsOf(
       await this.deps.db.execute<
@@ -185,6 +218,7 @@ export class ExportService {
         FROM scan s
         JOIN application a ON a.id = s.application_id
         WHERE s.id = ANY(${sql.param(scanIds)}::uuid[])
+          AND ${readableBy("a.environment_id", access)}
         ORDER BY a.name ASC
       `),
     );

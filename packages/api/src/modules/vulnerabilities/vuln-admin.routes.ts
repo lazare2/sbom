@@ -262,8 +262,10 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
   // Suppressions
   // -------------------------------------------------------------------------
 
-  fastify.get("/suppressions", async (_request, reply) => {
-    return reply.send({ suppressions: await vulnerabilities.listSuppressions() });
+  fastify.get("/suppressions", async (request, reply) => {
+    return reply.send({
+      suppressions: await vulnerabilities.listSuppressions(await requireScope(request)),
+    });
   });
 
   fastify.post("/suppressions", async (request, reply) => {

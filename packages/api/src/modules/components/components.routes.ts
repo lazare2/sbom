@@ -1,4 +1,4 @@
-import { requireScope } from "../environments/scope.js";
+import { requireScope, selectedScopes } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
@@ -30,7 +30,12 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get("/search", async (request, reply) => {
     const query = parseOrThrow(componentSearchQuerySchema, request.query, "Query");
-    return reply.send(await components.search(query));
+    /*
+      The one search that spans estates on purpose. An unreachable environment named in
+      the selection is refused by selectedScopes rather than quietly dropped.
+    */
+    const scopes = await selectedScopes(request, query.environments);
+    return reply.send(await components.search(query, scopes));
   });
 
   fastify.get(
@@ -57,7 +62,8 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
       request.query,
       "Query",
     );
-    return reply.send({ name, versions: await components.listVersions(name) });
+    const scopes = await selectedScopes(request, undefined);
+    return reply.send({ name, versions: await components.listVersions(name, scopes) });
   });
 
   // --- bulk package list search --------------------------------------------
@@ -93,7 +99,8 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/bulk-search/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(bulkSearchQuerySchema, request.query, "Query");
-    const result = await bulkSearch.rerun({ queryId: id, query });
+    const scope = await requireScope(request);
+    const result = await bulkSearch.rerun({ queryId: id, query, scope });
     // The raw text goes back too, so opening a shared link repopulates the input
     // box — including the lines that failed to parse, which are the ones the
     // recipient will want to fix.
@@ -121,9 +128,10 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(bulkSearchQuerySchema, request.query, "Query");
 
-    const result = await bulkSearch.rerun({ queryId: id, query });
+    const scope = await requireScope(request);
+    const result = await bulkSearch.rerun({ queryId: id, query, scope });
     const { entries } = bulkSearch.parse(await bulkSearch.savedInput(id));
-    const matches = await bulkSearch.allMatches(entries, query, XLSX_MATCH_CAP);
+    const matches = await bulkSearch.allMatches(entries, query, XLSX_MATCH_CAP, scope);
 
     const user = getUser(request);
     const workbook = await renderBulkXlsx({

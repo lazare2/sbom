@@ -1,3 +1,4 @@
+import { inScope, type EnvironmentScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import { COMPONENT_DEPENDANT_CAP, COMPONENT_LOCATION_PATH_CAP, corroborationOf } from "@sbom/shared";
 import type {
@@ -20,7 +21,7 @@ import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
 import { direction, orderBy } from "../../lib/sorting.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 import { toComponentLocation } from "../ingestion/location-row.js";
-import { groupMemberPredicate } from "../vulnerabilities/scope.js";
+import { applicationScopePredicate } from "../vulnerabilities/scope.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import type { MaliciousFeedService } from "./malicious-feed.service.js";
 import type { MaliciousMatchService } from "./malicious-match.service.js";
@@ -178,7 +179,7 @@ export class MaliciousService {
    * renders as "no malicious packages", which is the single most dangerous thing this
    * platform could assert without having looked.
    */
-  async summary(): Promise<MaliciousSummary | null> {
+  async summary(scope: EnvironmentScope): Promise<MaliciousSummary | null> {
     const settings = await this.deps.settings.getMaliciousSettings();
     if (!settings.enabled) return null;
 
@@ -232,6 +233,7 @@ export class MaliciousService {
       LEFT JOIN malicious_acknowledgement ack
         ON ack.malicious_package_id = mp.id
        AND (ack.application_id IS NULL OR ack.application_id = a.id)
+      WHERE ${inScope("a.environment_id", scope)}
     `);
 
     const row = rowsOf(rows)[0];
@@ -252,7 +254,10 @@ export class MaliciousService {
     };
   }
 
-  async list(query: ListMaliciousQuery): Promise<Paginated<MaliciousFinding>> {
+  async list(
+    query: ListMaliciousQuery,
+    scope: EnvironmentScope,
+  ): Promise<Paginated<MaliciousFinding>> {
     const conditions: SQL[] = [LIVE_REPORT];
 
     if (query.search) {
@@ -262,7 +267,13 @@ export class MaliciousService {
     if (query.ecosystem) conditions.push(sql`mp.ecosystem = ${query.ecosystem}`);
     if (query.corroboration) conditions.push(corroborationPredicate(query.corroboration));
     if (query.application) conditions.push(sql`a.id = ${query.application}::uuid`);
-    if (query.group) conditions.push(groupMemberPredicate(query.group));
+    /*
+      Unconditional, unlike the filters around it. This used to be added only when a group
+      was chosen, because with no group there was nothing to narrow -- but the predicate now
+      also carries the estate, and a findings list that skipped it when no group was selected
+      would show another environment's malicious packages on the default view.
+    */
+    conditions.push(applicationScopePredicate(query.group ?? null, scope));
 
     const where = sql.join([sql`WHERE `, sql.join(conditions, sql` AND `)]);
 
@@ -354,7 +365,7 @@ export class MaliciousService {
    * here: the page is about a finding, and rendering a report nobody is affected by as though
    * it were one would be alarming for no reason.
    */
-  async getById(id: string): Promise<MaliciousFindingDetail> {
+  async getById(id: string, scope: EnvironmentScope): Promise<MaliciousFindingDetail> {
     const rows = await this.deps.db.execute<Row<FindingRow & DetailRow>>(sql`
       SELECT
         mp.id, mp.ecosystem, mp.package_name, mp.summary, mp.details, mp.match_mode,
@@ -387,13 +398,16 @@ export class MaliciousService {
       affectedVersions: row.affected_versions ?? [],
       modifiedAt: toIso(row.modified_at),
       withdrawnAt: toIso(row.withdrawn_at),
-      impacts: await this.impacts(id),
+      impacts: await this.impacts(id, scope),
       acknowledgements: all,
     };
   }
 
   /** Per-application detail: what was affected, when, and whether it is still shipping. */
-  private async impacts(id: string): Promise<MaliciousApplicationImpact[]> {
+  private async impacts(
+    id: string,
+    scope: EnvironmentScope,
+  ): Promise<MaliciousApplicationImpact[]> {
     /*
      * Locations are unioned across every build that carried the package, not taken from the
      * latest one. A package that moved between builds was in both places, and the reader is
@@ -414,7 +428,7 @@ export class MaliciousService {
         JOIN scan_component sc ON sc.component_id = cm.component_id
         JOIN application a ON a.id = sc.application_id
         JOIN scan s ON s.id = sc.scan_id
-        WHERE cm.malicious_package_id = ${id}
+        WHERE cm.malicious_package_id = ${id} AND ${inScope("a.environment_id", scope)}
       ),
       located AS (
         SELECT h.application_id,

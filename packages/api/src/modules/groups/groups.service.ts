@@ -1,3 +1,5 @@
+import type { EnvironmentAccess } from "@sbom/shared";
+import { inScope, readableBy, type EnvironmentScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import type {
   ApplicationGroupDetail,
@@ -68,12 +70,16 @@ export class GroupsService {
     `;
   }
 
-  async list(query: ListGroupsQuery): Promise<Paginated<ApplicationGroupSummary>> {
+  async list(
+    query: ListGroupsQuery,
+    scope: EnvironmentScope,
+  ): Promise<Paginated<ApplicationGroupSummary>> {
     const { db } = this.deps;
     const vulnEnabled = await this.deps.settings.vulnScanningEnabled();
     const offset = offsetOf(query);
 
-    const conditions: SQL[] = [];
+    /* Groups belong to one estate and never span two -- see schemas/environment.ts. */
+    const conditions: SQL[] = [inScope("g.environment_id", scope)];
     if (query.search) {
       conditions.push(sql`g.name ILIKE ${"%" + escapeLike(query.search) + "%"}`);
     }
@@ -250,7 +256,7 @@ export class GroupsService {
     return out;
   }
 
-  async getById(id: string): Promise<ApplicationGroupDetail> {
+  async getById(id: string, access: EnvironmentAccess): Promise<ApplicationGroupDetail> {
     const { db } = this.deps;
 
     const rows = await db.execute<Row<GroupListRow & { updated_at: Date | string }>>(sql`
@@ -258,7 +264,7 @@ export class GroupsService {
         g.id, g.name, g.description, g.created_at, g.updated_at,
         (SELECT count(*) FROM application_group_member m WHERE m.group_id = g.id) AS application_count
       FROM application_group g
-      WHERE g.id = ${id}::uuid
+      WHERE g.id = ${id}::uuid AND ${readableBy("g.environment_id", access)}
     `);
     const row = rowsOf(rows)[0];
     if (!row) throw new NotFoundError("Group");
@@ -335,8 +341,14 @@ export class GroupsService {
   async listAdvisories(
     groupId: string,
     query: ListGroupAdvisoriesQuery,
+    access: EnvironmentAccess,
   ): Promise<Paginated<GroupAdvisory>> {
-    await this.requireExists(groupId);
+    /*
+      The estate check happens here, on the group. Every row below is reached through the
+      group's membership, so a caller who may read the group may read its advisories -- and
+      one who may not gets a 404 before any of it runs.
+    */
+    await this.requireExists(groupId, access);
     if (!(await this.deps.settings.vulnScanningEnabled())) {
       return paginate([], 0, query);
     }
@@ -409,12 +421,16 @@ export class GroupsService {
   }
 
   /** Groups an application belongs to, for its detail page and the applications list chips. */
-  async listForApplication(applicationId: string): Promise<Array<{ id: string; name: string }>> {
+  async listForApplication(
+    applicationId: string,
+    access: EnvironmentAccess,
+  ): Promise<Array<{ id: string; name: string }>> {
     const rows = await this.deps.db.execute<Row<{ id: string; name: string }>>(sql`
       SELECT g.id, g.name
       FROM application_group_member m
       JOIN application_group g ON g.id = m.group_id
       WHERE m.application_id = ${applicationId}::uuid
+        AND ${readableBy("g.environment_id", access)}
       ORDER BY lower(g.name) ASC
     `);
     return rowsOf(rows);
@@ -428,16 +444,18 @@ export class GroupsService {
    * group should render "Group: unknown" beside figures for the whole estate, not 404 a page
    * that is otherwise perfectly answerable.
    */
-  async nameById(id: string): Promise<string | null> {
+  async nameById(id: string, access: EnvironmentAccess): Promise<string | null> {
     const rows = await this.deps.db.execute<Row<{ name: string }>>(
-      sql`SELECT name FROM application_group WHERE id = ${id}::uuid`,
+      sql`SELECT name FROM application_group g WHERE g.id = ${id}::uuid
+           AND ${readableBy("g.environment_id", access)}`,
     );
     return rowsOf(rows)[0]?.name ?? null;
   }
 
-  private async requireExists(id: string): Promise<void> {
+  private async requireExists(id: string, access: EnvironmentAccess): Promise<void> {
     const rows = await this.deps.db.execute<Row<{ id: string }>>(
-      sql`SELECT id FROM application_group WHERE id = ${id}::uuid`,
+      sql`SELECT id FROM application_group g WHERE g.id = ${id}::uuid
+           AND ${readableBy("g.environment_id", access)}`,
     );
     if (rowsOf(rows).length === 0) throw new NotFoundError("Group");
   }

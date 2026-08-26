@@ -1,3 +1,4 @@
+import { environmentAccess, requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
@@ -26,7 +27,7 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
 
   fastify.get("/", async (request, reply) => {
     const query = parseOrThrow(listApplicationsQuerySchema, request.query, "Query");
-    return reply.send(await applications.list(query));
+    return reply.send(await applications.list(query, await requireScope(request)));
   });
 
   /** Distinct values for an attribute key, for the list view's filter dropdowns. */
@@ -36,34 +37,43 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
       request.params,
       "Params",
     );
-    return reply.send({ values: await applications.listAttributeValues(key) });
+    return reply.send({
+      values: await applications.listAttributeValues(key, await requireScope(request)),
+    });
   });
 
   fastify.get("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return reply.send(await applications.getById(id));
+    return reply.send(await applications.getById(id, await environmentAccess(request)));
   });
 
   /** Components of the application's current state (its latest scan). */
   fastify.get("/:id/components", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(listScanComponentsQuerySchema, request.query, "Query");
-    return reply.send(await applications.listLatestComponents(id, query));
+    return reply.send(
+      await applications.listLatestComponents(id, query, await environmentAccess(request)),
+    );
   });
 
   /** Ecosystem breakdown of the latest scan, for the filter dropdown and a chart. */
   fastify.get("/:id/ecosystems", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    const app = await applications.getById(id);
+    const access = await environmentAccess(request);
+    const app = await applications.getById(id, access);
     if (!app.latestScanId) return reply.send({ ecosystems: [] });
-    return reply.send({ ecosystems: await applications.listEcosystemsOfScan(app.latestScanId) });
+    return reply.send({
+      ecosystems: await applications.listEcosystemsOfScan(app.latestScanId, access),
+    });
   });
 
   /** Full scan history for this application. */
   fastify.get("/:id/scans", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(listScansQuerySchema, request.query, "Query");
-    return reply.send(await scans.listForApplication(id, query));
+    return reply.send(
+      await scans.listForApplication(id, query, await environmentAccess(request)),
+    );
   });
 
   /**
@@ -77,7 +87,7 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
   fastify.get("/:id/removed-components", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(listRemovedComponentsQuerySchema, request.query, "Query");
-    return reply.send(await diff.listRemoved(id, query));
+    return reply.send(await diff.listRemoved(id, query, await environmentAccess(request)));
   });
 
   /**
@@ -88,10 +98,14 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(scanDiffQuerySchema, request.query, "Query");
     return reply.send(
-      await diff.diff(id, {
-        ...(query.fromScanId ? { fromScanId: query.fromScanId } : {}),
-        ...(query.toScanId ? { toScanId: query.toScanId } : {}),
-      }),
+      await diff.diff(
+        id,
+        {
+          ...(query.fromScanId ? { fromScanId: query.fromScanId } : {}),
+          ...(query.toScanId ? { toScanId: query.toScanId } : {}),
+        },
+        await environmentAccess(request),
+      ),
     );
   });
 }

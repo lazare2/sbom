@@ -1,3 +1,4 @@
+import { environmentAccess, requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { idParamSchema, listScanComponentsQuerySchema } from "@sbom/shared";
@@ -23,12 +24,12 @@ export async function scanRoutes(fastify: FastifyInstance): Promise<void> {
       request.query,
       "Query",
     );
-    return reply.send({ scans: await scans.listRecent(limit) });
+    return reply.send({ scans: await scans.listRecent(limit, await requireScope(request)) });
   });
 
   fastify.get("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return reply.send(await scans.getById(id));
+    return reply.send(await scans.getById(id, await environmentAccess(request)));
   });
 
   /**
@@ -40,14 +41,16 @@ export async function scanRoutes(fastify: FastifyInstance): Promise<void> {
     const query = parseOrThrow(listScanComponentsQuerySchema, request.query, "Query");
     // Confirms the scan exists (and yields a clean 404 if not) before querying
     // its components, which would otherwise return a misleading empty page.
-    await scans.getById(id);
-    return reply.send(await applications.listComponentsOfScan(id, query));
+    const access = await environmentAccess(request);
+    await scans.getById(id, access);
+    return reply.send(await applications.listComponentsOfScan(id, query, access));
   });
 
   fastify.get("/:id/ecosystems", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    await scans.getById(id);
-    return reply.send({ ecosystems: await applications.listEcosystemsOfScan(id) });
+    const access = await environmentAccess(request);
+    await scans.getById(id, access);
+    return reply.send({ ecosystems: await applications.listEcosystemsOfScan(id, access) });
   });
 
   /**
@@ -58,7 +61,7 @@ export async function scanRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get("/:id/raw", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    const { body, filename } = await scans.getRawSbom(id);
+    const { body, filename } = await scans.getRawSbom(id, await environmentAccess(request));
     return reply
       .header("Content-Type", "application/json")
       .header("Content-Disposition", `attachment; filename="${filename}"`)

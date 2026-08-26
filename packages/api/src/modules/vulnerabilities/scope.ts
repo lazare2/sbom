@@ -1,3 +1,4 @@
+import type { EnvironmentScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import {
   osPackageEcosystems,
@@ -100,10 +101,30 @@ export const NOT_SUPPRESSED: SQL = sql`NOT EXISTS (
  * The alias is passed because these queries do not agree on one — the analytics estate query
  * self-joins as `a2` — and hardcoding `a` would produce a predicate that silently referenced
  * the wrong row.
+ *
+ * Renamed from `applicationScopePredicate` when environments arrived. The old name described half
+ * of what it does, and a name mentioning only groups would hide the estate filter from every
+ * reader of the 24 queries that depend on it.
  */
-export function groupMemberPredicate(groupId: string | null | undefined, alias = "a"): SQL {
-  if (!groupId) return sql`TRUE`;
-  return sql`EXISTS (
+export function applicationScopePredicate(
+  groupId: string | null | undefined,
+  scope: EnvironmentScope,
+  alias = "a",
+): SQL {
+  /*
+    The estate filter is unconditional and comes first. It used to be that this helper
+    answered only "is this application in the selected group", and a query that passed no
+    group got `TRUE` -- every application in the deployment. Under environments that is a
+    query reading somebody else's estate, so there is no longer any argument combination
+    that yields an unrestricted predicate.
+
+    Scope is a required parameter rather than an optional one for the same reason: the 24
+    call sites for this helper are most of the platform's aggregate queries, and an optional
+    parameter is one a refactor can drop without the compiler noticing.
+  */
+  const inEstate = sql`${sql.raw(alias)}.environment_id = ${scope.id}::uuid`;
+  if (!groupId) return inEstate;
+  return sql`${inEstate} AND EXISTS (
     SELECT 1 FROM application_group_member gm
     WHERE gm.application_id = ${sql.raw(alias)}.id AND gm.group_id = ${groupId}::uuid
   )`;

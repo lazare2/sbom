@@ -1,3 +1,4 @@
+import { rowsOf, type Row } from "../../lib/rows.js";
 import { sql, type SQL } from "drizzle-orm";
 import type {
   ApplicationDetail,
@@ -14,6 +15,12 @@ import type {
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
+import type { EnvironmentAccess } from "@sbom/shared";
+import {
+  inScope,
+  readableBy,
+  type EnvironmentScope,
+} from "../environments/environment.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
@@ -48,7 +55,10 @@ export class ApplicationsService {
     return this.deps.settings.staleInterval();
   }
 
-  async list(query: ListApplicationsQuery): Promise<Paginated<ApplicationSummary>> {
+  async list(
+    query: ListApplicationsQuery,
+    scope: EnvironmentScope,
+  ): Promise<Paginated<ApplicationSummary>> {
     const { db } = this.deps;
     const staleInterval = await this.staleInterval();
     /*
@@ -59,7 +69,11 @@ export class ApplicationsService {
     */
     const vulnEnabled = await this.deps.settings.vulnScanningEnabled();
 
-    const conditions: SQL[] = [];
+    /*
+      The estate filter is the first condition rather than one appended among the others,
+      so it cannot be lost by an edit to the optional filters below it.
+    */
+    const conditions: SQL[] = [inScope("a.environment_id", scope)];
 
     /**
      * Default visibility: active plus pending_confirmation.
@@ -261,7 +275,7 @@ export class ApplicationsService {
     }
   }
 
-  async getById(id: string): Promise<ApplicationDetail> {
+  async getById(id: string, access: EnvironmentAccess): Promise<ApplicationDetail> {
     const { db } = this.deps;
     const staleInterval = await this.staleInterval();
 
@@ -302,7 +316,7 @@ export class ApplicationsService {
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
       LEFT JOIN scan_vuln_summary vs ON vs.scan_id = a.latest_scan_id
-      WHERE a.id = ${id}::uuid
+      WHERE a.id = ${id}::uuid AND ${readableBy("a.environment_id", access)}
     `);
 
     const row = rowsOf(rows)[0];
@@ -324,6 +338,7 @@ export class ApplicationsService {
   async listLatestComponents(
     applicationId: string,
     query: ListScanComponentsQuery,
+    access: EnvironmentAccess,
   ): Promise<
     Paginated<ScanComponentEntry> & {
       scanId: string | null;
@@ -351,7 +366,7 @@ export class ApplicationsService {
       SELECT a.latest_scan_id, s.locations_extracted_at, s.dependencies_extracted_at
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
-      WHERE a.id = ${applicationId}::uuid
+      WHERE a.id = ${applicationId}::uuid AND ${readableBy("a.environment_id", access)}
     `);
     const app = rowsOf(appRows)[0];
     if (!app) throw new NotFoundError("Application");
@@ -367,7 +382,7 @@ export class ApplicationsService {
       };
     }
 
-    const page = await this.listComponentsOfScan(app.latest_scan_id, query);
+    const page = await this.listComponentsOfScan(app.latest_scan_id, query, access);
     return {
       ...page,
       scanId: app.latest_scan_id,
@@ -380,10 +395,19 @@ export class ApplicationsService {
   async listComponentsOfScan(
     scanId: string,
     query: ListScanComponentsQuery,
+    access: EnvironmentAccess,
   ): Promise<Paginated<ScanComponentEntry>> {
     const { db } = this.deps;
 
-    const conditions: SQL[] = [sql`sc.scan_id = ${scanId}::uuid`];
+    const conditions: SQL[] = [
+      sql`sc.scan_id = ${scanId}::uuid`,
+      /*
+        Joined through the application rather than trusting that the caller reached this
+        scan id legitimately. A scan id is a uuid somebody can paste, and the components of
+        a build are the build.
+      */
+      readableBy("a.environment_id", access),
+    ];
 
     if (query.search) {
       // A single scan is a bounded set (thousands, not millions), so a plain
@@ -403,6 +427,7 @@ export class ApplicationsService {
              count(*) OVER () AS total
       FROM scan_component sc
       JOIN component c ON c.id = sc.component_id
+      JOIN application a ON a.id = sc.application_id
       ${where}
       ${componentOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
@@ -412,12 +437,16 @@ export class ApplicationsService {
   }
 
   /** Distinct ecosystems present in a scan, for the filter dropdown. */
-  async listEcosystemsOfScan(scanId: string): Promise<Array<{ ecosystem: string; count: number }>> {
+  async listEcosystemsOfScan(
+    scanId: string,
+    access: EnvironmentAccess,
+  ): Promise<Array<{ ecosystem: string; count: number }>> {
     const rows = await this.deps.db.execute<Row<{ ecosystem: string; count: number }>>(sql`
       SELECT c.ecosystem, count(*)::int AS count
       FROM scan_component sc
       JOIN component c ON c.id = sc.component_id
-      WHERE sc.scan_id = ${scanId}::uuid
+      JOIN application a ON a.id = sc.application_id
+      WHERE sc.scan_id = ${scanId}::uuid AND ${readableBy("a.environment_id", access)}
       GROUP BY c.ecosystem
       ORDER BY count DESC, c.ecosystem ASC
     `);
@@ -425,12 +454,13 @@ export class ApplicationsService {
   }
 
   /** Distinct attribute values across all applications, for filter dropdowns. */
-  async listAttributeValues(key: string): Promise<string[]> {
+  async listAttributeValues(key: string, scope: EnvironmentScope): Promise<string[]> {
     // `key` reaches SQL as a bind parameter, never interpolated.
     const rows = await this.deps.db.execute<Row<{ value: string }>>(sql`
       SELECT DISTINCT a.attributes ->> ${key} AS value
       FROM application a
       WHERE a.attributes ? ${key} AND a.attributes ->> ${key} <> ''
+        AND ${inScope("a.environment_id", scope)}
       ORDER BY value ASC
       LIMIT 500
     `);
@@ -470,24 +500,11 @@ export function componentOrderBy(sortBy: ListScanComponentsQuery["sortBy"], dir:
 // Row mapping
 // ---------------------------------------------------------------------------
 
-/**
- * Drizzle's `execute<T>` constrains T to `Record<string, unknown>`, which a plain
- * interface does not satisfy without an index signature. This adds one without
- * polluting the row interfaces themselves — they stay precise for consumers.
+/*
+ * Re-exported from lib/rows so the many modules importing them from here keep working.
+ * The implementation moved out to break an import cycle with environment.service.
  */
-export type Row<T> = T & Record<string, unknown>;
-
-/**
- * Normalises the driver's result shape.
- *
- * `db.execute` on node-postgres resolves to a pg QueryResult (`{ rows }`), but
- * other drizzle drivers return a bare array. Typing the parameter as the union
- * rather than `unknown` is what lets callers write `rowsOf(result)` and keep full
- * type inference on the row.
- */
-export function rowsOf<T>(result: { rows: T[] } | T[]): T[] {
-  return Array.isArray(result) ? result : result.rows;
-}
+export { rowsOf, type Row } from "../../lib/rows.js";
 
 interface ApplicationListRow extends PlatformRow {
   id: string;

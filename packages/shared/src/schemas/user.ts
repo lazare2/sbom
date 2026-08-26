@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { uuidSchema } from "./common.js";
 import { userRoleSchema } from "../enums.js";
 import { emailSchema, passwordSchema } from "./auth.js";
 import { paginationQuerySchema } from "./common.js";
@@ -15,6 +16,13 @@ import { defineSortTable } from "./sort.js";
  * moment the user logs in.
  */
 export const createUserRequestSchema = z.object({
+  /**
+   * Which environments this account may read. Omitted grants every one that exists.
+   *
+   * Ignored while the account's role is `admin` -- an administrator reads every estate by
+   * definition, including ones created after the account was made.
+   */
+  environmentIds: z.array(uuidSchema).max(100).optional(),
   email: emailSchema,
   role: userRoleSchema.default("user"),
   /** Omit to have the server generate one and return it once. */

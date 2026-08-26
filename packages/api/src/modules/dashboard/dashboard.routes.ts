@@ -1,3 +1,5 @@
+import type { EnvironmentAccess } from "@sbom/shared";
+import { environmentAccess, requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { normalizeVulnFilter, topComponentsQuerySchema, vulnFilterQuerySchema } from "@sbom/shared";
 import { parseOrThrow } from "../../lib/validate.js";
@@ -17,9 +19,11 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
    * The lookup happens here rather than inside `normalizeVulnFilter` because that function is
    * pure and shared with the client. One extra query only when a group is actually selected.
    */
-  async function resolveFilter(rawQuery: unknown) {
+  async function resolveFilter(rawQuery: unknown, access: EnvironmentAccess) {
     const query = parseOrThrow(vulnFilterQuerySchema, rawQuery, "Query");
-    const groupName = query.group ? await groups.nameById(query.group) : null;
+    // A group the caller cannot reach resolves to no name, and the filter falls back to
+    // the whole estate rather than labelling itself with another estate's group.
+    const groupName = query.group ? await groups.nameById(query.group, access) : null;
     return normalizeVulnFilter(query, groupName);
   }
 
@@ -45,8 +49,10 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
     if (!(await settings.vulnScanningEnabled())) {
       return reply.send({ vulnerabilities: null });
     }
-    const filter = await resolveFilter(request.query);
-    return reply.send({ vulnerabilities: await analytics.vulnerabilities(filter, 10) });
+    const filter = await resolveFilter(request.query, await environmentAccess(request));
+    return reply.send({
+      vulnerabilities: await analytics.vulnerabilities(filter, 10, await requireScope(request)),
+    });
   });
 
   /**
@@ -56,28 +62,32 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
    * A zeroed panel here would read as "no malicious packages found", which is the strongest
    * and most dangerous claim this platform could make without having looked.
    */
-  fastify.get("/malicious", async (_request, reply) => {
-    return reply.send({ malicious: await fastify.ctx.malicious.summary() });
+  fastify.get("/malicious", async (request, reply) => {
+    return reply.send({
+      malicious: await fastify.ctx.malicious.summary(await requireScope(request)),
+    });
   });
 
-  fastify.get("/stats", async (_request, reply) => {
-    return reply.send(await dashboard.stats());
+  fastify.get("/stats", async (request, reply) => {
+    return reply.send(await dashboard.stats(await requireScope(request)));
   });
 
-  fastify.get("/ecosystems", async (_request, reply) => {
-    return reply.send({ ecosystems: await dashboard.ecosystems() });
+  fastify.get("/ecosystems", async (request, reply) => {
+    return reply.send({ ecosystems: await dashboard.ecosystems(await requireScope(request)) });
   });
 
   /**
    * OS and runtime counts across current builds. Doubles as the option source
    * for the applications list's platform filters.
    */
-  fastify.get("/platforms", async (_request, reply) => {
-    return reply.send(await dashboard.platforms());
+  fastify.get("/platforms", async (request, reply) => {
+    return reply.send(await dashboard.platforms(await requireScope(request)));
   });
 
   fastify.get("/top-components", async (request, reply) => {
     const query = parseOrThrow(topComponentsQuerySchema, request.query, "Query");
-    return reply.send({ components: await dashboard.topComponents(query) });
+    return reply.send({
+      components: await dashboard.topComponents(query, await requireScope(request)),
+    });
   });
 }

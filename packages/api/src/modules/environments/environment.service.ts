@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type {
   Environment,
   EnvironmentAccess,
@@ -8,7 +8,7 @@ import type {
 import type { Database } from "../../db/client.js";
 import type { UserRow } from "../../db/schema.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../lib/errors.js";
-import { rowsOf, type Row } from "../applications/applications.service.js";
+import { rowsOf, type Row } from "../../lib/rows.js";
 
 /**
  * One estate, resolved and checked.
@@ -28,6 +28,42 @@ export interface EnvironmentScope {
 
 function scopeOf(id: string, name: string): EnvironmentScope {
   return { id, name, __environmentScope: true };
+}
+
+/**
+ * Access that grants every estate.
+ *
+ * For paths where no user is being restricted: an administrator route that has already
+ * passed requireAdmin, a background job, a seed script, or an ingest token which is trusted
+ * for whatever estate it names. Written as a name rather than an inline `{ all: true }` so
+ * that reading a call site tells you the restriction was considered and waived, not omitted.
+ */
+export const UNRESTRICTED_ACCESS: EnvironmentAccess = { all: true, environmentIds: [] };
+
+/**
+ * SQL fragment restricting a query to one estate. For lists, aggregates, and anything that
+ * produces a number -- the cases where "never mixed" is the whole promise.
+ *
+ * `column` is a literal written at the call site, never user input.
+ */
+export function inScope(column: string, scope: EnvironmentScope): SQL {
+  return sql`${sql.raw(column)} = ${scope.id}::uuid`;
+}
+
+/**
+ * SQL fragment restricting a query to every estate the caller may read.
+ *
+ * For fetching one named thing by its id, where filtering to the *currently selected*
+ * environment would be wrong: opening a link to an application while the switcher happens
+ * to sit on another estate would 404 on a perfectly valid URL. The caller is still confined
+ * to what they are granted, so this is forgiving about which estate is selected, not about
+ * who may look.
+ *
+ * An administrator matches everything, including estates created after this request.
+ */
+export function readableBy(column: string, access: EnvironmentAccess): SQL {
+  if (access.all) return sql`TRUE`;
+  return sql`${sql.raw(column)} = ANY(${sql.param(access.environmentIds)}::uuid[])`;
 }
 
 interface EnvironmentRow {
@@ -88,7 +124,7 @@ export class EnvironmentService {
     */
     const visible = access.all
       ? sql`TRUE`
-      : sql`e.id = ANY(${access.environmentIds}::uuid[])`;
+      : sql`e.id = ANY(${sql.param(access.environmentIds)}::uuid[])`;
 
     const result = await this.deps.db.execute<Row<EnvironmentRow>>(sql`
       SELECT

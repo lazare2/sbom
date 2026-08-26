@@ -1,3 +1,4 @@
+import { requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { listMaliciousQuerySchema } from "@sbom/shared";
 import { parseOrThrow } from "../../lib/validate.js";
@@ -40,13 +41,13 @@ export async function maliciousRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get("/", async (request, reply) => {
     const query = parseOrThrow(listMaliciousQuerySchema, request.query, "Query");
-    return reply.send(await malicious.list(query));
+    return reply.send(await malicious.list(query, await requireScope(request)));
   });
 
   fastify.get("/:id", async (request, reply) => {
     // Not `idParamSchema`: these ids are upstream OSV strings like `MAL-2024-1677`, not uuids.
     const { id } = request.params as { id: string };
-    return reply.send({ finding: await malicious.getById(id) });
+    return reply.send({ finding: await malicious.getById(id, await requireScope(request)) });
   });
 }
 

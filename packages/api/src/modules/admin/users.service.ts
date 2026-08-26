@@ -1,3 +1,4 @@
+import type { EnvironmentService } from "../environments/environment.service.js";
 import { eq, sql, type SQL } from "drizzle-orm";
 import type {
   CreateUserRequest,
@@ -69,7 +70,12 @@ function userOrderBy(sortBy: ListUsersQuery["sortBy"], dir: SortDirection): SQL 
  */
 export class AdminUsersService {
   constructor(
-    private readonly deps: { db: Database; sessions: SessionService; audit: AuditService },
+    private readonly deps: {
+      db: Database;
+      sessions: SessionService;
+      audit: AuditService;
+      environments: EnvironmentService;
+    },
   ) {}
 
   async list(query: ListUsersQuery): Promise<Paginated<UserSummary>> {
@@ -121,6 +127,18 @@ export class AdminUsersService {
    * the fix is another reset — which is cheap, and far better than a system that
    * can show you a password it should not still know.
    */
+  /**
+   * Create an account.
+   *
+   * `environmentIds` is optional and omitting it grants every environment that exists today.
+   * That is the documented default, and it is also the only behaviour that keeps a new
+   * account usable: a user with no grants is refused every data route, which reads as the
+   * platform being broken rather than as a permission that was never set.
+   *
+   * Rows are written for administrators too, even though the role already grants everything.
+   * They cost nothing while the account is an admin and they are what stops a later demotion
+   * to a read-only role from silently handing somebody the whole deployment.
+   */
   async create(input: CreateUserRequest, actor: Actor): Promise<UserCredentialResponse> {
     const password = input.password ?? generatePassword();
     const passwordHash = await hashPassword(password);
@@ -154,6 +172,19 @@ export class AdminUsersService {
       targetId: created.id,
       // Never the password, and never its hash.
       metadata: { email: created.email, role: created.role, mustChangePassword: created.mustChangePassword },
+    });
+
+    const granted = input.environmentIds ?? (await this.deps.environments.allIds());
+    await this.deps.environments.setEnvironmentsForUser(created.id, granted);
+
+    await this.deps.audit.record({
+      actor,
+      action: "user.environments_set",
+      targetType: "user",
+      targetId: created.id,
+      // Counts and ids, not names: an environment can be renamed and the trail must still
+      // say which one was granted.
+      metadata: { environmentIds: granted, count: granted.length, atCreation: true },
     });
 
     return { user: toUserSummary(rowToQueryRow(created, 0)), temporaryPassword: password };

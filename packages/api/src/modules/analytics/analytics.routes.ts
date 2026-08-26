@@ -1,3 +1,5 @@
+import type { EnvironmentAccess } from "@sbom/shared";
+import { environmentAccess, requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import {
   analyticsQuerySchema,
@@ -36,9 +38,11 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
    * The lookup happens here rather than inside `normalizeVulnFilter` because that function is
    * pure and shared with the client. One extra query only when a group is actually selected.
    */
-  async function resolveFilter(rawQuery: unknown) {
+  async function resolveFilter(rawQuery: unknown, access: EnvironmentAccess) {
     const query = parseOrThrow(vulnFilterQuerySchema, rawQuery, "Query");
-    const groupName = query.group ? await groups.nameById(query.group) : null;
+    // A group the caller cannot reach resolves to no name, and the filter falls back to
+    // the whole estate rather than labelling itself with another estate's group.
+    const groupName = query.group ? await groups.nameById(query.group, access) : null;
     return normalizeVulnFilter(query, groupName);
   }
 
@@ -47,7 +51,8 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
     const report = await analytics.report({
       periodDays: query.periodDays,
       generatedBy: getUser(request).email,
-      vulnFilter: await resolveFilter(request.query),
+      scope: await requireScope(request),
+      vulnFilter: await resolveFilter(request.query, await environmentAccess(request)),
     });
     return reply.send(report);
   });
@@ -62,7 +67,7 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get("/coverage", async (request, reply) => {
     const query = parseOrThrow(coverageQuerySchema, request.query, "Query");
-    return reply.send(await analytics.coverage(query.limit));
+    return reply.send(await analytics.coverage(query.limit, await requireScope(request)));
   });
 
   /**
@@ -78,7 +83,8 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
     const report = await analytics.report({
       periodDays: query.periodDays,
       generatedBy: getUser(request).email,
-      vulnFilter: await resolveFilter(request.query),
+      scope: await requireScope(request),
+      vulnFilter: await resolveFilter(request.query, await environmentAccess(request)),
     });
 
     const pdf = await renderReportPdf(report);

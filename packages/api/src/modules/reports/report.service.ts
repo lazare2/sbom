@@ -118,7 +118,7 @@ export class ReportService {
           // borrowing the monthly label and reading as a duplicate of the scheduled report.
           currentMonthPeriod(now, timeZone);
 
-    const snapshot = await snapshots.capture();
+    const snapshot = await snapshots.capture(options.scope);
 
     // Both baselines are monthly whatever kind is being generated: an ad-hoc preview answers
     // "what has changed since the last report management received".

@@ -1,3 +1,4 @@
+import { inScope, type EnvironmentScope } from "../environments/environment.service.js";
 import { sql } from "drizzle-orm";
 import { REPORT_SNAPSHOT_VERSION, type ReportSnapshot } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
@@ -16,8 +17,10 @@ import { findingKey } from "./delta.js";
 export class SnapshotService {
   constructor(private readonly deps: { db: Database }) {}
 
-  async capture(): Promise<ReportSnapshot> {
+  async capture(scope: EnvironmentScope): Promise<ReportSnapshot> {
     const { db } = this.deps;
+    /* Every section of a report describes one estate. See report-scheduler. */
+    const env = inScope("a.environment_id", scope);
 
     /*
       Inactive applications are included. They still exist, still carry findings, and the
@@ -29,6 +32,7 @@ export class SnapshotService {
     >(sql`
       SELECT a.id, a.name, a.status, a.last_scan_at
       FROM application a
+      WHERE ${env}
       ORDER BY a.name
     `);
 
@@ -47,6 +51,7 @@ export class SnapshotService {
       FROM scan_component sc
       JOIN application a ON a.latest_scan_id = sc.scan_id
       JOIN component c ON c.id = sc.component_id
+      WHERE ${env}
     `);
 
     const dependencyRows = await db.execute<
@@ -55,6 +60,7 @@ export class SnapshotService {
       SELECT DISTINCT a.id AS application_id, sc.component_id
       FROM scan_component sc
       JOIN application a ON a.latest_scan_id = sc.scan_id
+      WHERE ${env}
     `);
 
     /*
@@ -72,6 +78,7 @@ export class SnapshotService {
       JOIN component c ON c.id = cv.component_id
       JOIN scan_component sc ON sc.component_id = c.id
       JOIN application a ON a.latest_scan_id = sc.scan_id
+      WHERE ${env}
     `);
 
     const dbRow = await db.execute<Row<{ built_at: Date | null }>>(sql`

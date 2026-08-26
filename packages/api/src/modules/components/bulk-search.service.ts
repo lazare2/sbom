@@ -161,7 +161,7 @@ export class BulkSearchService {
       scope: args.scope,
     });
 
-    return this.run({ queryId, entries, parse: summary, query: args.query });
+    return this.run({ queryId, entries, parse: summary, query: args.query, scope: args.scope });
   }
 
   /**
@@ -171,7 +171,12 @@ export class BulkSearchService {
    * changes with every scan, and a stored answer behind a permanent link would be
    * a stale result wearing a current URL.
    */
-  async rerun(args: { queryId: string; query: BulkSearchQuery }): Promise<BulkSearchResult> {
+  async rerun(args: {
+    queryId: string;
+    query: BulkSearchQuery;
+    /* Re-running a saved list reads the estate it was saved in. */
+    scope: EnvironmentScope;
+  }): Promise<BulkSearchResult> {
     const { db } = this.deps;
 
     const rows = await db.execute<Row<{ raw_input: string }>>(sql`
@@ -185,7 +190,13 @@ export class BulkSearchService {
     if (!row) throw new NotFoundError("This package list no longer exists.");
 
     const { entries, summary } = parseBulkInput(row.raw_input);
-    return this.run({ queryId: args.queryId, entries, parse: summary, query: args.query });
+    return this.run({
+      queryId: args.queryId,
+      entries,
+      parse: summary,
+      query: args.query,
+      scope: args.scope,
+    });
   }
 
   /** The raw text of a saved list, so the UI can repopulate its input box. */
@@ -270,6 +281,8 @@ export class BulkSearchService {
     entries: readonly BulkEntry[];
     parse: BulkSearchResult["parse"];
     query: BulkSearchQuery;
+    /* A saved list belongs to one estate, so its results do too. */
+    scope: EnvironmentScope;
   }): Promise<BulkSearchResult> {
     const { queryId, entries, parse, query } = args;
 
@@ -286,11 +299,11 @@ export class BulkSearchService {
       };
     }
 
-    const { rows: rollup, applicationsAffected } = await this.rollup(entries, query);
+    const { rows: rollup, applicationsAffected } = await this.rollup(entries, query, args.scope);
     const summary = summarise(rollup, applicationsAffected);
 
     const matches =
-      query.view === "matches" ? await this.matches(entries, query) : undefined;
+      query.view === "matches" ? await this.matches(entries, query, args.scope) : undefined;
 
     return {
       queryId,
@@ -314,6 +327,7 @@ export class BulkSearchService {
   private async rollup(
     entries: readonly BulkEntry[],
     query: BulkSearchQuery,
+    scope: EnvironmentScope,
   ): Promise<{ rows: BulkRollupRow[]; applicationsAffected: number }> {
     const lines = entries.map((e) => e.line);
     const names = this.nameKeys(entries, query);
@@ -440,7 +454,8 @@ export class BulkSearchService {
           (u.last_seen_scan_id = a.latest_scan_id) AS in_latest
         FROM capped m
         LEFT JOIN usage u      ON u.component_id = m.component_id
-        LEFT JOIN application a ON a.id = u.application_id ${statusCondition}
+        LEFT JOIN application a ON a.id = u.application_id
+          AND a.environment_id = ${scope.id}::uuid ${statusCondition}
       ),
       /* Overflow is a property of the match, so it is read off matched, before the cap. */
       overflow AS (
@@ -527,6 +542,7 @@ export class BulkSearchService {
   private async matches(
     entries: readonly BulkEntry[],
     query: BulkSearchQuery,
+    scope: EnvironmentScope,
   ): Promise<NonNullable<BulkSearchResult["matches"]>> {
     const names = this.nameKeys(entries, query);
     const versions = entries.map((e) => (e.versionKind === "exact" ? e.version : null));
@@ -592,6 +608,7 @@ export class BulkSearchService {
         ORDER BY sc.component_id, sc.application_id, sc.created_at DESC, sc.scan_id DESC
       )
       SELECT
+        a.environment_id, e.name AS environment_name,
         a.id AS application_id, a.name AS application_name, a.status AS application_status,
         m.id AS component_id, m.name AS component_name, m.version AS component_version,
         m.ecosystem, m.purl,
@@ -601,7 +618,8 @@ export class BulkSearchService {
         count(*) OVER () AS total
       FROM usage u
       JOIN matched m      ON m.id = u.component_id
-      JOIN application a  ON a.id = u.application_id
+      JOIN application a  ON a.id = u.application_id AND a.environment_id = ${scope.id}::uuid
+      JOIN environment e  ON e.id = a.environment_id
       JOIN scan s         ON s.id = u.last_seen_scan_id
       WHERE true ${scopeCondition} ${statusCondition}
       ${bulkMatchesOrderBy(query.sortBy, query.sortDir)}
@@ -623,8 +641,9 @@ export class BulkSearchService {
     entries: readonly BulkEntry[],
     query: BulkSearchQuery,
     cap: number,
+    scope: EnvironmentScope,
   ): Promise<{ items: ComponentSearchHit[]; truncated: boolean }> {
-    const page = await this.matches(entries, { ...query, page: 1, pageSize: cap + 1 });
+    const page = await this.matches(entries, { ...query, page: 1, pageSize: cap + 1 }, scope);
     return {
       items: page.items.slice(0, cap),
       truncated: page.items.length > cap,
@@ -680,6 +699,8 @@ interface RecentListRow {
 }
 
 interface MatchRow {
+  environment_id: string;
+  environment_name: string;
   application_id: string;
   application_name: string;
   application_status: "active" | "inactive" | "pending_confirmation";
@@ -702,6 +723,8 @@ function toStringArray(value: unknown): string[] {
 
 function toSearchHit(row: MatchRow): ComponentSearchHit {
   return {
+    environmentId: row.environment_id,
+    environmentName: row.environment_name,
     applicationId: row.application_id,
     applicationName: row.application_name,
     applicationStatus: row.application_status,

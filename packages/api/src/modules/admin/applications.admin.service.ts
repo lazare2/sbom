@@ -9,7 +9,7 @@ import type {
   UpdateApplicationRequest,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import { UNRESTRICTED_ACCESS, type EnvironmentScope } from "../environments/environment.service.js";
 import { application, applicationAlias, attributeDefinition } from "../../db/schema.js";
 import {
   BadRequestError,
@@ -78,7 +78,8 @@ export class AdminApplicationsService {
       metadata: { name: created.name, status: created.status, attributes },
     });
 
-    return this.deps.applications.getById(created.id);
+    // Behind requireAdmin, so every estate is already readable by this caller.
+    return this.deps.applications.getById(created.id, UNRESTRICTED_ACCESS);
   }
 
   async update(id: string, input: UpdateApplicationRequest, actor: Actor): Promise<ApplicationDetail> {
@@ -132,7 +133,7 @@ export class AdminApplicationsService {
       },
     });
 
-    return this.deps.applications.getById(id);
+    return this.deps.applications.getById(id, UNRESTRICTED_ACCESS);
   }
 
   /**
@@ -201,7 +202,7 @@ export class AdminApplicationsService {
       metadata: { name: patch.name ?? existing.name, previousName: existing.name },
     });
 
-    return this.deps.applications.getById(id);
+    return this.deps.applications.getById(id, UNRESTRICTED_ACCESS);
   }
 
   /**

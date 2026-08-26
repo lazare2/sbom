@@ -46,11 +46,33 @@ export const componentSearchQuerySchema = paginationQuerySchema
     match: nameMatchSchema.default("contains"),
     /** Include applications whose status is inactive. */
     includeInactive: z.coerce.boolean().default(false),
+    /**
+     * Which estates to search, by name or id. Omitted means every one the caller can reach,
+     * which is what the page opens on.
+     *
+     * Naming an environment the caller cannot reach is refused rather than quietly dropped:
+     * returning fewer estates than were asked for produces an answer that looks complete
+     * and is not.
+     */
+    environments: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : Array.isArray(v) ? v : [v])),
   })
   .merge(componentSearchSort.querySchema);
 export type ComponentSearchQuery = z.infer<typeof componentSearchQuerySchema>;
 
 export interface ComponentSearchHit {
+  /*
+    Package search is the one view that deliberately spans estates.
+
+    "Where does log4j appear" is a question about the whole deployment, and answering it one
+    environment at a time invites someone to check production, find nothing, and stop. It
+    stays inside the never-mix rule because it is a lookup rather than an aggregate: every
+    row names the estate it came from, and no figure is summed across them.
+  */
+  environmentId: string;
+  environmentName: string;
   applicationId: string;
   applicationName: string;
   applicationStatus: "active" | "inactive" | "pending_confirmation";

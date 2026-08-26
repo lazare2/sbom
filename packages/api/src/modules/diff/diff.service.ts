@@ -1,3 +1,5 @@
+import type { EnvironmentAccess } from "@sbom/shared";
+import { readableBy } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import type {
   ComponentRef,
@@ -66,12 +68,24 @@ export class DiffService {
    * Defaults are chosen so the common case needs no parameters: `toScanId`
    * alone diffs a build against the one immediately before it.
    */
-  async diff(applicationId: string, opts: { fromScanId?: string; toScanId?: string }): Promise<ScanDiff> {
+  async diff(
+    applicationId: string,
+    opts: { fromScanId?: string; toScanId?: string },
+    access: EnvironmentAccess,
+  ): Promise<ScanDiff> {
     const { db } = this.deps;
+
+    /*
+      Checked once, here, rather than on each scan lookup below. requireScan already
+      confines a scan to this application, so establishing that the caller may read the
+      application settles every scan reachable from it -- including the explicitly named
+      ones, which otherwise arrive as ids with nothing tying them to an estate.
+    */
+    await this.requireReadableApplication(applicationId, access);
 
     const toScan = opts.toScanId
       ? await this.requireScan(opts.toScanId, applicationId)
-      : await this.requireLatestScan(applicationId);
+      : await this.requireLatestScan(applicationId, access);
 
     const fromScan = opts.fromScanId
       ? await this.requireScan(opts.fromScanId, applicationId)
@@ -162,11 +176,13 @@ export class DiffService {
   async listRemoved(
     applicationId: string,
     query: ListRemovedComponentsQuery,
+    access: EnvironmentAccess,
   ): Promise<Paginated<RemovedComponent> & { latestScanId: string | null }> {
     const { db } = this.deps;
 
     const appRows = await db.execute<Row<{ latest_scan_id: string | null }>>(sql`
-      SELECT latest_scan_id FROM application WHERE id = ${applicationId}::uuid
+      SELECT latest_scan_id FROM application a WHERE a.id = ${applicationId}::uuid
+        AND ${readableBy("a.environment_id", access)}
     `);
     const app = rowsOf(appRows)[0];
     if (!app) throw new NotFoundError("Application");
@@ -301,11 +317,25 @@ export class DiffService {
     return toScanRef(row);
   }
 
-  private async requireLatestScan(applicationId: string): Promise<ScanRef> {
+  private async requireReadableApplication(
+    applicationId: string,
+    access: EnvironmentAccess,
+  ): Promise<void> {
+    const rows = await this.deps.db.execute<Row<{ id: string }>>(sql`
+      SELECT a.id FROM application a
+      WHERE a.id = ${applicationId}::uuid AND ${readableBy("a.environment_id", access)}
+    `);
+    if (rowsOf(rows).length === 0) throw new NotFoundError("Application");
+  }
+
+  private async requireLatestScan(
+    applicationId: string,
+    access: EnvironmentAccess,
+  ): Promise<ScanRef> {
     const rows = await this.deps.db.execute<Row<ScanRefRow>>(sql`
       SELECT s.id, s.application_id, s.created_at, s.commit_sha, s.build_number
       FROM application a JOIN scan s ON s.id = a.latest_scan_id
-      WHERE a.id = ${applicationId}::uuid
+      WHERE a.id = ${applicationId}::uuid AND ${readableBy("a.environment_id", access)}
     `);
     const row = rowsOf(rows)[0];
     if (!row) throw new BadRequestError("This application has no scans yet, so there is nothing to compare.");
