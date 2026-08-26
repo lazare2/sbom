@@ -1344,6 +1344,77 @@ log("22b-dep. dependants in the component list");
   await shot("component-dependants");
 }
 
+// --- 22b-raw. downloading a build's SBOM from the history ---------------------
+//
+// The size cell in the scan history doubles as the download. Two things can go wrong and
+// neither shows up as a console error: the anchor renders but points somewhere that 404s,
+// or it renders without `download` and the browser displays the JSON instead of saving it.
+// So this follows the href for real rather than trusting that a link exists.
+log("22b-raw. SBOM download from the scan history");
+{
+  await page.goto(`${BASE}/applications`, { waitUntil: "networkidle" });
+  await page
+    .locator("tbody tr", { hasText: TEST_APP })
+    .locator('a[href^="/applications/"]')
+    .first()
+    .click();
+  await page.waitForURL(/\/applications\/[0-9a-f-]+/, { timeout: 10000 });
+  await page.getByRole("tab", { name: /Scan history/ }).click();
+  await page.waitForLoadState("networkidle");
+
+  const link = page.locator('tbody tr a[href*="/raw"]').first();
+
+  // count() does not auto-wait, so it has to be given something that does. networkidle
+  // fires when the request finishes, which is before React has rendered the row.
+  await link.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+
+  if ((await link.count()) === 0) {
+    problems.push("the scan history has no SBOM download link");
+  } else {
+    const href = await link.getAttribute("href");
+    const label = (await link.innerText()).trim();
+
+    if (!/^\/api\/v1\/scans\/[0-9a-f-]+\/raw$/.test(href ?? "")) {
+      problems.push(`the SBOM link points somewhere unexpected: ${href}`);
+    }
+
+    // Without this the browser navigates to the JSON rather than saving it, which looks
+    // like a broken page rather than a missing attribute.
+    if ((await link.getAttribute("download")) === null) {
+      problems.push("the SBOM link is missing the download attribute");
+    }
+
+    // The size has to stay readable as a size — it is still the cell's own content, and
+    // turning it into a link must not have replaced it with a generic word.
+    if (!/\d/.test(label)) {
+      problems.push(`the SBOM cell no longer shows a size: "${label}"`);
+    }
+
+    // Follow it. A link that renders and 404s is the failure this step exists for.
+    const res = await page.request.get(`${BASE}${href}`);
+    if (res.status() !== 200) {
+      problems.push(`the SBOM download returned ${res.status()}`);
+    } else {
+      const disposition = res.headers()["content-disposition"] ?? "";
+      if (!/attachment/.test(disposition)) {
+        problems.push(`the SBOM download is not served as an attachment: "${disposition}"`);
+      }
+      const body = await res.body();
+      if (body.length === 0) {
+        problems.push("the SBOM download returned an empty body");
+      } else {
+        try {
+          JSON.parse(body.toString("utf8"));
+          log(`  OK   ${label} of valid SBOM JSON, served as an attachment`);
+        } catch {
+          problems.push("the SBOM download is not parseable JSON");
+        }
+      }
+    }
+  }
+  await shot("scan-history-download");
+}
+
 // --- 22c. exporting ---------------------------------------------------------
 //
 // The export dialog is the only place the disclosure boundary is visible to a human. The

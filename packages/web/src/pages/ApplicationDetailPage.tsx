@@ -869,8 +869,30 @@ function HistoryTab({
                         <Mono>{shortImageRef(scan.imageRef)}</Mono>
                       </Td>
                       <Td className="text-text-muted">{scan.toolVersion ?? "—"}</Td>
-                      <Td align="right" className="nums text-text-faint">
-                        {formatBytes(scan.sbomSizeBytes)}
+                      {/*
+                        The size doubles as the download rather than earning its own column:
+                        the cell already exists to describe the artifact, so making it the
+                        handle for it adds an action without adding width.
+
+                        Deliberately not beside Delete. That column is admin-only, and anyone
+                        who can see a build should be able to take its SBOM — putting the two
+                        together would either hide this from non-admins or give the column
+                        different contents per role. It also keeps the destructive button
+                        alone, instead of one click away from a harmless one.
+
+                        A plain anchor, not a router Link: the response carries
+                        Content-Disposition, so the browser has to handle the navigation
+                        rather than the SPA intercepting it. Same reason as ScanDetailPage.
+                      */}
+                      <Td align="right" className="nums">
+                        <a
+                          href={`/api/v1/scans/${scan.id}/raw`}
+                          download
+                          className="text-accent hover:underline"
+                          title="Download the SBOM exactly as this build uploaded it."
+                        >
+                          {formatBytes(scan.sbomSizeBytes)}
+                        </a>
                       </Td>
                       {isAdmin ? (
                         <Td align="right">
