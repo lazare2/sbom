@@ -94,7 +94,8 @@ ci-templates/
 sast-scan/                Standalone Python SAST tool — see "Static analysis (SAST)"
   sast/                   scanner.py, analyzer.py, engine.py, secrets.py, report.py, cli.py
   sast/rules/python.yaml  YAML rule definitions (AST rules + taint sources/sinks/sanitizers)
-  tests/                  64 tests: vulnerable_samples/ + safe_samples/ per rule, end-to-end CLI
+  ci_ingest_payload.py    Builds the POST /api/v1/sast body, shared by both CI templates
+  tests/                  68 tests: vulnerable_samples/ + safe_samples/ per rule, end-to-end CLI
 deploy/                   Copied verbatim into the offline bundle
   docker-compose.yml      Image-only compose, no build contexts
   start.ps1 / start.sh    Target-side installer: load, generate secrets, start
@@ -1289,19 +1290,23 @@ application's *own* source: `eval`/`exec`, unsafe `pickle` and `yaml.load`, `sub
 without passing through a sanitizer or a parameterized query first.
 
 It ships as a vendored, standalone Python project at [`sast-scan/`](sast-scan/), with its own
-[README](sast-scan/README.md) and its own test suite (64 tests: every rule has a vulnerable sample
+[README](sast-scan/README.md) and its own test suite (68 tests: every rule has a vulnerable sample
 that triggers it and a safe sample that doesn't).
 
-### Why it is not wired into the platform
+### Parallel to Grype, not merged into it
 
-The same reason there is no plugin system for a second vulnerability scanner (see "Vulnerability
-scanning" above): findings are stored keyed to Grype's output, and `component_vulnerability`,
-the ingestion pipeline, and the dashboard all assume that shape. A SAST finding — a line in a
-file, not a package/version pair — doesn't fit it, and forcing it in would mean the same
-refactor the Grype section already says this platform doesn't do for configuration alone.
+There is still no plugin system for a second *vulnerability* scanner (see "Vulnerability
+scanning" above) — `component_vulnerability`, the ingestion pipeline's matching logic, and the
+Grype-specific dashboard sections all assume a package/version finding, and a SAST finding — a
+line in a file — genuinely does not fit that shape. Forcing it in would mean the same refactor
+the Grype section already says this platform doesn't do for configuration alone.
 
-So `sast-scan/` stays outside that boundary on purpose. It runs as its own CI job, independent of
-`POST /api/v1/scans`, and produces a SARIF file as its output rather than a database row:
+What it fits instead is its own pair of tables, `sast_run` / `sast_finding`, the same relationship
+`scan` / `scan_component` has, and its own ingest and read routes — additive next to the
+vulnerability tables, not a mode of them. A CI job posts a run to `POST /api/v1/sast` and the
+application detail page reads it back on a **Static analysis** tab. Deliberately narrower than
+`POST /api/v1/scans` in one way: an unknown `app_name` is a 404, not an auto-created
+`pending_confirmation` application — a SAST run has to name something that already exists.
 
 ```
 include:
@@ -1311,20 +1316,28 @@ include:
 
 sast:scan:
   extends: .sast_scan
+  variables:
+    SAST_APP_NAME: "$CI_PROJECT_NAME"
 ```
 
-or, from a Jenkinsfile, `sastScan()`. Both templates archive the SARIF report as a build artifact
-and fail the job on any HIGH/CRITICAL finding — off by default in the sense that
-`SAST_ALLOW_FAILURE` / `required: true` let a project roll it out without breaking today's
-pipeline first, the same pattern `SBOM_REQUIRED` and Grype's own default-off use elsewhere in this
-repo. See [`ci-templates/gitlab/sast-scan.gitlab-ci.yml`](ci-templates/gitlab/sast-scan.gitlab-ci.yml)
-and [`ci-templates/jenkins/vars/sastScan.groovy`](ci-templates/jenkins/vars/sastScan.groovy).
+or, from a Jenkinsfile, `sastScan()`. Both templates always archive a SARIF report as a build
+artifact — that part needs no platform at all, and still works with nothing configured, which is
+what keeps `sast-scan/` usable standalone in a repo that has never heard of this platform. Posting
+to `POST /api/v1/sast` is the addition: it reuses `SBOM_PLATFORM_URL` / `SBOM_INGEST_TOKEN` if a
+project already has the SBOM job wired up (same token, same endpoint prefix), is skipped
+gracefully — no upload, no failure — when neither is set, and never fails the pipeline on its own
+(`SAST_REQUIRED`, same default-false reasoning as `SBOM_REQUIRED`). Whether HIGH/CRITICAL findings
+fail the *scan* job is the separate, independent `SAST_ALLOW_FAILURE` / `required: true` toggle,
+same pattern as Grype's own default-off. See
+[`ci-templates/gitlab/sast-scan.gitlab-ci.yml`](ci-templates/gitlab/sast-scan.gitlab-ci.yml) and
+[`ci-templates/jenkins/vars/sastScan.groovy`](ci-templates/jenkins/vars/sastScan.groovy).
 
 ### What this is not
 
-**Not persisted.** A finding lives in the SARIF artifact for that one build; there is no history,
-no diffing between builds, and nothing queryable from the dashboard or the API. Re-running the scan
-is the only way to see current findings.
+**Not versioned history the way scans are.** `sast_run` keeps every run it is sent — nothing is
+deleted — but the read side (and the tab) shows only the latest one per application. A project that
+wants to compare today's findings against last week's is reading the SARIF artifacts from those
+two builds, not this platform, for now.
 
 **Not multi-language.** Python source only, via the standard library's `ast` module. A repo with a
 non-Python component gets no coverage for it from this job.

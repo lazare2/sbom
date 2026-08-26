@@ -65,3 +65,4 @@ __pycache__/
 
 # sast-scan output written by a local run of the CI templates.
 sast-report.sarif
+sast-ingest-payload.json

@@ -1,11 +1,6 @@
 # Shared GitLab CI template: run the vendored Python SAST scanner (sast-scan/)
-# against a project's source and publish the results as a SARIF artifact.
-#
-# This is intentionally independent of the SBOM ingestion pipeline
-# (sbom-scan.gitlab-ci.yml): findings here are not uploaded to the platform or
-# stored in its database — see sast-scan/README.md for why. The artifact is
-# the deliverable; a human or a downstream job (e.g. GitLab's own SARIF report
-# viewer, where available) consumes it from there.
+# against a project's source, publish the results as a SARIF artifact, and
+# (when configured) post them to this platform.
 #
 # Usage in a project's .gitlab-ci.yml:
 #
@@ -16,10 +11,20 @@
 #
 #   sast:scan:
 #     extends: .sast_scan
+#     variables:
+#       SAST_APP_NAME: "$CI_PROJECT_NAME"
 #
 # The scanner ships in this repo (sast-scan/), so no registry or package index
 # is required — the job clones it via the same `include` mechanism GitLab uses
 # to fetch this file, alongside the project checkout.
+#
+# The SARIF artifact needs nothing configured and is always produced — this
+# job is a complete SAST gate on its own in a repo that has never heard of
+# this platform. Posting to POST /api/v1/sast is additive: it defaults to the
+# same SBOM_PLATFORM_URL / SBOM_INGEST_TOKEN as sbom-scan.gitlab-ci.yml (one
+# credential covers both jobs), and is skipped — not failed — when neither is
+# set. Requires an application with SAST_APP_NAME already registered on the
+# platform: unlike the SBOM endpoint, this one never auto-creates one.
 
 .sast_scan:
   stage: test
@@ -43,6 +48,18 @@
     # scanning: introduced disabled/non-blocking, turned into a real gate once
     # the existing findings are triaged.
     SAST_ALLOW_FAILURE: "false"
+    # --- platform upload (optional) ---------------------------------------
+    SAST_APP_NAME: "$CI_PROJECT_NAME"
+    SAST_PLATFORM_URL: "${SAST_PLATFORM_URL:-$SBOM_PLATFORM_URL}"
+    SAST_INGEST_TOKEN: "${SAST_INGEST_TOKEN:-$SBOM_INGEST_TOKEN}"
+    # Which estate this run belongs to, by name — same rule as sbom-scan's
+    # `environment` field. Leave unset on a single-environment deployment or
+    # with a token already bound to one.
+    SAST_ENVIRONMENT: ""
+    # A failed upload should not normally break a release build, same
+    # reasoning as SBOM_REQUIRED. Independent of SAST_ALLOW_FAILURE above:
+    # that one is about the *findings*, this one is about the *upload*.
+    SAST_REQUIRED: "false"
   before_script:
     - |
       if [ ! -d "sast-scan/sast" ]; then
@@ -57,25 +74,79 @@
       set -eu
 
       echo "Scanning ${SAST_TARGET} (severity >= ${SAST_SEVERITY_THRESHOLD})"
+      SAST_JSON_FILE="$(mktemp)"
 
       set +e
       PYTHONPATH="${CI_PROJECT_DIR}/sast-scan" python3 -m sast \
         "${SAST_TARGET}" \
         --exclude "${SAST_EXCLUDE}" \
-        --format sarif \
+        --format json \
         --severity-threshold "${SAST_SEVERITY_THRESHOLD}" \
-        > "${SAST_REPORT_FILE}"
+        > "${SAST_JSON_FILE}"
       SCAN_STATUS=$?
       set -e
 
-      # Also print a human-readable summary to the job log — the SARIF file is
-      # for tooling, not for someone scrolling a failed build at 2am.
+      # SARIF regenerated from the same scan rather than converted from the
+      # JSON above: the two formats are two independent renders of the same
+      # AST walk, not a pipeline, so there is no lossy JSON->SARIF step to
+      # maintain here.
+      PYTHONPATH="${CI_PROJECT_DIR}/sast-scan" python3 -m sast \
+        "${SAST_TARGET}" \
+        --exclude "${SAST_EXCLUDE}" \
+        --format sarif \
+        --severity-threshold "${SAST_SEVERITY_THRESHOLD}" \
+        > "${SAST_REPORT_FILE}" || true
+
+      # Human-readable summary in the job log — the JSON/SARIF files are for
+      # tooling, not for someone scrolling a failed build at 2am.
       PYTHONPATH="${CI_PROJECT_DIR}/sast-scan" python3 -m sast \
         "${SAST_TARGET}" \
         --exclude "${SAST_EXCLUDE}" \
         --severity-threshold "${SAST_SEVERITY_THRESHOLD}" \
         --no-color || true
 
+      # --- upload to the platform, only if configured ---------------------
+      if [ -n "${SAST_PLATFORM_URL}" ] && [ -n "${SAST_INGEST_TOKEN}" ]; then
+        echo "Posting results to ${SAST_PLATFORM_URL} as '${SAST_APP_NAME}'"
+
+        python3 "${CI_PROJECT_DIR}/sast-scan/ci_ingest_payload.py" \
+          "${SAST_JSON_FILE}" "${SAST_APP_NAME}" "${CI_COMMIT_SHA}" "${CI_COMMIT_REF_NAME}" "${SAST_ENVIRONMENT}" \
+          > sast-ingest-payload.json
+
+        # The token goes into a curl config file rather than onto the command
+        # line, same reasoning as sbom-scan.gitlab-ci.yml: not exposed in the
+        # process table to anything else sharing the runner.
+        CURL_CFG="$(mktemp)"
+        trap 'rm -f "$CURL_CFG"' EXIT
+        printf 'header = "Authorization: Bearer %s"\n' "${SAST_INGEST_TOKEN}" > "$CURL_CFG"
+        chmod 600 "$CURL_CFG"
+
+        set +e
+        curl -fsS \
+          --config "$CURL_CFG" \
+          -H "Content-Type: application/json" \
+          --data @sast-ingest-payload.json \
+          --retry 3 --retry-delay 5 --retry-connrefused \
+          --max-time 60 \
+          "${SAST_PLATFORM_URL}/api/v1/sast"
+        UPLOAD_STATUS=$?
+        set -e
+
+        if [ "$UPLOAD_STATUS" -ne 0 ]; then
+          if [ "${SAST_REQUIRED}" = "true" ]; then
+            echo "SAST upload failed and SAST_REQUIRED=true — failing the job." >&2
+            exit "$UPLOAD_STATUS"
+          fi
+          echo "SAST upload failed (exit ${UPLOAD_STATUS}). SAST_REQUIRED is not true, so the job is allowed to continue." >&2
+        else
+          echo ""
+          echo "Uploaded SAST results for '${SAST_APP_NAME}'"
+        fi
+      else
+        echo "SAST_PLATFORM_URL/SAST_INGEST_TOKEN not set — skipping upload, SARIF artifact only."
+      fi
+
+      # --- gate the job on findings, independent of the upload above ------
       if [ "$SCAN_STATUS" -ne 0 ]; then
         if [ "${SAST_ALLOW_FAILURE}" = "true" ]; then
           echo "HIGH/CRITICAL findings present. SAST_ALLOW_FAILURE=true, so the job is allowed to pass." >&2
