@@ -370,6 +370,43 @@ describe("app wiring", () => {
     expect(res.json().error.message).toMatch(/multipart\/form-data/);
   });
 
+  it("mounts the SAST ingest endpoint under /api/v1, guarded the same way", async () => {
+    // Same three-step contract as /api/v1/scans above, because sastIngestRoutes
+    // is registered in the same onRoute-hooked scope and reuses the same
+    // IngestTokenService — this is the regression test for that sharing.
+    const noAuth = await app.inject({ method: "POST", url: "/api/v1/sast" });
+    expect(noAuth.statusCode).toBe(401);
+    expect(noAuth.json()).toMatchObject({ error: { code: "unauthorized" } });
+
+    const badToken = await app.inject({
+      method: "POST",
+      url: "/api/v1/sast",
+      headers: { authorization: "Bearer not-the-right-token" },
+    });
+    expect(badToken.statusCode).toBeGreaterThanOrEqual(500);
+
+    // Getting to 400 (not 401) proves the env token verified without touching
+    // Postgres — this endpoint is JSON, so there is no multipart 415 step to
+    // land on instead, unlike /api/v1/scans.
+    const badBody = await app.inject({
+      method: "POST",
+      url: "/api/v1/sast",
+      headers: { authorization: "Bearer super-secret-ci-token", "content-type": "application/json" },
+      payload: { findings: [] },
+    });
+    expect(badBody.statusCode).toBe(400);
+    expect(badBody.json().error.code).toBe("validation_failed");
+    expect(Object.keys(badBody.json().error.details)).toContain("app_name");
+  });
+
+  it("guards the SAST read endpoint behind a session", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/sast/applications/00000000-0000-4000-8000-000000000000",
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
   it("requires authentication on the session-protected routes", async () => {
     const res = await app.inject({ method: "GET", url: "/api/v1/auth/me" });
     expect(res.statusCode).toBe(401);

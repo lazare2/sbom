@@ -19,3 +19,4 @@ export * from "./schemas/malicious.js";
 export * from "./schemas/export.js";
 export * from "./schemas/vex.js";
 export * from "./schemas/environment.js";
+export * from "./schemas/sast.js";

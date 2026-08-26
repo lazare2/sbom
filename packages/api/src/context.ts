@@ -34,6 +34,7 @@ import { ReportScheduler } from "./modules/reports/report-scheduler.js";
 import { ReportService } from "./modules/reports/report.service.js";
 import { SnapshotService } from "./modules/reports/snapshot.service.js";
 import { ScansService } from "./modules/scans/scans.service.js";
+import { SastService } from "./modules/sast/sast.service.js";
 import { SettingsService } from "./modules/settings/settings.service.js";
 import { SweepService } from "./modules/vulnerabilities/sweep.service.js";
 import { VulnDbService } from "./modules/vulnerabilities/vuln-db.service.js";
@@ -72,6 +73,8 @@ export interface AppContext {
    */
   environments: EnvironmentService;
   scans: ScansService;
+  /** SAST runs/findings from sast-scan — see "Static analysis (SAST)" in the schema. */
+  sast: SastService;
   components: ComponentsService;
   bulkSearch: BulkSearchService;
   diff: DiffService;
@@ -175,6 +178,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const environments = new EnvironmentService({ db });
   const groups = new GroupsService({ db, settings });
   const scans = new ScansService({ db, blobStore });
+  const sast = new SastService({ db });
   const components = new ComponentsService({ db });
   const bulkSearch = new BulkSearchService({ db });
   const diff = new DiffService({ db });
@@ -289,6 +293,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     groups,
     environments,
     scans,
+    sast,
     components,
     bulkSearch,
     diff,

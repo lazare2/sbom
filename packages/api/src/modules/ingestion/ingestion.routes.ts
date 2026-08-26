@@ -187,7 +187,7 @@ export async function ingestionRoutes(fastify: FastifyInstance): Promise<void> {
  *       INGEST_TOKENS, which has no database row to carry a binding and therefore falls
  *       back to the default estate rather than breaking a deployment on upgrade.
  */
-async function resolveIngestScope(
+export async function resolveIngestScope(
   environments: EnvironmentService,
   token: VerifiedIngestToken,
   requested: string | null,

@@ -33,8 +33,9 @@ import {
   useFindingsSort,
   type FindingsFilters,
 } from "../components/Findings.tsx";
-import { ScanningDisabledNotice } from "../components/Severity.tsx";
-import { useApplicationVulnerabilities, useVulnStatus } from "../lib/queries.ts";
+import { ScanningDisabledNotice, SeverityBadge, SeverityBar } from "../components/Severity.tsx";
+import { useApplicationSast, useApplicationVulnerabilities, useVulnStatus } from "../lib/queries.ts";
+import { EMPTY_SEVERITY_COUNTS, type SastSeverity, type SeverityCounts } from "@sbom/shared";
 import {
   Badge,
   Button,
@@ -60,7 +61,7 @@ import {
   Tr,
 } from "../components/ui.tsx";
 
-const TABS = ["components", "history", "removed", "changes", "vulnerabilities"] as const;
+const TABS = ["components", "history", "removed", "changes", "vulnerabilities", "sast"] as const;
 const COMPONENT_SORTS = componentListSort.fields;
 const DIRECTIONS = ["asc", "desc"] as const;
 
@@ -262,6 +263,11 @@ export function ApplicationDetailPage() {
           />
         ) : null}
         <TabButton
+          active={state.tab === "sast"}
+          onClick={() => setState({ tab: "sast" })}
+          label="Static analysis"
+        />
+        <TabButton
           active={state.tab === "removed"}
           onClick={() => setState({ tab: "removed", removedPage: 1 })}
           label="No longer used"
@@ -284,6 +290,8 @@ export function ApplicationDetailPage() {
         <ChangesTab applicationId={app.id} />
       ) : state.tab === "vulnerabilities" ? (
         <VulnerabilitiesTab applicationId={app.id} enabled={vulnEnabled} isAdmin={isAdmin} />
+      ) : state.tab === "sast" ? (
+        <SastTab applicationId={app.id} />
       ) : state.tab === "removed" ? (
         <RemovedTab applicationId={app.id} state={state} setState={setState} />
       ) : (
@@ -955,5 +963,100 @@ function HistoryTab({
         }}
       />
     </>
+  );
+}
+
+/** Highest first, same convention as Severity.tsx's SEVERITY_ORDER. */
+const SAST_SEVERITY_ORDER: SastSeverity[] = ["critical", "high", "medium", "low"];
+
+/**
+ * sast-scan findings for this application's most recent run — see "Static
+ * analysis (SAST)" in the top-level README.
+ *
+ * Unlike the Vulnerabilities tab above, this is not live against the current
+ * build: it is a snapshot of whatever `sast-scan`'s CI job last posted to
+ * `POST /api/v1/sast`, which only runs when that pipeline runs. Two scans
+ * with the same code can show different runs simply because one's pipeline
+ * hasn't executed yet — the "Run" line below exists so that is never mistaken
+ * for the finding count having changed.
+ */
+function SastTab({ applicationId }: { applicationId: string }) {
+  const { data, isLoading, error, refetch } = useApplicationSast(applicationId);
+
+  if (isLoading) return <LoadingBlock label="Loading SAST findings" />;
+  if (error) return <ErrorBanner error={error} onRetry={() => void refetch()} />;
+
+  const run = data?.run ?? null;
+
+  if (!run) {
+    return (
+      <EmptyState
+        title="No SAST run yet"
+        hint={
+          <>
+            Nothing has been posted to <Mono>POST /api/v1/sast</Mono> for this application. Wire
+            up <Mono>ci-templates/gitlab/sast-scan.gitlab-ci.yml</Mono> or{" "}
+            <Mono>ci-templates/jenkins/vars/sastScan.groovy</Mono> — see{" "}
+            <Mono>sast-scan/README.md</Mono>.
+          </>
+        }
+      />
+    );
+  }
+
+  const counts: SeverityCounts = { ...EMPTY_SEVERITY_COUNTS, ...run.severityCounts };
+
+  return (
+    <Card>
+      <CardHeader
+        title={`${formatNumber(run.findingCount)} finding${run.findingCount === 1 ? "" : "s"}`}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span title={formatDateTime(run.createdAt)}>Run {formatRelative(run.createdAt)}</span>
+            {run.commitSha ? <span>{shortSha(run.commitSha)}</span> : null}
+            {run.branch ? <span>{run.branch}</span> : null}
+          </span>
+        }
+        actions={run.findingCount > 0 ? <SeverityBar counts={counts} className="w-40" /> : null}
+      />
+
+      {run.findingCount === 0 ? (
+        <EmptyState title="Clean run" hint="No findings in the most recent scan." />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th width="90px">Severity</Th>
+                <Th>Rule</Th>
+                <Th width="90px">CWE</Th>
+                <Th>Location</Th>
+                <Th>Message</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...run.findings]
+                .sort(
+                  (a, b) =>
+                    SAST_SEVERITY_ORDER.indexOf(a.severity) - SAST_SEVERITY_ORDER.indexOf(b.severity),
+                )
+                .map((f) => (
+                  <Tr key={f.id}>
+                    <Td>
+                      <SeverityBadge severity={f.severity} />
+                    </Td>
+                    <Td className="font-mono text-xs">{f.ruleId}</Td>
+                    <Td className="nums text-xs text-text-muted">CWE-{f.cwe}</Td>
+                    <Td className="max-w-[280px] truncate font-mono text-xs text-text-muted" title={f.file}>
+                      {f.file}:{f.line}
+                    </Td>
+                    <Td className="max-w-[480px] text-xs text-text-muted">{f.message}</Td>
+                  </Tr>
+                ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
   );
 }

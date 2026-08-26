@@ -26,6 +26,7 @@ import {
 import { reportRoutes } from "./modules/reports/reports.routes.js";
 import { maliciousRoutes, maliciousStatusRoutes } from "./modules/malicious/malicious.routes.js";
 import { scanRoutes } from "./modules/scans/scans.routes.js";
+import { sastIngestRoutes, sastRoutes } from "./modules/sast/sast.routes.js";
 import { authPlugin } from "./plugins/auth.plugin.js";
 import { contextPlugin } from "./plugins/context.plugin.js";
 import { errorHandlerPlugin } from "./plugins/error-handler.plugin.js";
@@ -137,6 +138,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       await api.register(manualUploadRoutes, { prefix: "/applications" });
       await api.register(groupRoutes, { prefix: "/groups" });
       await api.register(scanRoutes, { prefix: "/scans" });
+      await api.register(sastRoutes, { prefix: "/sast" });
       await api.register(componentRoutes, { prefix: "/components" });
       /*
         Its own prefix rather than a query parameter on the existing read routes. An export is
@@ -201,6 +203,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
             };
           });
           await scoped.register(ingestionRoutes);
+          // Same bearer-token auth and per-token rate-limit bucketing as the
+          // SBOM endpoint above, via the same `onRoute` hook — registered in
+          // this scope rather than its own so that keyGenerator is not
+          // duplicated.
+          await scoped.register(sastIngestRoutes);
         },
         { prefix: "" },
       );

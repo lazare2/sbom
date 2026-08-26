@@ -25,6 +25,7 @@ import type {
   MaliciousFeedOutcome,
   MaliciousFeedTrigger,
   MaliciousMatchMode,
+  SastSeverity,
   ScanSource,
   ScanVulnStatus,
   SeverityCounts,
@@ -1548,6 +1549,67 @@ export const maliciousAlertSent = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Static analysis (SAST)
+// ---------------------------------------------------------------------------
+//
+// A parallel structure to `scan` / `scanComponent`, not a reuse of it: a `scan`
+// row always carries an SBOM (`sbomBlobKey`, `sbomSha256`) and everything in
+// the vulnerabilities section above is keyed to a Grype match against it. A
+// SAST finding is neither — it is a file/line in this application's own
+// source, produced by `sast-scan` (see `sast-scan/README.md`), and does not
+// fit that shape any better than it fit `componentVulnerability`. Two tables,
+// same reasoning as `scan`/`scanComponent`: a header row per run, so a finding
+// count and severity breakdown can be shown without re-aggregating on every
+// read, and a child row per finding.
+
+export const sastRun = pgTable(
+  "sast_run",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => application.id, { onDelete: "cascade" }),
+    // Denormalised at ingest time, same as `application.environmentId` — every
+    // row that can be read independently of its parent needs to carry the
+    // scope it belongs to, or a read path has to join up to find out.
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environment.id, { onDelete: "cascade" }),
+    commitSha: text("commit_sha"),
+    branch: text("branch"),
+    /** Which named ingest token submitted this, for traceability. */
+    ingestTokenName: text("ingest_token_name"),
+    /** Denormalised so the applications list and the run header render without a COUNT(*) join. */
+    findingCount: integer("finding_count").notNull().default(0),
+    highOrCriticalCount: integer("high_or_critical_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("sast_run_application_created_idx").on(t.applicationId, t.createdAt),
+    index("sast_run_environment_idx").on(t.environmentId),
+  ],
+);
+
+export const sastFinding = pgTable(
+  "sast_finding",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => sastRun.id, { onDelete: "cascade" }),
+    /** e.g. `PY-EVAL-001`, `SECRET-AWS-ACCESS-KEY`, `TAINT-OS-SYSTEM` — see sast-scan's rules YAML. */
+    ruleId: text("rule_id").notNull(),
+    severity: text("severity").$type<SastSeverity>().notNull(),
+    cwe: integer("cwe").notNull(),
+    message: text("message").notNull(),
+    file: text("file").notNull(),
+    line: integer("line").notNull(),
+    col: integer("col").notNull(),
+  },
+  (t) => [index("sast_finding_run_idx").on(t.runId)],
+);
+
+// ---------------------------------------------------------------------------
 // Inferred row types
 // ---------------------------------------------------------------------------
 
@@ -1582,3 +1644,7 @@ export type NewMaliciousPackageRow = typeof maliciousPackage.$inferInsert;
 export type ComponentMaliciousRow = typeof componentMalicious.$inferSelect;
 export type MaliciousAcknowledgementRow = typeof maliciousAcknowledgement.$inferSelect;
 export type MaliciousFeedUpdateRow = typeof maliciousFeedUpdate.$inferSelect;
+export type SastRunRow = typeof sastRun.$inferSelect;
+export type NewSastRunRow = typeof sastRun.$inferInsert;
+export type SastFindingRow = typeof sastFinding.$inferSelect;
+export type NewSastFindingRow = typeof sastFinding.$inferInsert;

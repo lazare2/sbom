@@ -43,6 +43,7 @@ import type {
   PlatformSettings,
   ReportRunSummary,
   ReportSettings,
+  SastRunSummary,
 } from "@sbom/shared";
 import type { componentSearchSort } from "@sbom/shared";
 import { api, toQueryString } from "./api.ts";
@@ -111,6 +112,7 @@ export const queryKeys = {
     ["applications", id, "vulnerabilities", params] as const,
   scanVulnerabilities: (id: string, params: Record<string, unknown>) =>
     ["scans", id, "vulnerabilities", params] as const,
+  applicationSast: (id: string) => ["applications", id, "sast"] as const,
 };
 
 // --- auth ------------------------------------------------------------------
@@ -735,6 +737,27 @@ export function useScanVulnerabilities(
     queryFn: () => api.get<FindingsResponse>(`/scans/${id}/vulnerabilities${toQueryString(params)}`),
     enabled: Boolean(id) && enabled,
     placeholderData: (previous) => previous,
+  });
+}
+
+// --- SAST --------------------------------------------------------------------
+
+export interface SastRunResponse {
+  /** Null when the application has never had a SAST run ingested for it. */
+  run: SastRunSummary | null;
+}
+
+/**
+ * The latest sast-scan run for an application — see "Static analysis (SAST)"
+ * in the top-level README. Unlike `useApplicationVulnerabilities`, this is not
+ * paginated: `ingestSastRequestSchema` caps a run at 5000 findings, and a real
+ * one is a few dozen.
+ */
+export function useApplicationSast(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.applicationSast(id ?? ""),
+    queryFn: () => api.get<SastRunResponse>(`/sast/applications/${id}`),
+    enabled: Boolean(id),
   });
 }
 
