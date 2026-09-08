@@ -786,6 +786,142 @@ await page.waitForLoadState("networkidle");
 await expectText("temp password", "the must-change-password badge");
 await shot("admin-users-after-create");
 
+
+// --- 18a. narrowing an account to particular groups and applications --------
+//
+// The API proof that a restricted account sees only its grants lives in the smoke test.
+// What that cannot reach is whether an administrator can actually express the restriction:
+// the modal has to load two independent grant sets, offer only groups from the environments
+// currently ticked, and save two endpoints in the right order.
+//
+// The specific failure worth catching is a screen that looks like it worked. Saving posts to
+// two endpoints, and if the second is skipped the boxes still show as ticked when reopened —
+// from local state — while nothing was stored.
+log("18a. granting an account access to particular groups");
+{
+  await page.goto(`${BASE}/admin/users`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(800);
+
+  const row = page.locator("tbody tr", { hasText: TEST_USER });
+  if ((await row.count()) === 0) {
+    problems.push("the account created above is not in the users table");
+  } else {
+    await row.getByRole("button", { name: /Choose…|Review…/ }).first().click();
+    await page.waitForTimeout(900);
+
+    await expectText(`Access for ${TEST_USER}`, "the access modal");
+    await expectText("Within those environments", "the restriction section");
+
+    const dialog = page.locator("dialog");
+    const everything = dialog.getByRole("checkbox", {
+      name: /Everything, including applications added later/,
+    });
+    const onlySelected = dialog.getByRole("checkbox", {
+      name: /Only the groups and applications selected below/,
+    });
+
+    // A new account starts unrestricted, and the screen has to say so rather than opening
+    // on a restriction nobody chose.
+    if (!(await everything.isChecked())) {
+      problems.push("a new account does not open as unrestricted");
+    } else {
+      log("  OK   a new account opens as unrestricted");
+    }
+
+    // The group and application pickers exist only once a restriction is chosen: offering
+    // them while the account sees everything would be controls that change nothing.
+    if ((await dialog.getByText("Individual applications").count()) > 0) {
+      problems.push("the grant pickers are shown while the account is unrestricted");
+    }
+
+    await onlySelected.click();
+    await page.waitForTimeout(1200);
+    await expectText("Individual applications", "the per-application picker");
+
+    // Grant exactly one application, save, reopen, and read it back from the server.
+    const appBox = dialog.getByRole("checkbox", { name: TEST_APP });
+    await appBox.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+    if ((await appBox.count()) === 0) {
+      /*
+        Reported with what the picker actually contained. "Does not offer X" sends the reader
+        looking for a filtering bug; the real cause the first time was every request behind
+        this list returning 400, which the modal then rendered as an empty estate.
+      */
+      const shown = await dialog.getByRole("checkbox").allInnerTexts();
+      problems.push(
+        `the application picker does not offer ${TEST_APP} — it shows: ${shown.join(", ") || "nothing"}`,
+      );
+    } else {
+      await appBox.check();
+      await page.waitForTimeout(300);
+      await dialog.getByRole("button", { name: "Save access" }).click();
+      await page.waitForTimeout(1800);
+      await page.waitForLoadState("networkidle");
+
+      // The list has to show that the account is narrowed, or an administrator scanning the
+      // table cannot tell a restricted account from an unrestricted one.
+      const restrictedBadge = page.locator("tbody tr", { hasText: TEST_USER })
+        .getByText("Restricted", { exact: true });
+      if ((await restrictedBadge.count()) === 0) {
+        problems.push("a restricted account is not marked as restricted in the users table");
+      } else {
+        log("  OK   the users table marks the account as restricted");
+      }
+
+      // Reopened, so this reads what was stored rather than what was typed.
+      await page.locator("tbody tr", { hasText: TEST_USER })
+        .getByRole("button", { name: /Review…|Choose…/ }).first().click();
+      await page.waitForTimeout(1200);
+
+      const reopened = page.locator("dialog");
+      const stored = reopened.getByRole("checkbox", {
+        name: /Only the groups and applications selected below/,
+      });
+      if (!(await stored.isChecked())) {
+        problems.push("the restriction did not persist");
+      } else if (!(await reopened.getByRole("checkbox", { name: TEST_APP }).isChecked())) {
+        problems.push("the application grant did not persist");
+      } else {
+        log("  OK   the restriction and its grant were stored, not just displayed");
+      }
+
+      await expectText("Currently reaches", "the visible-application count");
+      await shot("admin-user-access");
+
+      // Put it back, so the account this run created is left as it was found and the later
+      // password-gate steps are driven against an unrestricted account.
+      await reopened.getByRole("checkbox", {
+        name: /Everything, including applications added later/,
+      }).click();
+      await page.waitForTimeout(300);
+      await reopened.getByRole("button", { name: "Save access" }).click();
+      await page.waitForTimeout(1500);
+      await page.waitForLoadState("networkidle");
+
+      if ((await page.locator("tbody tr", { hasText: TEST_USER })
+        .getByText("Restricted", { exact: true }).count()) > 0) {
+        problems.push("clearing the restriction did not take effect");
+      } else {
+        log("  OK   the restriction can be cleared again");
+      }
+    }
+  }
+
+  /*
+    Closed on every path, including the ones that recorded a problem.
+
+    A native <dialog> opened with showModal() makes the rest of the page inert, so a step
+    that leaves one open does not fail on its own -- it fails the *next* step, with a
+    timeout naming a nav link that is plainly visible in the screenshot. That is a
+    genuinely confusing ten minutes, and it cost them once already.
+  */
+  const stillOpen = page.locator("dialog");
+  if ((await stillOpen.count()) > 0) {
+    await stillOpen.getByRole("button", { name: "Cancel" }).first().click().catch(() => {});
+    await page.waitForTimeout(500);
+  }
+}
+
 // --- 18b. environments: the switcher, the comparison, and isolation in a browser
 //
 // The API-level proof that estates do not blend lives in the smoke test. What that cannot

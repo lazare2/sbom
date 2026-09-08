@@ -16,6 +16,7 @@ import {
   mergeApplicationRequestSchema,
   resetUserPasswordRequestSchema,
   setGroupMembersRequestSchema,
+  setUserApplicationAccessSchema,
   setUserEnvironmentsRequestSchema,
   updateGroupRequestSchema,
   updateMaliciousSettingsSchema,
@@ -68,6 +69,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   const {
     adminUsers,
     environments,
+    applicationAccess,
     adminApplications,
     adminGroups,
     adminScans,
@@ -180,6 +182,67 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     return reply.send({ environmentIds: body.environmentIds });
+  });
+
+  /**
+   * Which groups and applications a read-only account may see, inside those environments.
+   *
+   * The second access axis. Read back even for administrators, whose grants are stored and
+   * simply not consulted while the role is `admin` — hiding them would mean an admin screen
+   * that shows nothing for an admin, and a later demotion to a read-only role that hands
+   * over whatever happened to be stored without anybody having reviewed it.
+   */
+  fastify.get("/users/:id/application-access", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    await adminUsers.getById(id);
+    return reply.send(await applicationAccess.forUser(id));
+  });
+
+  fastify.put("/users/:id/application-access", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setUserApplicationAccessSchema, request.body);
+    await adminUsers.getById(id);
+
+    /*
+      Unknown ids are refused rather than dropped, for the reason the environment route
+      gives: a checklist that comes back with a box unticked and no explanation reads as the
+      save having failed for some other reason.
+
+      Both lists are checked even when `restricted` is false. The grants are stored either
+      way so that switching the account back to restricted restores what it had, and storing
+      an id that names nothing would make that restoration quietly incomplete.
+    */
+    if (body.groupIds.length > 0 || body.applicationIds.length > 0) {
+      const found = await applicationAccess.countKnown(body.groupIds, body.applicationIds);
+      if (found.groups !== body.groupIds.length) throw new NotFoundError("Group");
+      if (found.applications !== body.applicationIds.length) {
+        throw new NotFoundError("Application");
+      }
+    }
+
+    const before = await applicationAccess.forUser(id);
+    await applicationAccess.setForUser(id, body);
+    const after = await applicationAccess.forUser(id);
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "user.application_access_set",
+      targetType: "user",
+      targetId: id,
+      /*
+        Ids and counts, never names -- a group can be renamed and the trail still has to say
+        which one was granted. `visible` is the figure that makes the row answerable months
+        later: "three groups" does not say whether somebody was given four services or forty.
+      */
+      metadata: {
+        restricted: { from: before.restricted, to: after.restricted },
+        groupIds: { from: before.groupIds, to: after.groupIds },
+        applicationIds: { from: before.applicationIds, to: after.applicationIds },
+        visible: { from: before.visibleApplicationCount, to: after.visibleApplicationCount },
+      },
+    });
+
+    return reply.send(after);
   });
 
   // -------------------------------------------------------------------------

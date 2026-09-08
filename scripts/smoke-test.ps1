@@ -3534,6 +3534,329 @@ try {
     }
 
     # ======================================================================
+    <#
+      Group and application access.
+
+      The API-level proof that a restricted account sees only what it was granted. Like the
+      environment section above, it works by building *deliberately colliding* data: three
+      applications in one estate, all ingested from the same SBOM, so every package, version
+      and finding is identical across them. Nothing distinguishes them except which group
+      they are in — which is exactly the distinction under test.
+
+      Colliding on purpose is what makes it a test. Three applications with different
+      packages would pass most of these assertions with the filtering removed entirely,
+      because the numbers would differ anyway and nothing would look obviously wrong.
+
+      The third application is in NO group, and it carries its own assertion: CI registers
+      every new service that way, so "invisible until granted" is the single most common
+      state this feature will be in.
+    #>
+    Write-Host ""
+    Write-Host "Group and application access" -ForegroundColor Cyan
+
+    $accSuffix = [guid]::NewGuid().ToString('N').Substring(0, 6)
+    $accAppA = "smoke-test-app-acc-a-$accSuffix"
+    $accAppB = "smoke-test-app-acc-b-$accSuffix"
+    $accAppNone = "smoke-test-app-acc-none-$accSuffix"
+    $accUserEmail = "smoke-user-acc-$accSuffix@sbom.local"
+    $accUserPassword = "smoke-acc-password-$accSuffix"
+    $accJar = Join-Path $workDir "acc-cookies.txt"
+
+    $script:accAppAId = $null
+    $script:accAppBId = $null
+    $script:accAppNoneId = $null
+    $script:accGroupAId = $null
+    $script:accGroupBId = $null
+    $script:accUserId = $null
+
+    Assert-That "ingests three identical applications into one estate" {
+        $ids = @()
+        foreach ($name in @($accAppA, $accAppB, $accAppNone)) {
+            $r = Invoke-Api @("-X", "POST", $scansUrl, "-H", $auth,
+                "-F", "sbom=@$sbomPath", "-F", "app_name=$name", "-F", "build_number=1")
+            if ($r.Status -ne 201) { Show-Body $r 201; return $false }
+            $ids += $r.Json.applicationId
+        }
+        $script:accAppAId = $ids[0]
+        $script:accAppBId = $ids[1]
+        $script:accAppNoneId = $ids[2]
+        # Three distinct applications carrying byte-identical package lists.
+        return (@($ids | Sort-Object -Unique).Count -eq 3)
+    }
+
+    Assert-That "puts two of them in groups and leaves one ungrouped" {
+        foreach ($pair in @(@("smoke-acc-group-a-$accSuffix", $script:accAppAId),
+                            @("smoke-acc-group-b-$accSuffix", $script:accAppBId))) {
+            $p = New-JsonFile -Name "accgroup-$($pair[1]).json" -Data @{ name = $pair[0] }
+            $c = Invoke-Api @("-X", "POST", "$adminUrl/groups", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+            if ($c.Status -ne 201) { Show-Body $c 201; return $false }
+            $groupId = $c.Json.group.id
+
+            $m = New-JsonFile -Name "accmembers-$groupId.json" -Data @{ applicationIds = @($pair[1]) }
+            $s = Invoke-Api @("-X", "PUT", "$adminUrl/groups/$groupId/members", "-H", $jsonCt, "--data-binary", "@$m", "-b", $readJar)
+            if ($s.Status -ne 200) { Show-Body $s 200; return $false }
+
+            if ($pair[0] -like "*group-a-*") { $script:accGroupAId = $groupId }
+            else { $script:accGroupBId = $groupId }
+        }
+        return $script:accGroupAId -and $script:accGroupBId
+    }
+
+    Assert-That "creates a read-only account and restricts it to one group" {
+        $p = New-JsonFile -Name "acc-user.json" -Data @{
+            email = $accUserEmail; role = "user"; password = $accUserPassword; mustChangePassword = $false
+        }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/users", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($r.Status -ne 201) { Show-Body $r 201; return $false }
+        $script:accUserId = $r.Json.user.id
+
+        $g = New-JsonFile -Name "acc-grant.json" -Data @{
+            restricted = $true; groupIds = @($script:accGroupAId); applicationIds = @()
+        }
+        $set = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:accUserId)/application-access",
+            "-H", $jsonCt, "--data-binary", "@$g", "-b", $readJar)
+        Show-Body $set 200
+        if ($set.Status -ne 200) { return $false }
+
+        # The count is the figure an administrator actually needs: one group, one application.
+        if ([int]$set.Json.visibleApplicationCount -ne 1) {
+            Write-Host "        reports $($set.Json.visibleApplicationCount) visible applications, expected 1" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $lp = New-JsonFile -Name "acc-login.json" -Data @{ email = $accUserEmail; password = $accUserPassword }
+        $l = Invoke-Api @("-X", "POST", $loginUrl, "-H", $jsonCt, "--data-binary", "@$lp", "-c", $accJar)
+        Show-Body $l 200
+        return $l.Status -eq 200
+    }
+
+    Assert-That "the applications list shows the granted one and neither of the others" {
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications?search=smoke-test-app-acc-&pageSize=200&status=active&status=inactive&status=pending_confirmation", "-b", $accJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        $names = @($r.Json.items | ForEach-Object { $_.name })
+
+        if ($names -notcontains $accAppA) {
+            Write-Host "        the granted application is missing" -ForegroundColor DarkYellow
+            return $false
+        }
+        # The ungrouped one is the case CI produces constantly, so it gets its own message.
+        if ($names -contains $accAppNone) {
+            Write-Host "        an ungrouped application was visible to a restricted account" -ForegroundColor DarkYellow
+            return $false
+        }
+        if ($names -contains $accAppB) {
+            Write-Host "        another group's application was visible" -ForegroundColor DarkYellow
+            return $false
+        }
+        return $true
+    }
+
+    Assert-That "the dashboard counts what the account can see, not what the estate holds" {
+        <#
+          The assertion that matters most, and the one a naive implementation fails.
+
+          Scoping the list is the obvious half. Every aggregate behind it -- application
+          totals, package counts, build counts -- runs through separate queries, and a figure
+          that still counts the whole estate is a number describing applications the reader
+          cannot open, on a page claiming to describe theirs.
+        #>
+        $mine = Invoke-Api @("$BaseUrl/api/v1/dashboard/stats", "-b", $accJar)
+        $all = Invoke-Api @("$BaseUrl/api/v1/dashboard/stats", "-b", $readJar)
+        if ($mine.Status -ne 200 -or $all.Status -ne 200) { return $false }
+
+        if ([int]$mine.Json.applications.total -ne 1) {
+            Write-Host "        restricted dashboard counts $($mine.Json.applications.total) applications, expected 1" -ForegroundColor DarkYellow
+            return $false
+        }
+        # And the admin's own view is unaffected, so this narrowed rather than broke.
+        if ([int]$all.Json.applications.total -lt 3) {
+            Write-Host "        the admin dashboard lost applications: $($all.Json.applications.total)" -ForegroundColor DarkYellow
+            return $false
+        }
+        # Identical SBOMs, so a leak would show as a package count larger than one app's.
+        return [int]$mine.Json.components.distinct -ge 1
+    }
+
+    Assert-That "an application outside the grant reads as absent, not as forbidden" {
+        # 404 rather than 403 throughout: a 403 confirms that an application exists which
+        # this account is not allowed to know about.
+        foreach ($id in @($script:accAppBId, $script:accAppNoneId)) {
+            $r = Invoke-Api @("$BaseUrl/api/v1/applications/$id", "-b", $accJar)
+            if ($r.Status -ne 404) {
+                Write-Host "        application $id returned $($r.Status), expected 404" -ForegroundColor DarkYellow
+                return $false
+            }
+        }
+        # The granted one still opens, or the filter is simply refusing everything.
+        $ok = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:accAppAId)", "-b", $accJar)
+        return $ok.Status -eq 200
+    }
+
+    Assert-That "a group the account was not granted is neither listed nor readable" {
+        $list = Invoke-Api @("$BaseUrl/api/v1/groups?pageSize=200", "-b", $accJar)
+        if ($list.Status -ne 200) { Show-Body $list 200; return $false }
+        $names = @($list.Json.items | ForEach-Object { $_.name })
+        if ($names -contains "smoke-acc-group-b-$accSuffix") {
+            Write-Host "        an ungranted group was offered in the list" -ForegroundColor DarkYellow
+            return $false
+        }
+        if ($names -notcontains "smoke-acc-group-a-$accSuffix") {
+            Write-Host "        the granted group is missing from the list" -ForegroundColor DarkYellow
+            return $false
+        }
+        # A group offered in a filter dropdown that returns nothing reads as broken data
+        # rather than as a permission, which is why the list is filtered and not just the id.
+        $direct = Invoke-Api @("$BaseUrl/api/v1/groups/$($script:accGroupBId)", "-b", $accJar)
+        return $direct.Status -eq 404
+    }
+
+    Assert-That "package search does not become a way to enumerate what is hidden" {
+        <#
+          The sharpest leak in the platform. Search spans estates on purpose and returns
+          application names, so an unfiltered version answers "which applications exist"
+          for anybody who can ask about a package -- and all three applications here ship
+          byte-identical packages, so a leak is guaranteed to show.
+        #>
+        $r = Invoke-Api @("$BaseUrl/api/v1/components/search?name=express&match=exact&scope=all&pageSize=200", "-b", $accJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+
+        $mine = @($r.Json.items | Where-Object { $_.applicationName -like "smoke-test-app-acc-*" })
+        $leaked = @($mine | Where-Object { $_.applicationName -ne $accAppA })
+        if ($leaked.Count -gt 0) {
+            Write-Host "        search leaked: $(@($leaked | ForEach-Object { $_.applicationName }) -join ', ')" -ForegroundColor DarkYellow
+            return $false
+        }
+        # Non-empty, or this passes vacuously against a search that found nothing at all.
+        return $mine.Count -ge 1
+    }
+
+    Assert-That "a build belonging to a hidden application cannot be opened by id" {
+        $scans = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:accAppBId)/scans", "-b", $readJar)
+        if ($scans.Status -ne 200) { Show-Body $scans 200; return $false }
+        $scanId = $scans.Json.items[0].id
+        if (-not $scanId) { return $false }
+
+        # Reachable by the admin, absent for the restricted account. Scans carry no
+        # environment or group of their own -- they inherit through their application -- so
+        # this is where an inherited filter that was never applied would show up.
+        $r = Invoke-Api @("$BaseUrl/api/v1/scans/$scanId", "-b", $accJar)
+        return $r.Status -eq 404
+    }
+
+    Assert-That "granting one application directly makes exactly that one visible" {
+        # The reason direct grants exist: a newly ingested service is in no group, and
+        # inventing a one-member group to share it is how a group list becomes unreadable.
+        $g = New-JsonFile -Name "acc-grant2.json" -Data @{
+            restricted = $true
+            groupIds = @($script:accGroupAId)
+            applicationIds = @($script:accAppNoneId)
+        }
+        $set = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:accUserId)/application-access",
+            "-H", $jsonCt, "--data-binary", "@$g", "-b", $readJar)
+        if ($set.Status -ne 200) { Show-Body $set 200; return $false }
+        if ([int]$set.Json.visibleApplicationCount -ne 2) {
+            Write-Host "        reports $($set.Json.visibleApplicationCount) visible, expected 2" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications?search=smoke-test-app-acc-&pageSize=200&status=active&status=inactive&status=pending_confirmation", "-b", $accJar)
+        $names = @($r.Json.items | ForEach-Object { $_.name })
+        # The direct grant reaches its application and nothing else -- group B stays hidden.
+        return ($names -contains $accAppA) -and ($names -contains $accAppNone) -and
+               ($names -notcontains $accAppB)
+    }
+
+    Assert-That "a restricted account with nothing granted sees nothing, not everything" {
+        <#
+          The fail-safe direction, and the reason the restriction is a stored flag rather
+          than "has any grant rows". Inferring it from row counts would make removing
+          somebody's last group indistinguishable from never having restricted them --
+          and the collapse fails upwards, silently promoting that account to the whole
+          estate at the moment an administrator meant to narrow it to nothing.
+        #>
+        $g = New-JsonFile -Name "acc-grant3.json" -Data @{
+            restricted = $true; groupIds = @(); applicationIds = @()
+        }
+        $set = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:accUserId)/application-access",
+            "-H", $jsonCt, "--data-binary", "@$g", "-b", $readJar)
+        if ($set.Status -ne 200) { Show-Body $set 200; return $false }
+        if ([int]$set.Json.visibleApplicationCount -ne 0) { return $false }
+
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications?pageSize=200&status=active&status=inactive&status=pending_confirmation", "-b", $accJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        if (@($r.Json.items).Count -ne 0) {
+            Write-Host "        an account granted nothing saw $(@($r.Json.items).Count) applications" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $d = Invoke-Api @("$BaseUrl/api/v1/dashboard/stats", "-b", $accJar)
+        return $d.Status -eq 200 -and [int]$d.Json.applications.total -eq 0
+    }
+
+    Assert-That "clearing the restriction restores the whole estate" {
+        $g = New-JsonFile -Name "acc-grant4.json" -Data @{
+            restricted = $false; groupIds = @(); applicationIds = @()
+        }
+        $set = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:accUserId)/application-access",
+            "-H", $jsonCt, "--data-binary", "@$g", "-b", $readJar)
+        if ($set.Status -ne 200) { Show-Body $set 200; return $false }
+        # Null rather than a number: the answer is "everything in its environments", and a
+        # count there would invite comparing it against a restricted account's.
+        if ($null -ne $set.Json.visibleApplicationCount) {
+            Write-Host "        an unrestricted account reported a visible count" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $r = Invoke-Api @("$BaseUrl/api/v1/applications?search=smoke-test-app-acc-&pageSize=200&status=active&status=inactive&status=pending_confirmation", "-b", $accJar)
+        $names = @($r.Json.items | ForEach-Object { $_.name })
+        return ($names -contains $accAppA) -and ($names -contains $accAppB) -and
+               ($names -contains $accAppNone)
+    }
+
+    Assert-That "an unknown group id is refused rather than silently dropped" {
+        # Dropping it would return a checklist with a box unticked and no explanation, which
+        # reads as the save having failed for some other reason entirely.
+        $g = New-JsonFile -Name "acc-grant5.json" -Data @{
+            restricted = $true
+            groupIds = @("00000000-0000-0000-0000-000000000000")
+            applicationIds = @()
+        }
+        $r = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:accUserId)/application-access",
+            "-H", $jsonCt, "--data-binary", "@$g", "-b", $readJar)
+        return $r.Status -eq 404
+    }
+
+    Assert-That "the audit trail records what access was granted and how much it reaches" {
+        $r = Invoke-Api @("$adminUrl/audit-log?action=user.application_access_set&pageSize=50", "-b", $readJar)
+        if ($r.Status -ne 200) { return $false }
+        $rows = @($r.Json.items | Where-Object { $_.targetId -eq $script:accUserId })
+        if ($rows.Count -lt 1) { return $false }
+        # Counts and ids, never names -- and the visible figure, because "one group" does not
+        # say whether somebody was handed one service or forty.
+        return $null -ne $rows[0].metadata.visible
+    }
+
+    Assert-That "removes the account this section created" {
+        if (-not $script:accUserId) { return $true }
+        $r = Invoke-Api @("-X", "DELETE", "$adminUrl/users/$($script:accUserId)", "-b", $readJar)
+        Show-Body $r 204
+        return $r.Status -eq 204
+    }
+
+    Assert-That "removes the groups this section created" {
+        $ok = $true
+        foreach ($groupId in @($script:accGroupAId, $script:accGroupBId)) {
+            if (-not $groupId) { continue }
+            $d = Invoke-Api @("-X", "DELETE", "$adminUrl/groups/$groupId", "-b", $readJar)
+            if ($d.Status -ne 204 -and $d.Status -ne 200) {
+                Write-Host "        could not delete group $groupId ($($d.Status))" -ForegroundColor DarkYellow
+                $ok = $false
+            }
+        }
+        return $ok
+    }
+
+    # ======================================================================
     Write-Host ""
     Write-Host "Error handling" -ForegroundColor Cyan
 

@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
+import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
   AdvisoryImpact,
   AdvisorySummary,
@@ -35,6 +35,7 @@ import type {
   SortDirection,
   SuppressionSummary,
   TopComponentEntry,
+  UserApplicationAccess,
   UserSummary,
   VulnBreakdown,
   VulnDbUpdateAttempt,
@@ -102,6 +103,7 @@ export const queryKeys = {
   */
   environments: ["environments"] as const,
   userEnvironments: (id: string) => ["admin", "user-environments", id] as const,
+  userApplicationAccess: (id: string) => ["admin", "user-application-access", id] as const,
   environmentComparison: ["admin", "environment-comparison"] as const,
   auditLog: (params: Record<string, unknown>) => ["admin", "audit-log", params] as const,
   ingestTokens: ["admin", "ingest-tokens"] as const,
@@ -550,6 +552,79 @@ export function useUserEnvironments(id: string | null) {
     queryFn: () => api.get<{ environmentIds: string[] }>(`/admin/users/${id}/environments`),
     enabled: id !== null,
   });
+}
+
+/** Which groups and applications one account may see. Admin only. */
+export function useUserApplicationAccess(id: string | null) {
+  return useQuery({
+    queryKey: queryKeys.userApplicationAccess(id ?? ""),
+    queryFn: () => api.get<UserApplicationAccess>(`/admin/users/${id}/application-access`),
+    enabled: id !== null,
+  });
+}
+
+/**
+ * The groups and applications an administrator can grant, gathered per environment.
+ *
+ * One request per estate rather than one for all of them, because both list endpoints are
+ * scoped to a single environment by design — that scoping is the feature the rest of this
+ * platform rests on, and adding a cross-estate mode to it so one admin screen could avoid a
+ * few requests would be widening a boundary to save a round trip.
+ *
+ * Only the environments the account has actually been granted are fetched. Offering a group
+ * from an estate the account cannot reach would let an administrator tick something that
+ * grants nothing, since the two restrictions compose by intersection.
+ */
+const GRANT_PAGE_SIZE = 200;
+
+export function useGrantableScope(environmentIds: string[]) {
+  const groups = useQueries({
+    queries: environmentIds.map((environment) => ({
+      queryKey: queryKeys.groups({ pageSize: 200, environment }),
+      queryFn: () =>
+        api.get<Paginated<ApplicationGroupSummary>>(
+          `/groups${toQueryString({ pageSize: 200, environment })}`,
+        ),
+      staleTime: 60 * 1000,
+    })),
+  });
+
+  const applications = useQueries({
+    queries: environmentIds.map((environment) => ({
+      queryKey: queryKeys.applications({ pageSize: GRANT_PAGE_SIZE, environment, forGrant: true }),
+      queryFn: () =>
+        api.get<Paginated<ApplicationSummary>>(
+          `/applications${toQueryString({
+            pageSize: GRANT_PAGE_SIZE,
+            environment,
+            // Inactive and unconfirmed applications are grantable too: a service somebody
+            // needs access to is often exactly the one that has just appeared and not yet
+            // been confirmed.
+            status: ["active", "inactive", "pending_confirmation"],
+          })}`,
+        ),
+      staleTime: 60 * 1000,
+    })),
+  });
+
+  const all = [...groups, ...applications];
+  return {
+    groups: groups.flatMap((q) => q.data?.items ?? []),
+    applications: applications.flatMap((q) => q.data?.items ?? []),
+    isLoading: all.some((q) => q.isLoading),
+    /*
+      Surfaced rather than swallowed. A failed request leaves both lists empty, and an empty
+      list here renders as "no applications in the selected environments" -- which is a
+      statement of fact about the estate, made on the strength of a request that failed. The
+      administrator would then conclude there is nothing to grant.
+
+      Found exactly that way: pageSize was over the API's cap, every request 400'd, and the
+      screen calmly reported an empty estate.
+    */
+    error: all.find((q) => q.error)?.error ?? null,
+    /** True only when the lists are known to be complete. */
+    truncated: all.some((q) => (q.data?.total ?? 0) > GRANT_PAGE_SIZE),
+  };
 }
 
 /** Every estate's figures side by side. Admin only, and never summed — see the API. */

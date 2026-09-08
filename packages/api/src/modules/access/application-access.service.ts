@@ -143,6 +143,29 @@ export class ApplicationAccessService {
   }
 
   /**
+   * How many of these ids name something that exists.
+   *
+   * Counted in one round trip rather than checked one at a time, and returned as counts
+   * rather than as the missing ids: the caller only needs to know whether to refuse, and
+   * echoing back which ids were unknown would confirm the existence of everything it did
+   * not name — a way to probe for group ids by elimination.
+   */
+  async countKnown(
+    groupIds: string[],
+    applicationIds: string[],
+  ): Promise<{ groups: number; applications: number }> {
+    const result = await this.deps.db.execute<Row<{ groups: number; applications: number }>>(sql`
+      SELECT
+        (SELECT count(*) FROM application_group
+          WHERE id = ANY(${sql.param(groupIds)}::uuid[]))::int AS groups,
+        (SELECT count(*) FROM application
+          WHERE id = ANY(${sql.param(applicationIds)}::uuid[]))::int AS applications
+    `);
+    const row = rowsOf(result)[0];
+    return { groups: Number(row?.groups ?? 0), applications: Number(row?.applications ?? 0) };
+  }
+
+  /**
    * Replaces an account's grants with exactly this set.
    *
    * One transaction, because the two lists and the flag are one decision. A partial apply —

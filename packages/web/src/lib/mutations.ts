@@ -30,6 +30,8 @@ import type {
   UpdateUserRequest,
   UpdateVulnSettings,
   UserCredentialResponse,
+  SetUserApplicationAccess,
+  UserApplicationAccess,
   UserSummary,
   VulnScanStatus,
   PlatformSettings,
@@ -272,6 +274,17 @@ export function useSetUserEnvironments() {
       api.put<{ environmentIds: string[] }>(`/admin/users/${vars.id}/environments`, {
         environmentIds: vars.environmentIds,
       }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+  });
+}
+
+export function useSetUserApplicationAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; body: SetUserApplicationAccess }) =>
+      api.put<UserApplicationAccess>(`/admin/users/${vars.id}/application-access`, vars.body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["admin"] });
     },

@@ -8,10 +8,17 @@ import {
   useCreateUser,
   useDeleteUser,
   useResetUserPassword,
+  useSetUserApplicationAccess,
   useSetUserEnvironments,
   useUpdateUser,
 } from "../../lib/mutations.ts";
-import { useEnvironments, useUserEnvironments, useUsers } from "../../lib/queries.ts";
+import {
+  useEnvironments,
+  useGrantableScope,
+  useUserApplicationAccess,
+  useUserEnvironments,
+  useUsers,
+} from "../../lib/queries.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../../lib/useUrlState.ts";
 import {
   Badge,
@@ -62,7 +69,7 @@ export function AdminUsersPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<UserSummary | null>(null);
-  const [environmentTarget, setEnvironmentTarget] = useState<UserSummary | null>(null);
+  const [accessTarget, setAccessTarget] = useState<UserSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserSummary | null>(null);
   /** Shown once, after a create or reset. Cleared when the modal closes. */
   const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
@@ -164,7 +171,7 @@ export function AdminUsersPage() {
                       Status
                     </Th>
                     {/* Not sortable: the grants are per user and not part of the list query. */}
-                    <Th>Environments</Th>
+                    <Th>Access</Th>
                     <Th onSort={() => sort.toggle("lastLoginAt")} sorted={sort.stateOf("lastLoginAt")}>
                       Last sign-in
                     </Th>
@@ -217,11 +224,11 @@ export function AdminUsersPage() {
                           )}
                         </Td>
                         <Td>
-                          <EnvironmentAccessCell
+                          <AccessCell
                             user={u}
                             onEdit={() => {
                               setActionError(null);
-                              setEnvironmentTarget(u);
+                              setAccessTarget(u);
                             }}
                           />
                         </Td>
@@ -294,10 +301,7 @@ export function AdminUsersPage() {
         )}
       </Card>
 
-      <UserEnvironmentsModal
-        target={environmentTarget}
-        onClose={() => setEnvironmentTarget(null)}
-      />
+      <UserAccessModal target={accessTarget} onClose={() => setAccessTarget(null)} />
 
       <CreateUserModal
         open={createOpen}
@@ -643,121 +647,296 @@ function ResetPasswordModal({
  * row — twenty-five rows would mean twenty-five requests to render a column. They are read
  * when the editor opens.
  */
-function EnvironmentAccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void }) {
+function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void }) {
   if (user.role === "admin") {
     return (
       <span
         className="text-xs text-text-muted"
-        title="Administrators reach every environment, including ones created later."
+        title="Administrators reach every environment, group and application, including ones created later."
       >
-        All environments
+        Everything
       </span>
     );
   }
+
   return (
-    <Button size="sm" variant="ghost" onClick={onEdit}>
-      Choose…
-    </Button>
+    <div className="flex items-center gap-1.5">
+      {/*
+        Whether the account is narrowed is worth a badge; *what* it is narrowed to is not,
+        because it cannot be rendered honestly here. The grants are not in the list payload
+        and fetching them per row would mean twenty-five requests to draw one column — and a
+        count of groups would be the misleading half of the answer anyway, since groups
+        overlap and say nothing about how many applications they reach.
+      */}
+      {user.applicationAccessRestricted ? (
+        <Badge tone="warn" title="This account sees only the groups and applications granted to it.">
+          Restricted
+        </Badge>
+      ) : null}
+      <Button size="sm" variant="ghost" onClick={onEdit}>
+        {user.applicationAccessRestricted ? "Review…" : "Choose…"}
+      </Button>
+    </div>
   );
 }
 
 /**
- * The per-user environment checklist.
+ * Everything one account may see, on one screen.
  *
- * Saves the complete set rather than a delta, matching the API. Two administrators editing
- * the same account at once would otherwise each apply their own change to a set the other
- * had already altered, and whichever saved second would silently restore what the first
- * removed.
+ * Two restrictions with a strict order between them, and the screen is laid out to make that
+ * order legible rather than to be tidy. Environments come first because they decide which
+ * estates exist for this account at all; groups and applications narrow within those. Ticking
+ * a group from an estate the account has not been granted would grant nothing — the two
+ * compose by intersection — so only groups from granted estates are offered.
  *
- * Granting nothing is permitted and is a real state — an account can exist before anyone
- * has decided what it should reach — but it is called out, because a user in that state is
- * refused every page on the platform and reports it as the platform being broken.
+ * They were briefly two separate modals. That was worse for one specific reason: an
+ * administrator asking "what can this person see" had to open both and hold the intersection
+ * in their head, and the intersection is exactly where the surprising answers live.
  */
-function UserEnvironmentsModal({
-  target,
-  onClose,
-}: {
-  target: UserSummary | null;
-  onClose: () => void;
-}) {
+function UserAccessModal({ target, onClose }: { target: UserSummary | null; onClose: () => void }) {
   const environments = useEnvironments();
-  const granted = useUserEnvironments(target?.id ?? null);
-  const save = useSetUserEnvironments();
-  const [selected, setSelected] = useState<string[] | null>(null);
+  const grantedEnvironments = useUserEnvironments(target?.id ?? null);
+  const access = useUserApplicationAccess(target?.id ?? null);
+  const saveEnvironments = useSetUserEnvironments();
+  const saveAccess = useSetUserApplicationAccess();
 
-  // Server state is the starting point; local state only exists once something is ticked.
-  const current = selected ?? granted.data?.environmentIds ?? [];
-  const all = environments.data?.environments ?? [];
-  const dirty =
-    granted.data !== undefined &&
-    selected !== null &&
-    (selected.length !== granted.data.environmentIds.length ||
-      selected.some((id) => !granted.data.environmentIds.includes(id)));
+  const [envIds, setEnvIds] = useState<string[] | null>(null);
+  const [restricted, setRestricted] = useState<boolean | null>(null);
+  const [groupIds, setGroupIds] = useState<string[] | null>(null);
+  const [appIds, setAppIds] = useState<string[] | null>(null);
 
-  function toggle(id: string, checked: boolean) {
-    setSelected(checked ? [...current, id] : current.filter((e) => e !== id));
+  // Server state is the starting point; local state exists only once something is changed.
+  const currentEnvs = envIds ?? grantedEnvironments.data?.environmentIds ?? [];
+  const currentRestricted = restricted ?? access.data?.restricted ?? false;
+  const currentGroups = groupIds ?? access.data?.groupIds ?? [];
+  const currentApps = appIds ?? access.data?.applicationIds ?? [];
+
+  const grantable = useGrantableScope(currentEnvs);
+  const allEnvironments = environments.data?.environments ?? [];
+  const isAdmin = target?.role === "admin";
+
+  const loading = grantedEnvironments.isLoading || access.isLoading;
+  const saving = saveEnvironments.isPending || saveAccess.isPending;
+  const dirty = envIds !== null || restricted !== null || groupIds !== null || appIds !== null;
+
+  function toggle(list: string[], id: string, on: boolean): string[] {
+    return on ? [...list, id] : list.filter((entry) => entry !== id);
   }
 
   function close() {
-    setSelected(null);
-    save.reset();
+    setEnvIds(null);
+    setRestricted(null);
+    setGroupIds(null);
+    setAppIds(null);
+    saveEnvironments.reset();
+    saveAccess.reset();
     onClose();
+  }
+
+  /*
+    Two endpoints, saved in this order deliberately. Environments are widened or narrowed
+    first, so that a group grant landing immediately afterwards is checked against the estates
+    the account will actually have, rather than the ones it had a moment ago.
+  */
+  async function save() {
+    if (!target) return;
+    await saveEnvironments.mutateAsync({ id: target.id, environmentIds: currentEnvs });
+    await saveAccess.mutateAsync({
+      id: target.id,
+      body: {
+        restricted: currentRestricted,
+        groupIds: currentGroups,
+        applicationIds: currentApps,
+      },
+    });
+    close();
   }
 
   return (
     <Modal
       open={target !== null}
       onClose={close}
-      title={target ? `Environments for ${target.email}` : "Environments"}
+      wide
+      title={target ? `Access for ${target.email}` : "Access"}
       footer={
         <>
-          <Button onClick={close} disabled={save.isPending}>
+          <Button onClick={close} disabled={saving}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            disabled={!dirty || save.isPending}
-            onClick={() => {
-              if (!target || selected === null) return;
-              save.mutate({ id: target.id, environmentIds: selected }, { onSuccess: close });
-            }}
-          >
-            {save.isPending ? "Saving…" : "Save"}
+          <Button variant="primary" disabled={!dirty || saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save access"}
           </Button>
         </>
       }
     >
-      <div className="space-y-3 text-sm">
-        <FormError error={save.error} />
+      <div className="space-y-4 text-sm">
+        <FormError error={saveEnvironments.error ?? saveAccess.error} />
 
-        {granted.isLoading || environments.isLoading ? (
+        {loading ? (
           <LoadingBlock label="Loading access" />
         ) : (
           <>
-            <div className="flex flex-col gap-2">
-              {all.map((environment) => (
-                <Checkbox
-                  key={environment.id}
-                  checked={current.includes(environment.id)}
-                  onChange={(checked) => toggle(environment.id, checked)}
-                  label={environment.name}
-                />
-              ))}
-            </div>
-
-            {current.length === 0 ? (
-              <div className="rounded-md border border-warn/40 bg-warn-subtle p-2.5 text-[11px] text-warn">
-                With no environments, this account can sign in and see nothing — every page
-                will report that it has no access. That is a valid state, but it is rarely the
-                intended one.
+            {/*
+              Stated once, at the top, rather than repeated as a disabled state on every
+              control below. An admin screen whose every checkbox is greyed out reads as
+              broken; one sentence explaining that the role already grants everything reads
+              as an answer.
+            */}
+            {isAdmin ? (
+              <div className="rounded-md border border-accent/40 bg-accent-subtle p-2.5 text-[11px] text-accent">
+                This is an administrator, and administrators reach every environment, group and
+                application — including ones created later. The choices below are stored and
+                take effect only if the account is changed to a read-only user.
               </div>
             ) : null}
 
-            <p className="text-[11px] text-text-faint">
-              Applies to read-only accounts. Administrators reach every environment regardless
-              of what is ticked here, and these choices take effect if the account is later
-              made read-only.
-            </p>
+            <section>
+              <h3 className="mb-1.5 text-xs font-medium text-text-muted">Environments</h3>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                {allEnvironments.map((environment) => (
+                  <Checkbox
+                    key={environment.id}
+                    checked={currentEnvs.includes(environment.id)}
+                    onChange={(on) => setEnvIds(toggle(currentEnvs, environment.id, on))}
+                    label={environment.name}
+                  />
+                ))}
+              </div>
+              {currentEnvs.length === 0 ? (
+                <p className="mt-1.5 text-[11px] text-warn">
+                  With no environments this account can sign in and see nothing at all.
+                </p>
+              ) : null}
+            </section>
+
+            <section className="border-t border-border-base pt-3">
+              <h3 className="mb-1.5 text-xs font-medium text-text-muted">
+                Within those environments
+              </h3>
+              <div className="flex flex-col gap-1.5">
+                <Checkbox
+                  checked={!currentRestricted}
+                  onChange={() => setRestricted(false)}
+                  label="Everything, including applications added later"
+                />
+                <Checkbox
+                  checked={currentRestricted}
+                  onChange={() => setRestricted(true)}
+                  label="Only the groups and applications selected below"
+                />
+              </div>
+
+              {currentRestricted ? (
+                <div className="mt-3 space-y-3">
+                  {grantable.isLoading ? (
+                    <LoadingBlock label="Loading groups" />
+                  ) : grantable.error ? (
+                    /*
+                      Shown instead of the pickers, never alongside an empty one. An empty
+                      picker after a failed load says "there is nothing to grant", which is a
+                      claim about the estate rather than about the request -- and an
+                      administrator who believes it stops looking.
+                    */
+                    <ErrorBanner error={grantable.error} />
+                  ) : (
+                    <>
+                      <div>
+                        <p className="mb-1 text-[11px] font-medium text-text-muted">Groups</p>
+                        {grantable.groups.length === 0 ? (
+                          <p className="text-[11px] text-text-faint">
+                            No groups exist in the selected environments yet.
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                            {grantable.groups.map((group) => (
+                              <Checkbox
+                                key={group.id}
+                                checked={currentGroups.includes(group.id)}
+                                onChange={(on) => setGroupIds(toggle(currentGroups, group.id, on))}
+                                label={`${group.name} (${group.applicationCount})`}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {/*
+                          The reason to prefer a group, said where the choice is made. A group
+                          grant follows its membership; the list below does not.
+                        */}
+                        <p className="mt-1 text-[11px] text-text-faint">
+                          A group grant follows the group: applications added to it later become
+                          visible without anyone revisiting this screen.
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="mb-1 text-[11px] font-medium text-text-muted">
+                          Individual applications
+                        </p>
+                        <div className="max-h-48 overflow-y-auto rounded-md border border-border-base p-2">
+                          {grantable.applications.length === 0 ? (
+                            <p className="text-[11px] text-text-faint">
+                              No applications in the selected environments.
+                            </p>
+                          ) : (
+                            <div className="flex flex-col gap-1">
+                              {grantable.applications.map((application) => (
+                                <Checkbox
+                                  key={application.id}
+                                  checked={currentApps.includes(application.id)}
+                                  onChange={(on) =>
+                                    setAppIds(toggle(currentApps, application.id, on))
+                                  }
+                                  label={application.name}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <p className="mt-1 text-[11px] text-text-faint">
+                          For a service that is in no group — which is how every application
+                          starts, since CI registers it before anyone files it.
+                        </p>
+                        {/*
+                          Stated rather than silently trimmed. A list that stops at the cap
+                          without saying so lets an administrator conclude an application does
+                          not exist because they could not find it.
+                        */}
+                        {grantable.truncated ? (
+                          <p className="mt-1 text-[11px] text-warn">
+                            More applications exist than are listed here. Grant a group instead,
+                            or narrow the environments above.
+                          </p>
+                        ) : null}
+                      </div>
+
+                      {currentGroups.length === 0 && currentApps.length === 0 ? (
+                        <div className="rounded-md border border-warn/40 bg-warn-subtle p-2.5 text-[11px] text-warn">
+                          Nothing is selected, so this account will see no applications at all.
+                          That is a real state, but it is rarely the intended one.
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </section>
+
+            {/*
+              The count, not the two list lengths. Groups overlap with each other and with
+              directly granted applications, so "two groups and one application" does not tell
+              an administrator whether they have granted three services or thirty — and a
+              number they have to reconcile themselves is how somebody concludes a save failed.
+            */}
+            {currentRestricted && access.data ? (
+              <p className="border-t border-border-base pt-3 text-[11px] text-text-muted">
+                Currently reaches{" "}
+                <strong className="text-text-base">
+                  {access.data.visibleApplicationCount ?? 0}
+                </strong>{" "}
+                {access.data.visibleApplicationCount === 1 ? "application" : "applications"}.
+                Saving recalculates this.
+              </p>
+            ) : null}
           </>
         )}
       </div>

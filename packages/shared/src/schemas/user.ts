@@ -88,6 +88,14 @@ export interface UserSummary {
   authProvider: "local" | "ldap";
   isActive: boolean;
   mustChangePassword: boolean;
+  /**
+   * Whether this account is narrowed to particular groups and applications.
+   *
+   * The flag alone, not the grants. It is what the user list needs to show that an account
+   * is restricted at all; *what* it is restricted to is read when the editor opens, because
+   * fetching grants per row would be one request per row to draw one column.
+   */
+  applicationAccessRestricted: boolean;
   lastLoginAt: string | null;
   /** Live session count, so an admin can see who is currently signed in. */
   activeSessions: number;

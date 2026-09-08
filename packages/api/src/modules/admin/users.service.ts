@@ -90,7 +90,8 @@ export class AdminUsersService {
     const rows = await this.deps.db.execute<Row<UserQueryRow>>(sql`
       SELECT
         u.id, u.email, u.role, u.auth_provider, u.is_active,
-        u.must_change_password, u.last_login_at, u.created_at,
+        u.must_change_password, u.application_access_restricted,
+        u.last_login_at, u.created_at,
         (
           SELECT count(*) FROM session s
           WHERE s.user_id = u.id AND s.expires_at > now()
@@ -109,7 +110,8 @@ export class AdminUsersService {
     const rows = await this.deps.db.execute<Row<UserQueryRow>>(sql`
       SELECT
         u.id, u.email, u.role, u.auth_provider, u.is_active,
-        u.must_change_password, u.last_login_at, u.created_at,
+        u.must_change_password, u.application_access_restricted,
+        u.last_login_at, u.created_at,
         (SELECT count(*) FROM session s WHERE s.user_id = u.id AND s.expires_at > now())::int
           AS active_sessions
       FROM "user" u
@@ -343,6 +345,7 @@ interface UserQueryRow {
   auth_provider: "local" | "ldap";
   is_active: boolean;
   must_change_password: boolean;
+  application_access_restricted: boolean;
   last_login_at: Date | string | null;
   created_at: Date | string;
   active_sessions: number | string;
@@ -357,6 +360,7 @@ function toUserSummary(row: UserQueryRow): UserSummary {
     authProvider: row.auth_provider,
     isActive: row.is_active,
     mustChangePassword: row.must_change_password,
+    applicationAccessRestricted: row.application_access_restricted,
     lastLoginAt: toIso(row.last_login_at),
     activeSessions: Number(row.active_sessions),
     createdAt: toIso(row.created_at)!,
@@ -372,6 +376,7 @@ function rowToQueryRow(row: typeof user.$inferSelect, activeSessions: number): U
     auth_provider: row.authProvider,
     is_active: row.isActive,
     must_change_password: row.mustChangePassword,
+    application_access_restricted: row.applicationAccessRestricted,
     last_login_at: row.lastLoginAt,
     created_at: row.createdAt,
     active_sessions: activeSessions,
