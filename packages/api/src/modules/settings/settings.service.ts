@@ -6,6 +6,7 @@ import {
   STALE_THRESHOLD_MAX_DAYS,
   STALE_THRESHOLD_MIN_DAYS,
   VULN_DB_INTERVAL_DEFAULT_HOURS,
+  reportSettingsFieldsSchema,
   updateReportSettingsSchema,
   updateMaliciousSettingsSchema,
   MALICIOUS_DEFAULT_FEED_URL,
@@ -267,7 +268,7 @@ export class SettingsService {
           a host that no longer passes a tightened rule, say -- should not throw away the
           recipient list an administrator spent time entering.
         */
-        for (const [key, fieldSchema] of Object.entries(updateReportSettingsSchema.shape)) {
+        for (const [key, fieldSchema] of Object.entries(reportSettingsFieldsSchema.shape)) {
           const candidate = (stored as Record<string, unknown>)[key];
           if (candidate === undefined) continue;
           const field = fieldSchema.safeParse(candidate);

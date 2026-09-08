@@ -1065,16 +1065,31 @@ const originalHost = await page.getByLabel("Mail server").inputValue();
 await page.getByLabel("Mail server").fill("smtp://user:pass@relay.internal:25/");
 await page.getByRole("button", { name: "Save delivery settings" }).click();
 await page.waitForTimeout(900);
-if ((await page.getByText(/hostname or IP address/i).count()) === 0) {
-  problems.push("a URL was accepted in the mail server field");
+/*
+  The message has to name the correction, not the category.
+
+  It used to read "must be a hostname or IP address, with no scheme, port, path or
+  credentials" -- accurate, and it lists four possible mistakes and leaves the reader to
+  work out which one they made. Asserting on the specific correction is what stops it
+  regressing to a generic phrase that technically passes a looser check.
+*/
+if ((await page.getByText(/drop the "smtp:\/\/" prefix/i).count()) === 0) {
+  problems.push("a URL in the mail server field was accepted, or refused without saying why");
 } else {
-  log("  OK   a URL in the mail server field is refused");
+  log("  OK   a URL in the mail server field is refused, naming the fix");
+}
+
+// And the message lands against the field rather than in a banner that names nothing.
+const hostFieldError = page.locator("#smtp-host ~ p.text-danger");
+if ((await hostFieldError.count()) === 0) {
+  problems.push("the mail server error is not shown against the mail server field");
+} else {
+  log("  OK   the error is shown against the field it is about");
 }
 
 /*
-  Restored by reloading rather than by saving the original value back. On an estate where
-  delivery has never been configured the original host is empty, and saving that is itself
-  rejected -- so the discard has to be the thing that does not touch the API.
+  Restored by reloading rather than by saving the original value back, so the discard
+  touches no endpoint at all -- the point is to leave the estate exactly as it was found.
 */
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForTimeout(600);
@@ -1085,6 +1100,52 @@ if (restoredHost !== originalHost) {
   log("  OK   the rejected value was not saved");
 }
 await shot("admin-configuration-delivery");
+
+/*
+  21d. A relay that cannot be reached must be reported as a relay problem.
+
+  This is the regression that produced the bug report. Pressing the test button against an
+  unreachable relay threw inside the mail library, reached the API's error handler as an
+  unrecognised exception, and came back as 500 "Internal server error" -- which says the
+  platform is broken when the platform is working and the relay is not, sending whoever
+  reads it to the wrong system entirely.
+
+  Driven against a host that cannot resolve, because that is reliable from any machine with
+  no fixture to stand up. The assertion is on both halves: the reader is told what happened,
+  and is NOT told the server failed.
+*/
+log("21d. an unreachable relay is diagnosed, not reported as a server error");
+await page.getByLabel("Mail server").fill("mail.corp.invalid");
+await page.getByLabel("From address").fill("sbom@intranet");
+await page.waitForTimeout(300);
+
+const presets = await page.getByRole("button", { name: /^(25|587|465) —/ }).count();
+if (presets !== 3) {
+  problems.push(`expected 3 port/encryption presets, found ${presets}`);
+} else {
+  log("  OK   the common port and encryption pairings are offered as presets");
+}
+await page.getByRole("button", { name: /^25 —/ }).click();
+await page.waitForTimeout(300);
+
+await page.getByRole("button", { name: "Test connection" }).click();
+// A DNS failure plus the mailer's own timeout budget; generous so a slow resolver does not
+// read as a missing diagnosis.
+await page.waitForTimeout(10000);
+
+const afterTest = await page.locator("body").innerText();
+if (/Internal server error/i.test(afterTest)) {
+  problems.push("an unreachable relay is still reported as an internal server error");
+} else if (!/could not be resolved/i.test(afterTest)) {
+  problems.push("an unreachable relay produced no diagnosis on screen");
+} else {
+  log("  OK   the failure names the host and says what to check");
+}
+await shot("admin-configuration-smtp-diagnosis");
+
+// Reloaded so nothing typed above survives into the next step. Nothing was saved.
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForTimeout(600);
 
 // --- 22. admin: audit log ---------------------------------------------------
 log("22. admin panel, audit log");

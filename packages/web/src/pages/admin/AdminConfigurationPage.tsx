@@ -5,10 +5,14 @@ import {
   REPORT_TEMPLATE_PLACEHOLDERS,
   STALE_THRESHOLD_MAX_DAYS,
   STALE_THRESHOLD_MIN_DAYS,
+  SMTP_PRESETS,
   VULN_DB_INTERVAL_MAX_HOURS,
   VULN_DB_INTERVAL_MIN_HOURS,
   smtpEncryptions,
+  smtpPairingWarning,
   type ReportSettings,
+  type SmtpConnection,
+  type SmtpDiagnosis,
   type SmtpEncryption,
 } from "@sbom/shared";
 import {
@@ -23,7 +27,9 @@ import {
   useUpdatePlatformSettings,
   useUpdateReportSettings,
   useUpdateVulnSettings,
+  useVerifySmtp,
 } from "../../lib/mutations.ts";
+import { ApiError } from "../../lib/api.ts";
 import {
   Button,
   Card,
@@ -341,14 +347,18 @@ function ReportDeliveryCard() {
   const update = useUpdateReportSettings();
   const test = useTestReportEmail();
 
+  const verify = useVerifySmtp();
+
   const [form, setForm] = useState<ReportSettings | null>(null);
   const [recipientText, setRecipientText] = useState("");
+  const [portText, setPortText] = useState("25");
   const [testAddress, setTestAddress] = useState("");
 
   useEffect(() => {
     if (query.data) {
       setForm(query.data);
       setRecipientText(query.data.recipients.join("\n"));
+      setPortText(String(query.data.smtpPort));
     }
   }, [query.data]);
 
@@ -373,6 +383,40 @@ function ReportDeliveryCard() {
     setForm({ ...form, [key]: value });
 
   const tooMany = recipients.length > REPORT_RECIPIENT_LIMIT;
+  const parsedPort = Number(portText.trim());
+  const port = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 0;
+
+  /*
+    The server's own per-field messages, shown against the field each one names.
+
+    They were in the response all along and never displayed: the page rendered a single
+    banner reading "Body validation failed", which names no field and suggests no
+    correction. Reading them here means the rules live in one place instead of being
+    restated in the browser, where the two copies drift apart and the form starts refusing
+    values the API would have accepted.
+  */
+  const fieldError = (field: string): string | undefined =>
+    update.error instanceof ApiError ? update.error.fieldErrors[field]?.[0] : undefined;
+
+  /** What the test buttons use: the values on screen, not the ones last saved. */
+  const connection: SmtpConnection = {
+    smtpHost: form.smtpHost.trim(),
+    smtpPort: port,
+    smtpEncryption: form.smtpEncryption,
+    smtpFrom: form.smtpFrom.trim(),
+  };
+  // Both actions need somewhere to connect and an address to send as.
+  const testable = connection.smtpHost !== "" && connection.smtpFrom !== "" && port > 0;
+  const pairing = smtpPairingWarning(port, form.smtpEncryption);
+
+  /** The last thing either test button reported. Only one is shown, whichever ran last. */
+  const diagnosis = test.data ?? verify.data ?? null;
+  const testing = test.isPending || verify.isPending;
+
+  function applyPreset(preset: (typeof SMTP_PRESETS)[number]) {
+    setPortText(String(preset.port));
+    set("smtpEncryption", preset.encryption);
+  }
 
   return (
     <Card>
@@ -397,10 +441,46 @@ function ReportDeliveryCard() {
         </p>
 
         <div className="grid gap-3 sm:grid-cols-2">
+          {/*
+            Port and encryption are one decision wearing two controls, and getting the pair
+            wrong is the failure that looks least like a configuration mistake: the
+            connection simply hangs until it times out. Offering the three real-world
+            combinations as one click each is most of the fix.
+
+            They set the fields rather than replacing them. A relay on 2525 is somebody's
+            actual network, and a preset that became the only way to choose would be this
+            page deciding it knows better.
+          */}
+          <div className="sm:col-span-2">
+            <span className="mb-1 block text-xs font-medium text-text-muted">Common setups</span>
+            <div className="flex flex-wrap gap-1.5">
+              {SMTP_PRESETS.map((preset) => {
+                const active = port === preset.port && form.smtpEncryption === preset.encryption;
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    aria-pressed={active}
+                    title={preset.hint}
+                    onClick={() => applyPreset(preset)}
+                    className={`rounded-md border px-2 py-1 text-xs transition-colors ${
+                      active
+                        ? "border-accent/40 bg-accent-subtle font-medium text-accent"
+                        : "border-border-base text-text-muted hover:bg-bg-subtle hover:text-text-base"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <FormRow
             label="Mail server"
             htmlFor="smtp-host"
-            hint="Hostname or IP address only — no scheme, port or credentials."
+            hint="Host name or IP address on its own."
+            error={fieldError("smtpHost")}
           >
             <TextInput
               id="smtp-host"
@@ -409,11 +489,21 @@ function ReportDeliveryCard() {
               placeholder="smtp.example.org"
             />
           </FormRow>
-          <FormRow label="Port" htmlFor="smtp-port">
+          <FormRow
+            label="Port"
+            htmlFor="smtp-port"
+            hint="25 for a plain internal relay."
+            error={fieldError("smtpPort")}
+          >
             <TextInput
               id="smtp-port"
-              value={String(form.smtpPort)}
-              onChange={(value) => set("smtpPort", Number(value) || 0)}
+              value={portText}
+              /*
+                Held as text while it is being edited. Coercing each keystroke to a number
+                meant clearing the field produced 0, and the save then failed complaining
+                about a value nobody had typed.
+              */
+              onChange={setPortText}
               placeholder="25"
             />
           </FormRow>
@@ -421,6 +511,7 @@ function ReportDeliveryCard() {
             label="Encryption"
             htmlFor="smtp-encryption"
             hint="Most internal relays accept plain SMTP from inside the network."
+            error={fieldError("smtpEncryption")}
           >
             <Select<SmtpEncryption>
               id="smtp-encryption"
@@ -432,7 +523,22 @@ function ReportDeliveryCard() {
               }))}
             />
           </FormRow>
-          <FormRow label="From address" htmlFor="smtp-from">
+
+          {/*
+            Advice, never a block. An unusual pairing is somebody's deliberate choice often
+            enough that refusing it would be this page being wrong about their network — but
+            it is a mistake often enough to be worth saying out loud, because the symptom is
+            a timeout that reads as "the relay is down".
+          */}
+          {pairing ? (
+            <p className="text-xs text-warn sm:col-span-2">{pairing}</p>
+          ) : null}
+          <FormRow
+            label="From address"
+            htmlFor="smtp-from"
+            hint="The address the report appears to come from."
+            error={fieldError("smtpFrom")}
+          >
             <TextInput
               id="smtp-from"
               value={form.smtpFrom}
@@ -466,7 +572,9 @@ function ReportDeliveryCard() {
           label="Recipients"
           htmlFor="report-recipients"
           hint={`One address per line. ${recipients.length} of ${REPORT_RECIPIENT_LIMIT} used.`}
-          error={tooMany ? `At most ${REPORT_RECIPIENT_LIMIT} recipients.` : undefined}
+          error={
+            tooMany ? `At most ${REPORT_RECIPIENT_LIMIT} recipients.` : fieldError("recipients")
+          }
         >
           <Textarea
             id="report-recipients"
@@ -521,43 +629,108 @@ function ReportDeliveryCard() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-border-base pt-4">
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={update.isPending || tooMany}
-            onClick={() => update.mutate({ ...form, recipients })}
-          >
-            {update.isPending ? "Saving…" : "Save delivery settings"}
-          </Button>
+        {/*
+          Two tests, and the order is the point. Checking the connection costs nobody an
+          email, and it catches every failure except a refused recipient — so it is the one
+          to reach for while a setting is still being guessed at. Sending is the
+          confirmation afterwards.
 
-          <span className="text-xs text-text-faint">Send a test message to:</span>
-          <div className="w-64">
-            <TextInput
-              value={testAddress}
-              onChange={setTestAddress}
-              ariaLabel="Test recipient"
-              placeholder="you@example.org"
-            />
+          Both use the values on screen rather than what is saved, so a relay can be tried
+          before it replaces a working configuration.
+        */}
+        <div className="space-y-3 border-t border-border-base pt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={update.isPending || tooMany}
+              onClick={() => update.mutate({ ...form, smtpPort: port, recipients })}
+            >
+              {update.isPending ? "Saving…" : "Save delivery settings"}
+            </Button>
+
+            <Button
+              size="sm"
+              disabled={!testable || testing}
+              onClick={() => {
+                test.reset();
+                verify.mutate(connection);
+              }}
+              title={
+                testable
+                  ? "Open the connection and stop before sending anything."
+                  : "Needs a mail server, a port and a sender address."
+              }
+            >
+              {verify.isPending ? "Checking…" : "Test connection"}
+            </Button>
           </div>
-          <Button
-            size="sm"
-            disabled={test.isPending || testAddress.trim() === ""}
-            onClick={() => test.mutate(testAddress.trim())}
-          >
-            {test.isPending ? "Sending…" : "Send test"}
-          </Button>
-          {test.isSuccess ? <span className="text-xs text-ok">Test message sent.</span> : null}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs text-text-faint">Send a test message to:</span>
+            <div className="w-64">
+              <TextInput
+                value={testAddress}
+                onChange={setTestAddress}
+                ariaLabel="Test recipient"
+                placeholder="you@example.org"
+              />
+            </div>
+            <Button
+              size="sm"
+              disabled={!testable || testing || testAddress.trim() === ""}
+              onClick={() => {
+                verify.reset();
+                test.mutate({ recipient: testAddress.trim(), connection });
+              }}
+            >
+              {test.isPending ? "Sending…" : "Send test"}
+            </Button>
+          </div>
+
+          <SmtpResult diagnosis={diagnosis} />
         </div>
 
         {/*
-          A failing test is the whole point of the button, so its error is shown in full
-          rather than as "something went wrong": the relay's own message is what tells an
-          administrator whether the host is wrong, the port is closed or the sender refused.
+          These two remain error banners because they are genuine request failures — the API
+          was unreachable, or refused the body. A relay that declines to talk is not one of
+          them: it comes back as a normal answer and is rendered by `SmtpResult` above.
         */}
         {test.error ? <ErrorBanner error={test.error} /> : null}
+        {verify.error ? <ErrorBanner error={verify.error} /> : null}
         {update.error ? <ErrorBanner error={update.error} /> : null}
       </div>
     </Card>
+  );
+}
+
+/**
+ * What the relay said, in three layers.
+ *
+ * The failure this replaces was a banner reading "Internal server error", which is wrong in
+ * the most expensive way: it says the platform is broken when the platform is working and
+ * the relay is not, sending whoever reads it to the wrong system entirely.
+ *
+ * So the summary says what happened, the hint says what to change, and the relay's own words
+ * are kept verbatim underneath — that last part is not for the administrator to interpret,
+ * it is for them to paste to whoever runs the mail server.
+ */
+function SmtpResult({ diagnosis }: { diagnosis: SmtpDiagnosis | null }) {
+  if (!diagnosis) return null;
+
+  return (
+    <div
+      className={`rounded-md border p-3 text-xs ${
+        diagnosis.ok
+          ? "border-ok/40 bg-ok-subtle text-ok"
+          : "border-danger/40 bg-danger-subtle text-danger"
+      }`}
+    >
+      <p className="font-medium">{diagnosis.summary}</p>
+      {diagnosis.hint ? <p className="mt-1 opacity-90">{diagnosis.hint}</p> : null}
+      {diagnosis.detail ? (
+        <p className="mt-1.5 font-mono text-[11px] break-all opacity-75">{diagnosis.detail}</p>
+      ) : null}
+    </div>
   );
 }

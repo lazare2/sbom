@@ -35,6 +35,8 @@ import type {
   PlatformSettings,
   ReportRunSummary,
   ReportSettings,
+  SmtpConnection,
+  SmtpDiagnosis,
   UpdatePlatformSettings,
   UpdateReportSettings,
 } from "@sbom/shared";
@@ -490,10 +492,26 @@ export function useUpdateReportSettings() {
   });
 }
 
+/**
+ * Send a test message through the settings currently on screen.
+ *
+ * `connection` is sent rather than relying on what is saved, so a relay can be tried before
+ * it replaces a working configuration. Both actions resolve rather than reject when the relay
+ * refuses -- the diagnosis is the answer, and turning it into an ApiError would discard the
+ * hint and detail that make it worth having.
+ */
 export function useTestReportEmail() {
   return useMutation({
-    mutationFn: (recipient: string) =>
-      api.post<{ sent: boolean }>("/admin/reports/settings/test", { recipient }),
+    mutationFn: (vars: { recipient: string; connection: SmtpConnection }) =>
+      api.post<SmtpDiagnosis>("/admin/reports/settings/test", vars),
+  });
+}
+
+/** Open the SMTP session and stop short of sending, so a failing relay costs nobody an email. */
+export function useVerifySmtp() {
+  return useMutation({
+    mutationFn: (connection: SmtpConnection) =>
+      api.post<SmtpDiagnosis>("/admin/reports/settings/verify", { connection }),
   });
 }
 

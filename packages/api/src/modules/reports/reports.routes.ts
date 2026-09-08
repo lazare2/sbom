@@ -5,9 +5,14 @@ import {
   idParamSchema,
   testReportEmailSchema,
   updateReportSettingsSchema,
+  verifySmtpSchema,
+  type SmtpConnection,
+  type SmtpDiagnosis,
 } from "@sbom/shared";
+import { BadRequestError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
+import { MailTransportError } from "./mailer.js";
 
 /**
  * The management report: generate, list, read.
@@ -64,6 +69,46 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   /**
+   * The connection this request is about: what was sent, or what is saved.
+   *
+   * Testing the values on screen before saving them is the whole point. The alternative is
+   * saving first, which overwrites a working configuration with an unproven one and leaves
+   * nothing to fall back to when the test fails.
+   */
+  async function connectionFor(supplied: SmtpConnection | undefined): Promise<SmtpConnection> {
+    if (supplied) return supplied;
+    const saved = await settings.getReportSettings();
+    if (saved.smtpHost === "" || saved.smtpFrom === "") {
+      throw new BadRequestError(
+        "No mail server is configured yet. Fill in the host and sender address, then test.",
+      );
+    }
+    return {
+      smtpHost: saved.smtpHost,
+      smtpPort: saved.smtpPort,
+      smtpEncryption: saved.smtpEncryption,
+      smtpFrom: saved.smtpFrom,
+    };
+  }
+
+  /**
+   * Check the connection without sending anything.
+   *
+   * Opens the session, greets, negotiates encryption, stops. Almost every way this feature
+   * fails happens before a message is composed, so this answers "will it work" without
+   * putting a test message in somebody's inbox — which matters when the answer is "no" and
+   * the fourth attempt is being made.
+   *
+   * 200 either way. A relay that refuses the connection is the answer to the question that
+   * was asked, not a failure of the request; the body says which.
+   */
+  fastify.post("/settings/verify", async (request, reply) => {
+    const body = parseOrThrow(verifySmtpSchema, request.body ?? {}, "Body");
+    const connection = await connectionFor(body.connection);
+    return reply.send(await mailer.verify(connection));
+  });
+
+  /**
    * Send a test email now.
    *
    * The alternative to this is discovering that the relay refuses the sender address at
@@ -72,23 +117,70 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/settings/test", async (request, reply) => {
     const body = parseOrThrow(testReportEmailSchema, request.body, "Body");
     const user = getUser(request);
-    const config = await settings.getReportSettings();
+    const connection = await connectionFor(body.connection);
+    const saved = await settings.getReportSettings();
 
-    await mailer.send(config, {
-      to: [body.recipient],
-      subject: "SBOM platform test message",
-      text: "This is a test message from the SBOM platform. If you received it, the monthly report can be delivered to this address.",
-    });
+    let diagnosis: SmtpDiagnosis;
+    try {
+      await mailer.send(
+        { ...saved, ...connection },
+        {
+          to: [body.recipient],
+          subject: "SBOM platform test message",
+          text: "This is a test message from the SBOM platform. If you received it, the monthly report can be delivered to this address.",
+        },
+      );
+      diagnosis = {
+        ok: true,
+        code: "ok",
+        summary: `Sent to ${body.recipient}.`,
+        hint: "If it does not arrive, the relay accepted it and something after that dropped it — a spam filter, or a rule on the recipient's mailbox.",
+        detail: null,
+      };
+    } catch (error) {
+      /*
+        A relay failure is not a server failure. Before this, the exception reached the error
+        handler unrecognised and the button reported "Internal server error", which points
+        the reader at the platform -- the one place the problem is not.
+      */
+      if (!(error instanceof MailTransportError)) throw error;
+      diagnosis = error.diagnosis;
+    }
 
     await audit.record({
       actor: { id: user.id, email: user.email },
       action: "report_settings.test",
       targetType: "setting",
       targetId: "report.delivery",
-      metadata: { recipient: body.recipient },
+      /*
+        The outcome, not just that somebody pressed the button. A trail of test attempts with
+        no results cannot answer "was this ever working" -- and never the address, which is a
+        recipient's personal data, only whether one was supplied.
+      */
+      metadata: {
+        ok: diagnosis.ok,
+        code: diagnosis.code,
+        host: connection.smtpHost,
+        port: connection.smtpPort,
+        encryption: connection.smtpEncryption,
+        usedUnsavedSettings: body.connection !== undefined,
+      },
     });
 
-    return reply.send({ sent: true });
+    /*
+      200 either way, like the connection check above, and unlike `/:id/send`.
+
+      The distinction is what the caller asked for. `/:id/send` was told to deliver a report;
+      if the relay refuses, the thing it was asked to do did not happen, and 502 is the honest
+      answer. This endpoint was asked to *try one and report back* — and it did, successfully.
+      "No, because the port is closed" is the answer to the question, not a failure to answer.
+
+      It also keeps the diagnosis reachable. A non-2xx is turned into an `ApiError` by the
+      client, which keeps the status and the error envelope and discards the body — so every
+      hint and detail assembled above would be replaced by "Request failed with status 502",
+      which is how this feature came to report nothing useful in the first place.
+    */
+    return reply.send(diagnosis);
   });
 
   fastify.get("/", async (_request, reply) => {
