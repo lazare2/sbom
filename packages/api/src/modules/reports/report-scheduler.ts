@@ -1,5 +1,6 @@
+import { UNRESTRICTED_READ } from "../../modules/environments/environment.service.js";
 import type { FastifyBaseLogger } from "fastify";
-import type { EnvironmentScope, EnvironmentService } from "../environments/environment.service.js";
+import type { ReadScope, EnvironmentService } from "../environments/environment.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { monthlyReportDue, previousMonthPeriod } from "./period.js";
 import type { ReportService } from "./report.service.js";
@@ -99,7 +100,7 @@ export class ReportScheduler {
       this runs on a timer with nothing to catch it, and a test environment with no builds
       must not be able to stop production's report going out.
     */
-    for (const scope of await environments.scopesFor({ all: true, environmentIds: [] })) {
+    for (const scope of await environments.scopesFor(UNRESTRICTED_READ)) {
       try {
         await this.runForEnvironment(now, config, scope);
       } catch (err) {
@@ -111,7 +112,7 @@ export class ReportScheduler {
   private async runForEnvironment(
     now: Date,
     config: Awaited<ReturnType<SettingsService["getReportSettings"]>>,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<void> {
     const { settings, reports, logger } = this.deps;
 

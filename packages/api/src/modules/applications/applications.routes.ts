@@ -1,4 +1,4 @@
-import { environmentAccess, requireScope } from "../environments/scope.js";
+import { readAccess, requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
@@ -44,7 +44,7 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
 
   fastify.get("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return reply.send(await applications.getById(id, await environmentAccess(request)));
+    return reply.send(await applications.getById(id, await readAccess(request)));
   });
 
   /** Components of the application's current state (its latest scan). */
@@ -52,14 +52,14 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(listScanComponentsQuerySchema, request.query, "Query");
     return reply.send(
-      await applications.listLatestComponents(id, query, await environmentAccess(request)),
+      await applications.listLatestComponents(id, query, await readAccess(request)),
     );
   });
 
   /** Ecosystem breakdown of the latest scan, for the filter dropdown and a chart. */
   fastify.get("/:id/ecosystems", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    const access = await environmentAccess(request);
+    const access = await readAccess(request);
     const app = await applications.getById(id, access);
     if (!app.latestScanId) return reply.send({ ecosystems: [] });
     return reply.send({
@@ -72,7 +72,7 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(listScansQuerySchema, request.query, "Query");
     return reply.send(
-      await scans.listForApplication(id, query, await environmentAccess(request)),
+      await scans.listForApplication(id, query, await readAccess(request)),
     );
   });
 
@@ -87,7 +87,7 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
   fastify.get("/:id/removed-components", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(listRemovedComponentsQuerySchema, request.query, "Query");
-    return reply.send(await diff.listRemoved(id, query, await environmentAccess(request)));
+    return reply.send(await diff.listRemoved(id, query, await readAccess(request)));
   });
 
   /**
@@ -104,7 +104,7 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
           ...(query.fromScanId ? { fromScanId: query.fromScanId } : {}),
           ...(query.toScanId ? { toScanId: query.toScanId } : {}),
         },
-        await environmentAccess(request),
+        await readAccess(request),
       ),
     );
   });

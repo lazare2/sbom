@@ -6,7 +6,7 @@ import type {
   UpdateGroupRequest,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
-import { UNRESTRICTED_ACCESS, type EnvironmentScope } from "../environments/environment.service.js";
+import { UNRESTRICTED_READ, type ReadScope } from "../environments/environment.service.js";
 import { applicationGroup, applicationGroupMember } from "../../db/schema.js";
 import {
   BadRequestError,
@@ -39,7 +39,7 @@ export class GroupsAdminService {
   async create(
     input: CreateGroupRequest,
     actor: Actor,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<ApplicationGroupDetail> {
     const applicationIds = input.applicationIds ?? [];
     // Verified before the insert so a bad id fails the whole request rather than leaving a
@@ -88,7 +88,7 @@ export class GroupsAdminService {
     });
 
     // Behind requireAdmin, so every estate is already readable by this caller.
-    return this.deps.groups.getById(created.id, UNRESTRICTED_ACCESS);
+    return this.deps.groups.getById(created.id, UNRESTRICTED_READ);
   }
 
   async update(
@@ -121,7 +121,7 @@ export class GroupsAdminService {
       metadata: { from: { name: existing.name }, to: { name: input.name ?? existing.name } },
     });
 
-    return this.deps.groups.getById(id, UNRESTRICTED_ACCESS);
+    return this.deps.groups.getById(id, UNRESTRICTED_READ);
   }
 
   /**
@@ -185,7 +185,7 @@ export class GroupsAdminService {
 
     });
 
-    return this.deps.groups.getById(id, UNRESTRICTED_ACCESS);
+    return this.deps.groups.getById(id, UNRESTRICTED_READ);
   }
 
   /**

@@ -1,7 +1,8 @@
+import { UNRESTRICTED_READ } from "../../modules/environments/environment.service.js";
 import type { FastifyInstance } from "fastify";
 import { ingestScanFieldsSchema, type IngestScanResponse } from "@sbom/shared";
 import { BadRequestError, ForbiddenError, UnauthorizedError, ValidationError } from "../../lib/errors.js";
-import type { EnvironmentScope, EnvironmentService } from "../environments/environment.service.js";
+import type { ReadScope, EnvironmentService } from "../environments/environment.service.js";
 import type { VerifiedIngestToken } from "./ingest-token.service.js";
 import { IngestTokenService } from "./ingest-token.service.js";
 
@@ -191,10 +192,10 @@ async function resolveIngestScope(
   environments: EnvironmentService,
   token: VerifiedIngestToken,
   requested: string | null,
-): Promise<EnvironmentScope> {
+): Promise<ReadScope> {
   // An ingest token is not a user session: it is trusted for whichever estate it names or
   // is bound to, so access is evaluated as unrestricted here and narrowed by the rules below.
-  const unrestricted = { all: true, environmentIds: [] };
+  const unrestricted = UNRESTRICTED_READ;
 
   if (token.environmentId) {
     const bound = await environments.resolve(token.environmentId, unrestricted);

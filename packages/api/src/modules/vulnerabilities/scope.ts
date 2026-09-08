@@ -1,4 +1,4 @@
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import { applicationInScope, type ReadScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import {
   osPackageEcosystems,
@@ -108,23 +108,37 @@ export const NOT_SUPPRESSED: SQL = sql`NOT EXISTS (
  */
 export function applicationScopePredicate(
   groupId: string | null | undefined,
-  scope: EnvironmentScope,
+  scope: ReadScope,
   alias = "a",
 ): SQL {
   /*
-    The estate filter is unconditional and comes first. It used to be that this helper
+    The scope filter is unconditional and comes first. It used to be that this helper
     answered only "is this application in the selected group", and a query that passed no
     group got `TRUE` -- every application in the deployment. Under environments that is a
     query reading somebody else's estate, so there is no longer any argument combination
     that yields an unrestricted predicate.
 
-    Scope is a required parameter rather than an optional one for the same reason: the 24
+    Scope is a required parameter rather than an optional one for the same reason: the 20
     call sites for this helper are most of the platform's aggregate queries, and an optional
     parameter is one a refactor can drop without the compiler noticing.
+
+    `applicationInScope` rather than a hand-written estate comparison, so that the viewer's
+    application access lands here too. That single substitution is what scopes every
+    dashboard figure, every analytics table and every vulnerability ranking to what the
+    reader may actually open -- and writing the estate check inline again, which is exactly
+    what it said before, would silently leave all twenty of them counting applications the
+    reader cannot see.
   */
-  const inEstate = sql`${sql.raw(alias)}.environment_id = ${scope.id}::uuid`;
-  if (!groupId) return inEstate;
-  return sql`${inEstate} AND EXISTS (
+  const inScope = applicationInScope(alias, scope);
+  if (!groupId) return inScope;
+
+  /*
+    The group *filter* is a different question from the group *grant* above, and both apply.
+    A reader who selects a group they were granted sees that group; one who names a group
+    they were not granted sees nothing, because the visibility filter has already removed
+    every application the group could have contributed.
+  */
+  return sql`${inScope} AND EXISTS (
     SELECT 1 FROM application_group_member gm
     WHERE gm.application_id = ${sql.raw(alias)}.id AND gm.group_id = ${groupId}::uuid
   )`;

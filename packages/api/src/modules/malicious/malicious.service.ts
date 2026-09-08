@@ -1,4 +1,4 @@
-import { inScope, type EnvironmentScope } from "../environments/environment.service.js";
+import { applicationInScope, type ReadScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import { COMPONENT_DEPENDANT_CAP, COMPONENT_LOCATION_PATH_CAP, corroborationOf } from "@sbom/shared";
 import type {
@@ -179,7 +179,7 @@ export class MaliciousService {
    * renders as "no malicious packages", which is the single most dangerous thing this
    * platform could assert without having looked.
    */
-  async summary(scope: EnvironmentScope): Promise<MaliciousSummary | null> {
+  async summary(scope: ReadScope): Promise<MaliciousSummary | null> {
     const settings = await this.deps.settings.getMaliciousSettings();
     if (!settings.enabled) return null;
 
@@ -233,7 +233,7 @@ export class MaliciousService {
       LEFT JOIN malicious_acknowledgement ack
         ON ack.malicious_package_id = mp.id
        AND (ack.application_id IS NULL OR ack.application_id = a.id)
-      WHERE ${inScope("a.environment_id", scope)}
+      WHERE ${applicationInScope("a", scope)}
     `);
 
     const row = rowsOf(rows)[0];
@@ -256,7 +256,7 @@ export class MaliciousService {
 
   async list(
     query: ListMaliciousQuery,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<Paginated<MaliciousFinding>> {
     const conditions: SQL[] = [LIVE_REPORT];
 
@@ -365,7 +365,7 @@ export class MaliciousService {
    * here: the page is about a finding, and rendering a report nobody is affected by as though
    * it were one would be alarming for no reason.
    */
-  async getById(id: string, scope: EnvironmentScope): Promise<MaliciousFindingDetail> {
+  async getById(id: string, scope: ReadScope): Promise<MaliciousFindingDetail> {
     const rows = await this.deps.db.execute<Row<FindingRow & DetailRow>>(sql`
       SELECT
         mp.id, mp.ecosystem, mp.package_name, mp.summary, mp.details, mp.match_mode,
@@ -406,7 +406,7 @@ export class MaliciousService {
   /** Per-application detail: what was affected, when, and whether it is still shipping. */
   private async impacts(
     id: string,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<MaliciousApplicationImpact[]> {
     /*
      * Locations are unioned across every build that carried the package, not taken from the
@@ -428,7 +428,7 @@ export class MaliciousService {
         JOIN scan_component sc ON sc.component_id = cm.component_id
         JOIN application a ON a.id = sc.application_id
         JOIN scan s ON s.id = sc.scan_id
-        WHERE cm.malicious_package_id = ${id} AND ${inScope("a.environment_id", scope)}
+        WHERE cm.malicious_package_id = ${id} AND ${applicationInScope("a", scope)}
       ),
       located AS (
         SELECT h.application_id,

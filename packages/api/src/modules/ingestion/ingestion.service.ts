@@ -8,7 +8,7 @@ import type {
   ScanSource,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import type { ReadScope } from "../environments/environment.service.js";
 import {
   application,
   applicationAlias,
@@ -60,7 +60,7 @@ export interface IngestInput {
   rawSbom: Buffer;
   tokenName: string;
   /** Decided by the route from the token's binding and the upload's environment field. */
-  scope: EnvironmentScope;
+  scope: ReadScope;
 }
 
 /** A signed-in user uploading an SBOM for an application they picked in the UI. */
@@ -93,7 +93,7 @@ type IngestTarget =
     the name alone is no longer unique -- `payments-api` exists in every environment that
     deploys it, and the whole point is that those are different applications.
   */
-  | { kind: "app_name"; appName: string; scope: EnvironmentScope }
+  | { kind: "app_name"; appName: string; scope: ReadScope }
   /*
     By id, which is how a person uploads from an application's own page. No scope: the
     application is already in exactly one environment, and accepting one here would let a
@@ -478,7 +478,7 @@ export class IngestionService {
   private async resolveApplication(
     tx: Database,
     appName: string,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<ResolvedApplication> {
     const byName = await this.findByName(tx, appName, scope);
     if (byName) return { app: byName, created: false, redirectedFrom: null };
@@ -540,7 +540,7 @@ export class IngestionService {
   private async findByName(
     tx: Database,
     name: string,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<ApplicationRow | undefined> {
     const [row] = await tx
       .select()

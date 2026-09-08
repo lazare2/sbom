@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getConfig } from "../config.js";
 import { IngestionService } from "../modules/ingestion/ingestion.service.js";
-import { EnvironmentService } from "../modules/environments/environment.service.js";
+import { EnvironmentService, UNRESTRICTED_READ } from "../modules/environments/environment.service.js";
 import { createBlobStore } from "../services/blob-store/index.js";
 import { closeDb, getDb } from "./client.js";
 
@@ -441,10 +441,7 @@ async function main(): Promise<void> {
     that has run the environments migration is Production. A seed that created its own
     estate would leave a demo environment behind on a real deployment.
   */
-  const seedScope = await new EnvironmentService({ db }).requireDefault({
-    all: true,
-    environmentIds: [],
-  });
+  const seedScope = await new EnvironmentService({ db }).requireDefault(UNRESTRICTED_READ);
 
   console.log("[seed:demo] generating demo applications and scan history...");
 

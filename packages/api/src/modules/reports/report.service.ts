@@ -9,7 +9,7 @@ import {
   type ReportSnapshot,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import type { ReadScope } from "../environments/environment.service.js";
 import type { BlobStore } from "../../services/blob-store/index.js";
 import { ConflictError, isPgError, NotFoundError, PG_UNIQUE_VIOLATION } from "../../lib/errors.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
@@ -39,7 +39,7 @@ import type { SnapshotService } from "./snapshot.service.js";
 
 export interface GenerateOptions {
   /** The estate this report describes. One report per estate per month. */
-  scope: EnvironmentScope;
+  scope: ReadScope;
   kind: ReportKind;
   /** Injected so the scheduler and the tests can both decide what "now" means. */
   now?: Date;
@@ -402,7 +402,7 @@ export class ReportService {
    */
   private async insertRun(input: {
     /* One report per estate per month: the partial unique index carries the estate too. */
-    scope: EnvironmentScope;
+    scope: ReadScope;
     kind: ReportKind;
     period: ReportPeriod;
     timeZone: string;

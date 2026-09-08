@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getConfig } from "../config.js";
 import { IngestionService } from "../modules/ingestion/ingestion.service.js";
-import { EnvironmentService } from "../modules/environments/environment.service.js";
+import { EnvironmentService, UNRESTRICTED_READ } from "../modules/environments/environment.service.js";
 import { createBlobStore } from "../services/blob-store/index.js";
 import { closeDb, getDb } from "./client.js";
 
@@ -275,10 +275,7 @@ async function main(): Promise<void> {
   console.log(`[seed:drift] ingesting ${BUILDS.length} builds of ${APP_NAME}...`);
 
   /* Demo data belongs in the default estate, not one invented for it. */
-  const seedScope = await new EnvironmentService({ db }).requireDefault({
-    all: true,
-    environmentIds: [],
-  });
+  const seedScope = await new EnvironmentService({ db }).requireDefault(UNRESTRICTED_READ);
 
   const scanIds: string[] = [];
   for (let i = 0; i < BUILDS.length; i++) {

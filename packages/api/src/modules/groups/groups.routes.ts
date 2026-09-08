@@ -1,4 +1,4 @@
-import { environmentAccess, requireScope } from "../environments/scope.js";
+import { readAccess, requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { idParamSchema, listGroupAdvisoriesQuerySchema, listGroupsQuerySchema } from "@sbom/shared";
 import { parseOrThrow } from "../../lib/validate.js";
@@ -24,7 +24,7 @@ export async function groupRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return reply.send({ group: await groups.getById(id, await environmentAccess(request)) });
+    return reply.send({ group: await groups.getById(id, await readAccess(request)) });
   });
 
   /**
@@ -37,7 +37,7 @@ export async function groupRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseOrThrow(listGroupAdvisoriesQuerySchema, request.query, "Query");
     return reply.send(
-      await groups.listAdvisories(id, query, await environmentAccess(request)),
+      await groups.listAdvisories(id, query, await readAccess(request)),
     );
   });
 }

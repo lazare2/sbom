@@ -1,4 +1,4 @@
-import { environmentAccess } from "../environments/scope.js";
+import { readAccess } from "../environments/scope.js";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   EXPORT_MEDIA_TYPES,
@@ -35,19 +35,19 @@ export async function exportRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/applications/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseQuery(request.query);
-    return send(reply, await exports.forApplication(id, query.flavour, await environmentAccess(request)), query);
+    return send(reply, await exports.forApplication(id, query.flavour, await readAccess(request)), query);
   });
 
   fastify.get("/scans/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseQuery(request.query);
-    return send(reply, await exports.forScan(id, query.flavour, await environmentAccess(request)), query);
+    return send(reply, await exports.forScan(id, query.flavour, await readAccess(request)), query);
   });
 
   fastify.get("/groups/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const query = parseQuery(request.query);
-    return send(reply, await exports.forGroup(id, query.flavour, await environmentAccess(request)), query);
+    return send(reply, await exports.forGroup(id, query.flavour, await readAccess(request)), query);
   });
 
   /*
@@ -61,17 +61,17 @@ export async function exportRoutes(fastify: FastifyInstance): Promise<void> {
   */
   fastify.get("/applications/:id/vex", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return sendVex(reply, await exports.vexForApplication(id, await environmentAccess(request)));
+    return sendVex(reply, await exports.vexForApplication(id, await readAccess(request)));
   });
 
   fastify.get("/scans/:id/vex", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return sendVex(reply, await exports.vexForScan(id, await environmentAccess(request)));
+    return sendVex(reply, await exports.vexForScan(id, await readAccess(request)));
   });
 
   fastify.get("/groups/:id/vex", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return sendVex(reply, await exports.vexForGroup(id, await environmentAccess(request)));
+    return sendVex(reply, await exports.vexForGroup(id, await readAccess(request)));
   });
 }
 

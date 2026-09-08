@@ -1,4 +1,4 @@
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import { applicationInAnyScope, type ReadScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import type {
   ComponentSearchHit,
@@ -65,7 +65,7 @@ export class ComponentsService {
    */
   async search(
     query: ComponentSearchQuery,
-    scopes: EnvironmentScope[],
+    scopes: ReadScope[],
   ): Promise<ComponentSearchResult> {
     const { db } = this.deps;
     const environmentIds = scopes.map((s) => s.id);
@@ -140,7 +140,7 @@ export class ComponentsService {
       JOIN application a ON a.id = u.application_id
       JOIN environment e ON e.id = a.environment_id
       JOIN scan s        ON s.id = u.last_seen_scan_id
-      WHERE a.environment_id = ANY(${sql.param(environmentIds)}::uuid[])
+      WHERE ${applicationInAnyScope("a", scopes)}
         ${scopeCondition} ${statusCondition}
       ${searchOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
@@ -208,7 +208,7 @@ export class ComponentsService {
    */
   async listVersions(
     name: string,
-    scopes: EnvironmentScope[],
+    scopes: ReadScope[],
   ): Promise<
     Array<{ componentId: string; version: string | null; ecosystem: string; currentApplications: number; totalApplications: number }>
   > {
@@ -243,7 +243,7 @@ export class ComponentsService {
         caller can see still appears, with a count of zero rather than vanishing.
       */
       LEFT JOIN application a ON a.id = u.application_id
-        AND a.environment_id = ANY(${sql.param(scopes.map((sc) => sc.id))}::uuid[])
+        AND ${applicationInAnyScope("a", scopes)}
       GROUP BY m.id, m.version, m.ecosystem
       ORDER BY m.version DESC NULLS LAST
     `);

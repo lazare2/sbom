@@ -83,6 +83,25 @@ export const user = pgTable(
      * password is changed.
      */
     mustChangePassword: boolean("must_change_password").notNull().default(false),
+    /**
+     * Whether this account sees only the groups and applications granted to it.
+     *
+     * A stored flag rather than "has rows in `user_group` or `user_application`", because
+     * those two states are different and the difference is the whole feature. No rows with
+     * the flag off means *unrestricted* — every application in the environments they were
+     * granted, which is how every account behaved before this existed and how they must keep
+     * behaving after it. No rows with the flag on means *nothing*, which is a real state: an
+     * account can be restricted before anyone has decided what it should reach.
+     *
+     * Inferring it from row counts collapses those into one, and the collapse fails in the
+     * dangerous direction — removing somebody's last group would silently promote them to
+     * seeing the entire estate.
+     *
+     * Ignored while the account is an admin, exactly like the environment grants.
+     */
+    applicationAccessRestricted: boolean("application_access_restricted")
+      .notNull()
+      .default(false),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -204,6 +223,73 @@ export const userEnvironment = pgTable(
   (t) => [
     primaryKey({ name: "user_environment_pkey", columns: [t.userId, t.environmentId] }),
     index("user_environment_env_idx").on(t.environmentId),
+  ],
+);
+
+/**
+ * Narrowing an account to particular groups, within the environments it was granted.
+ *
+ * The second of two access dimensions, and they answer different questions. An environment
+ * decides *which estate* — a hard partition, every application in exactly one. A group is an
+ * annotation: an application belongs to none, one, or several, so this cannot be a partition
+ * and is not treated as one. It narrows what an account sees inside estates it already has.
+ *
+ * Granting a group is granting its membership as it changes. An application added to the
+ * group next month becomes visible without anybody revisiting this table, which is the reason
+ * to grant a group rather than its members — and the reason a group's membership is an
+ * access decision rather than only an organisational one.
+ *
+ * Rows are kept for administrators too. They are not consulted while the role is `admin`,
+ * and they are what stops a later demotion to a read-only role from handing somebody the
+ * whole estate.
+ */
+export const userGroup = pgTable(
+  "user_group",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => applicationGroup.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "user_group_pkey", columns: [t.userId, t.groupId] }),
+    /*
+      Deleting a group cascades the grant away rather than leaving it dangling. That is the
+      safe direction: the grant disappears and the account loses access, whereas an orphaned
+      row would either error or, worse, be skipped silently and read as unrestricted.
+    */
+    index("user_group_group_idx").on(t.groupId),
+  ],
+);
+
+/**
+ * Granting one application directly, for the cases a group does not fit.
+ *
+ * Groups are the unit that scales — membership is maintained once and every grant follows it.
+ * This exists because CI registers a new application into no group at all, so without it the
+ * only way to give somebody access to their own new service is to invent a group for one
+ * member, and that pressure produces a group list nobody can read.
+ *
+ * The trade is that these grants do not follow anything: an application named here is visible
+ * until somebody removes the row. That is why the admin screen presents groups first.
+ */
+export const userApplication = pgTable(
+  "user_application",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => application.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "user_application_pkey", columns: [t.userId, t.applicationId] }),
+    index("user_application_application_idx").on(t.applicationId),
   ],
 );
 

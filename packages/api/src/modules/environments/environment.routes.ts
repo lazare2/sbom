@@ -1,3 +1,4 @@
+import { UNRESTRICTED_READ } from "../../modules/environments/environment.service.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   createEnvironmentRequestSchema,
@@ -8,7 +9,7 @@ import {
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
 import type { Actor } from "../admin/audit.service.js";
-import { environmentAccess } from "./scope.js";
+import { readAccess } from "./scope.js";
 
 function actorOf(request: FastifyRequest): Actor {
   const user = getUser(request);
@@ -30,12 +31,12 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   fastify.addHook("preHandler", fastify.requireAuth);
 
   fastify.get("/", async (request, reply) => {
-    return reply.send({ environments: await environments.list(await environmentAccess(request)) });
+    return reply.send({ environments: await environments.list(await readAccess(request)) });
   });
 
   fastify.get("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return reply.send({ environment: await environments.get(id, await environmentAccess(request)) });
+    return reply.send({ environment: await environments.get(id, await readAccess(request)) });
   });
 }
 
@@ -59,7 +60,7 @@ export async function environmentAdminRoutes(fastify: FastifyInstance): Promise<
     const enabled = await settings.vulnScanningEnabled();
     return reply.send(
       await environments.comparison(
-        await environmentAccess(request),
+        await readAccess(request),
         await settings.staleInterval(),
         enabled,
       ),
@@ -92,7 +93,7 @@ export async function environmentAdminRoutes(fastify: FastifyInstance): Promise<
   fastify.patch("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const body = parseOrThrow(updateEnvironmentRequestSchema, request.body);
-    const before = await environments.get(id, { all: true, environmentIds: [] });
+    const before = await environments.get(id, UNRESTRICTED_READ);
     const after = await environments.update(id, body);
 
     await audit.record({

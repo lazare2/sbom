@@ -9,7 +9,7 @@ import type {
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
-import { inScope, type EnvironmentScope } from "../environments/environment.service.js";
+import { applicationInScope, type ReadScope } from "../environments/environment.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 import { applicationScopePredicate } from "../vulnerabilities/scope.js";
@@ -33,7 +33,7 @@ export class DashboardService {
     private readonly deps: { db: Database; config: Config; settings: SettingsService },
   ) {}
 
-  async stats(scope: EnvironmentScope): Promise<DashboardStats> {
+  async stats(scope: ReadScope): Promise<DashboardStats> {
     const { db, settings } = this.deps;
     // One definition of "stale", shared with the applications list and the analytics
     // report. Resolved once here so every aggregate in this query agrees.
@@ -47,8 +47,8 @@ export class DashboardService {
     // Two spellings of the same filter because the subqueries differ in whether they
     // alias the table: `env` for the bare `FROM application`, `scopedA` where it is joined
     // as `a`. Both are the estate filter and both must be present on every line.
-    const env = inScope("environment_id", scope);
-    const scopedA = inScope("a.environment_id", scope);
+    const env = applicationInScope("application", scope);
+    const scopedA = applicationInScope("a", scope);
     const rows = await db.execute<Row<StatsRow>>(sql`
       SELECT
         (SELECT count(*) FROM application WHERE ${env})::int AS app_total,
@@ -137,7 +137,7 @@ export class DashboardService {
    * carrying both Node and Python.
    */
   async platforms(
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<PlatformBreakdown> {
     const { db } = this.deps;
@@ -218,7 +218,7 @@ export class DashboardService {
 
   /** Ecosystem mix across every application's current state. */
   async ecosystems(
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<EcosystemBreakdownEntry[]> {
     const inGroup = applicationScopePredicate(groupId, scope);
@@ -258,7 +258,7 @@ export class DashboardService {
    */
   async topComponents(
     query: TopComponentsQuery & { groupId?: string | null },
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<TopComponentEntry[]> {
     const inGroup = applicationScopePredicate(query.groupId ?? null, scope);
     const rows = query.groupByName

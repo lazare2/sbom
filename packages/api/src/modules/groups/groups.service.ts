@@ -1,5 +1,5 @@
 import type { EnvironmentAccess } from "@sbom/shared";
-import { inScope, readableBy, type EnvironmentScope } from "../environments/environment.service.js";
+import { groupInScope, groupReadableBy, type ReadAccess, type ReadScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import type {
   ApplicationGroupDetail,
@@ -72,14 +72,14 @@ export class GroupsService {
 
   async list(
     query: ListGroupsQuery,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<Paginated<ApplicationGroupSummary>> {
     const { db } = this.deps;
     const vulnEnabled = await this.deps.settings.vulnScanningEnabled();
     const offset = offsetOf(query);
 
     /* Groups belong to one estate and never span two -- see schemas/environment.ts. */
-    const conditions: SQL[] = [inScope("g.environment_id", scope)];
+    const conditions: SQL[] = [groupInScope("g", scope)];
     if (query.search) {
       conditions.push(sql`g.name ILIKE ${"%" + escapeLike(query.search) + "%"}`);
     }
@@ -256,7 +256,7 @@ export class GroupsService {
     return out;
   }
 
-  async getById(id: string, access: EnvironmentAccess): Promise<ApplicationGroupDetail> {
+  async getById(id: string, access: ReadAccess): Promise<ApplicationGroupDetail> {
     const { db } = this.deps;
 
     const rows = await db.execute<Row<GroupListRow & { updated_at: Date | string }>>(sql`
@@ -264,7 +264,7 @@ export class GroupsService {
         g.id, g.name, g.description, g.created_at, g.updated_at,
         (SELECT count(*) FROM application_group_member m WHERE m.group_id = g.id) AS application_count
       FROM application_group g
-      WHERE g.id = ${id}::uuid AND ${readableBy("g.environment_id", access)}
+      WHERE g.id = ${id}::uuid AND ${groupReadableBy("g", access)}
     `);
     const row = rowsOf(rows)[0];
     if (!row) throw new NotFoundError("Group");
@@ -341,7 +341,7 @@ export class GroupsService {
   async listAdvisories(
     groupId: string,
     query: ListGroupAdvisoriesQuery,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<Paginated<GroupAdvisory>> {
     /*
       The estate check happens here, on the group. Every row below is reached through the
@@ -423,14 +423,14 @@ export class GroupsService {
   /** Groups an application belongs to, for its detail page and the applications list chips. */
   async listForApplication(
     applicationId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<Array<{ id: string; name: string }>> {
     const rows = await this.deps.db.execute<Row<{ id: string; name: string }>>(sql`
       SELECT g.id, g.name
       FROM application_group_member m
       JOIN application_group g ON g.id = m.group_id
       WHERE m.application_id = ${applicationId}::uuid
-        AND ${readableBy("g.environment_id", access)}
+        AND ${groupReadableBy("g", access)}
       ORDER BY lower(g.name) ASC
     `);
     return rowsOf(rows);
@@ -444,18 +444,18 @@ export class GroupsService {
    * group should render "Group: unknown" beside figures for the whole estate, not 404 a page
    * that is otherwise perfectly answerable.
    */
-  async nameById(id: string, access: EnvironmentAccess): Promise<string | null> {
+  async nameById(id: string, access: ReadAccess): Promise<string | null> {
     const rows = await this.deps.db.execute<Row<{ name: string }>>(
       sql`SELECT name FROM application_group g WHERE g.id = ${id}::uuid
-           AND ${readableBy("g.environment_id", access)}`,
+           AND ${groupReadableBy("g", access)}`,
     );
     return rowsOf(rows)[0]?.name ?? null;
   }
 
-  private async requireExists(id: string, access: EnvironmentAccess): Promise<void> {
+  private async requireExists(id: string, access: ReadAccess): Promise<void> {
     const rows = await this.deps.db.execute<Row<{ id: string }>>(
       sql`SELECT id FROM application_group g WHERE g.id = ${id}::uuid
-           AND ${readableBy("g.environment_id", access)}`,
+           AND ${groupReadableBy("g", access)}`,
     );
     if (rowsOf(rows).length === 0) throw new NotFoundError("Group");
   }

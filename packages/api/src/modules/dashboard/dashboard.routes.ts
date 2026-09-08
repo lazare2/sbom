@@ -1,5 +1,5 @@
-import type { EnvironmentAccess } from "@sbom/shared";
-import { environmentAccess, requireScope } from "../environments/scope.js";
+import { readAccess, requireScope } from "../environments/scope.js";
+import type { ReadAccess } from "../environments/environment.service.js";
 import type { FastifyInstance } from "fastify";
 import { normalizeVulnFilter, topComponentsQuerySchema, vulnFilterQuerySchema } from "@sbom/shared";
 import { parseOrThrow } from "../../lib/validate.js";
@@ -19,7 +19,7 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
    * The lookup happens here rather than inside `normalizeVulnFilter` because that function is
    * pure and shared with the client. One extra query only when a group is actually selected.
    */
-  async function resolveFilter(rawQuery: unknown, access: EnvironmentAccess) {
+  async function resolveFilter(rawQuery: unknown, access: ReadAccess) {
     const query = parseOrThrow(vulnFilterQuerySchema, rawQuery, "Query");
     // A group the caller cannot reach resolves to no name, and the filter falls back to
     // the whole estate rather than labelling itself with another estate's group.
@@ -49,7 +49,7 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
     if (!(await settings.vulnScanningEnabled())) {
       return reply.send({ vulnerabilities: null });
     }
-    const filter = await resolveFilter(request.query, await environmentAccess(request));
+    const filter = await resolveFilter(request.query, await readAccess(request));
     return reply.send({
       vulnerabilities: await analytics.vulnerabilities(filter, 10, await requireScope(request)),
     });

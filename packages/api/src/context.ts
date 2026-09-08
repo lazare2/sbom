@@ -25,6 +25,7 @@ import { MaliciousMatchService } from "./modules/malicious/malicious-match.servi
 import { MaliciousAlertService } from "./modules/malicious/malicious-alert.service.js";
 import { MaliciousWorker } from "./modules/malicious/malicious-worker.js";
 import { GroupsService } from "./modules/groups/groups.service.js";
+import { ApplicationAccessService } from "./modules/access/application-access.service.js";
 import { EnvironmentService } from "./modules/environments/environment.service.js";
 import { IngestTokenService } from "./modules/ingestion/ingest-token.service.js";
 import { IngestionService } from "./modules/ingestion/ingestion.service.js";
@@ -68,9 +69,10 @@ export interface AppContext {
   groups: GroupsService;
   /*
    * Constructed before anything that reads the estate: every one of those services
-   * takes an EnvironmentScope, and a scope can only be produced here.
+   * takes an ReadScope, and a scope can only be produced here.
    */
   environments: EnvironmentService;
+  applicationAccess: ApplicationAccessService;
   scans: ScansService;
   components: ComponentsService;
   bulkSearch: BulkSearchService;
@@ -173,6 +175,11 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const settings = new SettingsService({ db, config });
   const applications = new ApplicationsService({ db, config, settings });
   const environments = new EnvironmentService({ db });
+  /*
+    The second access axis. Constructed beside `environments` and never after a service that
+    reads estate data, because every one of those resolves both restrictions together.
+  */
+  const applicationAccess = new ApplicationAccessService({ db });
   const groups = new GroupsService({ db, settings });
   const scans = new ScansService({ db, blobStore });
   const components = new ComponentsService({ db });
@@ -288,6 +295,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     applications,
     groups,
     environments,
+    applicationAccess,
     scans,
     components,
     bulkSearch,

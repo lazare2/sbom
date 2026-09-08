@@ -2,7 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import type { ListScansQuery, Paginated, ScanSource, ScanSummary, SortDirection } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import type { EnvironmentAccess } from "@sbom/shared";
-import { inScope, readableBy, type EnvironmentScope } from "../environments/environment.service.js";
+import { applicationInScope, applicationReadableBy, type ReadAccess, type ReadScope } from "../environments/environment.service.js";
 import { NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
 import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
@@ -90,7 +90,7 @@ export class ScansService {
   async listForApplication(
     applicationId: string,
     query: ListScansQuery,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<Paginated<ScanSummary>> {
     const { db } = this.deps;
 
@@ -101,7 +101,7 @@ export class ScansService {
 
     const conditions: SQL[] = [
       sql`s.application_id = ${applicationId}::uuid`,
-      readableBy("a.environment_id", access),
+      applicationReadableBy("a", access),
     ];
     if (query.branch) {
       conditions.push(sql`s.branch = ${query.branch}`);
@@ -133,7 +133,7 @@ export class ScansService {
    * The neighbour ids let the UI page through builds and seed the diff view's
    * "compare with the previous build" default without a second round trip.
    */
-  async getById(scanId: string, access: EnvironmentAccess): Promise<ScanDetail> {
+  async getById(scanId: string, access: ReadAccess): Promise<ScanDetail> {
     const rows = await this.deps.db.execute<
       Row<ScanQueryRow & {
         application_name: string;
@@ -167,7 +167,7 @@ export class ScansService {
           ORDER BY n.created_at ASC, n.id ASC LIMIT 1) AS next_scan_id
       FROM scan s
       JOIN application a ON a.id = s.application_id
-      WHERE s.id = ${scanId}::uuid AND ${readableBy("a.environment_id", access)}
+      WHERE s.id = ${scanId}::uuid AND ${applicationReadableBy("a", access)}
     `);
 
     const row = rowsOf(rows)[0];
@@ -196,7 +196,7 @@ export class ScansService {
    */
   async getRawSbom(
     scanId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<{ body: Buffer; filename: string }> {
     const rows = await this.deps.db.execute<Row<{
       sbom_blob_key: string;
@@ -206,7 +206,7 @@ export class ScansService {
     }>>(sql`
       SELECT s.sbom_blob_key, s.build_number, s.created_at, a.name AS application_name
       FROM scan s JOIN application a ON a.id = s.application_id
-      WHERE s.id = ${scanId}::uuid AND ${readableBy("a.environment_id", access)}
+      WHERE s.id = ${scanId}::uuid AND ${applicationReadableBy("a", access)}
     `);
 
     const row = rowsOf(rows)[0];
@@ -225,7 +225,7 @@ export class ScansService {
   /** Recent scan activity across all applications, for the dashboard. */
   async listRecent(
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<Array<ScanSummary & { applicationName: string }>> {
     const rows = await this.deps.db.execute<Row<ScanQueryRow>>(sql`
       SELECT
@@ -238,7 +238,7 @@ export class ScansService {
         (s.id = a.latest_scan_id) AS is_latest
       FROM scan s
       JOIN application a ON a.id = s.application_id
-      WHERE ${inScope("a.environment_id", scope)}
+      WHERE ${applicationInScope("a", scope)}
       ORDER BY s.created_at DESC
       LIMIT ${limit}
     `);

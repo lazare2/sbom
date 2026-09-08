@@ -16,11 +16,7 @@ import type {
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import type { EnvironmentAccess } from "@sbom/shared";
-import {
-  inScope,
-  readableBy,
-  type EnvironmentScope,
-} from "../environments/environment.service.js";
+import { applicationInScope, applicationReadableBy, type ReadAccess, type ReadScope } from "../environments/environment.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { NotFoundError } from "../../lib/errors.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
@@ -57,7 +53,7 @@ export class ApplicationsService {
 
   async list(
     query: ListApplicationsQuery,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<Paginated<ApplicationSummary>> {
     const { db } = this.deps;
     const staleInterval = await this.staleInterval();
@@ -73,7 +69,7 @@ export class ApplicationsService {
       The estate filter is the first condition rather than one appended among the others,
       so it cannot be lost by an edit to the optional filters below it.
     */
-    const conditions: SQL[] = [inScope("a.environment_id", scope)];
+    const conditions: SQL[] = [applicationInScope("a", scope)];
 
     /**
      * Default visibility: active plus pending_confirmation.
@@ -275,7 +271,7 @@ export class ApplicationsService {
     }
   }
 
-  async getById(id: string, access: EnvironmentAccess): Promise<ApplicationDetail> {
+  async getById(id: string, access: ReadAccess): Promise<ApplicationDetail> {
     const { db } = this.deps;
     const staleInterval = await this.staleInterval();
 
@@ -316,7 +312,7 @@ export class ApplicationsService {
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
       LEFT JOIN scan_vuln_summary vs ON vs.scan_id = a.latest_scan_id
-      WHERE a.id = ${id}::uuid AND ${readableBy("a.environment_id", access)}
+      WHERE a.id = ${id}::uuid AND ${applicationReadableBy("a", access)}
     `);
 
     const row = rowsOf(rows)[0];
@@ -338,7 +334,7 @@ export class ApplicationsService {
   async listLatestComponents(
     applicationId: string,
     query: ListScanComponentsQuery,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<
     Paginated<ScanComponentEntry> & {
       scanId: string | null;
@@ -366,7 +362,7 @@ export class ApplicationsService {
       SELECT a.latest_scan_id, s.locations_extracted_at, s.dependencies_extracted_at
       FROM application a
       LEFT JOIN scan s ON s.id = a.latest_scan_id
-      WHERE a.id = ${applicationId}::uuid AND ${readableBy("a.environment_id", access)}
+      WHERE a.id = ${applicationId}::uuid AND ${applicationReadableBy("a", access)}
     `);
     const app = rowsOf(appRows)[0];
     if (!app) throw new NotFoundError("Application");
@@ -395,7 +391,7 @@ export class ApplicationsService {
   async listComponentsOfScan(
     scanId: string,
     query: ListScanComponentsQuery,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<Paginated<ScanComponentEntry>> {
     const { db } = this.deps;
 
@@ -406,7 +402,7 @@ export class ApplicationsService {
         scan id legitimately. A scan id is a uuid somebody can paste, and the components of
         a build are the build.
       */
-      readableBy("a.environment_id", access),
+      applicationReadableBy("a", access),
     ];
 
     if (query.search) {
@@ -439,14 +435,14 @@ export class ApplicationsService {
   /** Distinct ecosystems present in a scan, for the filter dropdown. */
   async listEcosystemsOfScan(
     scanId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<Array<{ ecosystem: string; count: number }>> {
     const rows = await this.deps.db.execute<Row<{ ecosystem: string; count: number }>>(sql`
       SELECT c.ecosystem, count(*)::int AS count
       FROM scan_component sc
       JOIN component c ON c.id = sc.component_id
       JOIN application a ON a.id = sc.application_id
-      WHERE sc.scan_id = ${scanId}::uuid AND ${readableBy("a.environment_id", access)}
+      WHERE sc.scan_id = ${scanId}::uuid AND ${applicationReadableBy("a", access)}
       GROUP BY c.ecosystem
       ORDER BY count DESC, c.ecosystem ASC
     `);
@@ -454,13 +450,13 @@ export class ApplicationsService {
   }
 
   /** Distinct attribute values across all applications, for filter dropdowns. */
-  async listAttributeValues(key: string, scope: EnvironmentScope): Promise<string[]> {
+  async listAttributeValues(key: string, scope: ReadScope): Promise<string[]> {
     // `key` reaches SQL as a bind parameter, never interpolated.
     const rows = await this.deps.db.execute<Row<{ value: string }>>(sql`
       SELECT DISTINCT a.attributes ->> ${key} AS value
       FROM application a
       WHERE a.attributes ? ${key} AND a.attributes ->> ${key} <> ''
-        AND ${inScope("a.environment_id", scope)}
+        AND ${applicationInScope("a", scope)}
       ORDER BY value ASC
       LIMIT 500
     `);

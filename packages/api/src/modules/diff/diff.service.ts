@@ -1,5 +1,5 @@
 import type { EnvironmentAccess } from "@sbom/shared";
-import { readableBy } from "../environments/environment.service.js";
+import { applicationReadableBy, type ReadAccess } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import type {
   ComponentRef,
@@ -71,7 +71,7 @@ export class DiffService {
   async diff(
     applicationId: string,
     opts: { fromScanId?: string; toScanId?: string },
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<ScanDiff> {
     const { db } = this.deps;
 
@@ -176,13 +176,13 @@ export class DiffService {
   async listRemoved(
     applicationId: string,
     query: ListRemovedComponentsQuery,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<Paginated<RemovedComponent> & { latestScanId: string | null }> {
     const { db } = this.deps;
 
     const appRows = await db.execute<Row<{ latest_scan_id: string | null }>>(sql`
       SELECT latest_scan_id FROM application a WHERE a.id = ${applicationId}::uuid
-        AND ${readableBy("a.environment_id", access)}
+        AND ${applicationReadableBy("a", access)}
     `);
     const app = rowsOf(appRows)[0];
     if (!app) throw new NotFoundError("Application");
@@ -319,23 +319,23 @@ export class DiffService {
 
   private async requireReadableApplication(
     applicationId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<void> {
     const rows = await this.deps.db.execute<Row<{ id: string }>>(sql`
       SELECT a.id FROM application a
-      WHERE a.id = ${applicationId}::uuid AND ${readableBy("a.environment_id", access)}
+      WHERE a.id = ${applicationId}::uuid AND ${applicationReadableBy("a", access)}
     `);
     if (rowsOf(rows).length === 0) throw new NotFoundError("Application");
   }
 
   private async requireLatestScan(
     applicationId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<ScanRef> {
     const rows = await this.deps.db.execute<Row<ScanRefRow>>(sql`
       SELECT s.id, s.application_id, s.created_at, s.commit_sha, s.build_number
       FROM application a JOIN scan s ON s.id = a.latest_scan_id
-      WHERE a.id = ${applicationId}::uuid AND ${readableBy("a.environment_id", access)}
+      WHERE a.id = ${applicationId}::uuid AND ${applicationReadableBy("a", access)}
     `);
     const row = rowsOf(rows)[0];
     if (!row) throw new BadRequestError("This application has no scans yet, so there is nothing to compare.");

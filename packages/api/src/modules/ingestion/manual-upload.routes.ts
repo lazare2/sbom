@@ -3,7 +3,7 @@ import { idParamSchema, manualUploadFieldsSchema, type ManualUploadResponse } fr
 import { BadRequestError, ValidationError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
-import { environmentAccess } from "../environments/scope.js";
+import { readAccess } from "../environments/scope.js";
 
 /**
  * `POST /api/v1/applications/:id/scans` — manual SBOM upload.
@@ -85,7 +85,7 @@ export async function manualUploadRoutes(fastify: FastifyInstance): Promise<void
         confirming the application exists tells the caller about an estate they were not
         granted.
       */
-      await applications.getById(id, await environmentAccess(request));
+      await applications.getById(id, await readAccess(request));
 
       if (!request.isMultipart()) {
         return reply.status(415).send({

@@ -20,7 +20,7 @@ import type { DashboardService } from "../dashboard/dashboard.service.js";
 import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { applicationScopePredicate } from "../vulnerabilities/scope.js";
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import type { ReadScope } from "../environments/environment.service.js";
 import type { VulnReportService } from "../vulnerabilities/vuln-report.service.js";
 
 /**
@@ -79,7 +79,7 @@ export class AnalyticsService {
      */
     vulnFilter?: VulnFilterState;
     /** Every section below describes one estate. There is no all-environments report. */
-    scope: EnvironmentScope;
+    scope: ReadScope;
   }): Promise<AnalyticsReport> {
     const limit = args.limit ?? 10;
     const vulnFilter = args.vulnFilter ?? INERT_VULN_FILTER;
@@ -166,7 +166,7 @@ export class AnalyticsService {
   async vulnerabilities(
     filter: VulnFilterState,
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<VulnerabilityReport> {
     return this.deps.vulnReport.report(filter, limit, scope);
   }
@@ -175,7 +175,7 @@ export class AnalyticsService {
   /** Whole-estate counters. Deliberately identical to the dashboard's, plus the window. */
   async totals(
     periodStart: Date,
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<EstateTotals> {
     const inGroup = applicationScopePredicate(groupId, scope);
@@ -233,7 +233,7 @@ export class AnalyticsService {
    */
   async coverage(
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<CoverageReport> {
     const inGroup = applicationScopePredicate(groupId, scope);
@@ -310,7 +310,7 @@ export class AnalyticsService {
    */
   async topProjects(
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<TopProjectEntry[]> {
     const inGroup = applicationScopePredicate(groupId, scope);
@@ -346,7 +346,7 @@ export class AnalyticsService {
    */
   async fragmentation(
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<FragmentationEntry[]> {
     const inGroup = applicationScopePredicate(groupId, scope);
@@ -402,7 +402,7 @@ export class AnalyticsService {
   async newPackages(
     periodStart: Date,
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<NewPackageEntry[]> {
     const inGroup = applicationScopePredicate(groupId, scope);
@@ -466,7 +466,7 @@ export class AnalyticsService {
    */
   async velocity(
     periodStart: Date,
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<VelocitySummary> {
     const inGroup = applicationScopePredicate(groupId, scope);
@@ -572,7 +572,7 @@ export class AnalyticsService {
   async activity(
     periodStart: Date,
     periodDays: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null = null,
   ): Promise<ActivityBucket[]> {
     const inGroup = applicationScopePredicate(groupId, scope);

@@ -1,34 +1,72 @@
 import { sql, type SQL } from "drizzle-orm";
-import type {
-  Environment,
-  EnvironmentAccess,
-  EnvironmentComparison,
-  CreateEnvironmentRequest,
-  UpdateEnvironmentRequest,
+import {
+  UNRESTRICTED_APPLICATIONS,
+  type ApplicationAccess,
+  type Environment,
+  type EnvironmentAccess,
+  type EnvironmentComparison,
+  type CreateEnvironmentRequest,
+  type UpdateEnvironmentRequest,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import type { UserRow } from "../../db/schema.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../lib/errors.js";
 import { rowsOf, type Row } from "../../lib/rows.js";
+import { visibleApplications, visibleGroups } from "../access/application-access.service.js";
 
 /**
- * One estate, resolved and checked.
+ * One estate, resolved and checked, together with how much of it the viewer may see.
  *
  * Services take this rather than a bare id string on purpose. A `string` parameter is easy
  * to satisfy with the wrong string — a request's raw query value, an application's id, an
  * empty default — and every one of those silently reads somebody else's estate. A nominal
  * type means the only way to obtain one is to go through `resolve` or `requireDefault`,
  * both of which check access first.
+ *
+ * ## Why the viewer's visibility rides along
+ *
+ * These are two different restrictions — which estate, and which applications within it —
+ * and they were nearly modelled as two parameters. One value instead, because they have to
+ * be applied at exactly the same forty-odd sites, and two parameters is an invitation to
+ * apply one and forget the other. There is no way to filter by estate here without also
+ * filtering by visibility, because they are the same value.
+ *
+ * It was called `EnvironmentScope` while it carried only the estate. The rename is the same
+ * correction `applicationScopePredicate` needed: a name describing half of what a value does
+ * hides the other half from everyone who reads a call site.
  */
-export interface EnvironmentScope {
+export interface ReadScope {
   readonly id: string;
   readonly name: string;
+  /** Which applications the viewer may see. Unrestricted for admins and for legacy callers. */
+  readonly visibility: ApplicationAccess;
   /** Present so the type is not structurally identical to any other {id, name} pair. */
-  readonly __environmentScope: true;
+  readonly __readScope: true;
 }
 
-function scopeOf(id: string, name: string): EnvironmentScope {
-  return { id, name, __environmentScope: true };
+function scopeOf(id: string, name: string, visibility: ApplicationAccess): ReadScope {
+  return { id, name, visibility, __readScope: true };
+}
+
+/**
+ * Everything a caller may reach, for fetching one named thing by its id.
+ *
+ * The pair to `ReadScope`, and split from it for the reason described on `readableBy` below:
+ * a single entity is fetched against the caller's whole readable set rather than the estate
+ * currently selected, so that a valid link does not 404 because a dropdown was pointing
+ * elsewhere. Both restrictions travel together here for the same reason they do there.
+ */
+export interface ReadAccess {
+  readonly environments: EnvironmentAccess;
+  readonly applications: ApplicationAccess;
+  readonly __readAccess: true;
+}
+
+export function readAccessOf(
+  environments: EnvironmentAccess,
+  applications: ApplicationAccess,
+): ReadAccess {
+  return { environments, applications, __readAccess: true };
 }
 
 /**
@@ -42,29 +80,109 @@ function scopeOf(id: string, name: string): EnvironmentScope {
 export const UNRESTRICTED_ACCESS: EnvironmentAccess = { all: true, environmentIds: [] };
 
 /**
- * SQL fragment restricting a query to one estate. For lists, aggregates, and anything that
- * produces a number -- the cases where "never mixed" is the whole promise.
+ * Both restrictions waived, for the same paths and the same reason.
  *
- * `column` is a literal written at the call site, never user input.
+ * A background job, a seed script, an ingest token trusted for the estate it names, or an
+ * administrator route that has already passed `requireAdmin`. Written as a name rather than
+ * an inline literal so that reading a call site tells you the restriction was considered and
+ * waived, not that somebody did not know it existed.
  */
-export function inScope(column: string, scope: EnvironmentScope): SQL {
+export const UNRESTRICTED_READ: ReadAccess = readAccessOf(
+  UNRESTRICTED_ACCESS,
+  UNRESTRICTED_APPLICATIONS,
+);
+
+/**
+ * The three scoping helpers, and why there are three rather than one.
+ *
+ * There used to be one `inScope(column, scope)` taking a column name — `a.environment_id`,
+ * `g.environment_id`, `sup.environment_id`. That was fine while the only restriction was the
+ * estate, because every one of those columns means the same thing. It stopped being fine the
+ * moment a second restriction arrived that applies to *applications* and not to the other
+ * two: a helper deriving an alias from `g.environment_id` would happily emit a predicate
+ * comparing a group's id against granted application ids, which is not wrong in a way
+ * anything would catch — it would simply return the wrong rows.
+ *
+ * So the kind of thing being scoped is now named by the function rather than implied by a
+ * string, and each one takes a table alias. Choosing the wrong one is visible when reading
+ * the call site, which is the only place it can be caught.
+ *
+ * Aliases are literals written at the call site, never user input.
+ */
+
+/**
+ * An `application` row: in this estate, and visible to this viewer.
+ *
+ * For lists, aggregates, and anything that produces a number — the cases where "never mixed"
+ * is the whole promise, and now also the cases where one account's dashboard must not count
+ * services it cannot open.
+ */
+export function applicationInScope(alias: string, scope: ReadScope): SQL {
+  return sql`${sql.raw(alias)}.environment_id = ${scope.id}::uuid
+    AND ${visibleApplications(scope.visibility, alias)}`;
+}
+
+/**
+ * An `application` row in any of several estates, and visible to this viewer.
+ *
+ * For package search, the one view that deliberately spans environments. Spanning estates
+ * must never widen what may be seen *inside* one: without the visibility half, this would be
+ * the way to enumerate the names of applications an account was deliberately not granted —
+ * ask which packages exist and read the application column.
+ *
+ * Every scope in the list is produced from one `readAccess` call, so they carry the same
+ * visibility by construction and the first is representative. An empty list matches nothing,
+ * which is the right answer for a caller who can reach no estate at all.
+ */
+export function applicationInAnyScope(alias: string, scopes: readonly ReadScope[]): SQL {
+  const first = scopes[0];
+  if (!first) return sql`FALSE`;
+  return sql`${sql.raw(alias)}.environment_id = ANY(${sql.param(scopes.map((s) => s.id))}::uuid[])
+    AND ${visibleApplications(first.visibility, alias)}`;
+}
+
+/** An `application_group` row: in this estate, and granted to this viewer. */
+export function groupInScope(alias: string, scope: ReadScope): SQL {
+  return sql`${sql.raw(alias)}.environment_id = ${scope.id}::uuid
+    AND ${visibleGroups(scope.visibility, alias)}`;
+}
+
+/**
+ * A row that belongs to the estate itself rather than to an application.
+ *
+ * Suppressions, ingest tokens, report runs, saved package queries. They carry an
+ * `environment_id` and no application, so the viewer's application visibility has nothing to
+ * filter on. Named separately so that reaching for it is a decision a reader can see and
+ * question, rather than the default that quietly skips a restriction.
+ */
+export function estateInScope(column: string, scope: ReadScope): SQL {
   return sql`${sql.raw(column)} = ${scope.id}::uuid`;
 }
 
 /**
- * SQL fragment restricting a query to every estate the caller may read.
+ * An `application` row the caller may read, in any estate they were granted.
  *
  * For fetching one named thing by its id, where filtering to the *currently selected*
  * environment would be wrong: opening a link to an application while the switcher happens
  * to sit on another estate would 404 on a perfectly valid URL. The caller is still confined
- * to what they are granted, so this is forgiving about which estate is selected, not about
- * who may look.
+ * to what they are granted, so this is forgiving about which estate is selected, never about
+ * who may look — and under application access, never about which applications either.
  *
  * An administrator matches everything, including estates created after this request.
  */
-export function readableBy(column: string, access: EnvironmentAccess): SQL {
-  if (access.all) return sql`TRUE`;
-  return sql`${sql.raw(column)} = ANY(${sql.param(access.environmentIds)}::uuid[])`;
+export function applicationReadableBy(alias: string, access: ReadAccess): SQL {
+  const estate = access.environments.all
+    ? sql`TRUE`
+    : sql`${sql.raw(alias)}.environment_id = ANY(${sql.param(access.environments.environmentIds)}::uuid[])`;
+  return sql`${estate} AND ${visibleApplications(access.applications, alias)}`;
+}
+
+/** An `application_group` row the caller may read, in any estate they were granted. */
+export function groupReadableBy(alias: string, access: ReadAccess): SQL {
+  const estate = access.environments.all
+    ? sql`TRUE`
+    : sql`${sql.raw(alias)}.environment_id = ANY(${sql.param(access.environments.environmentIds)}::uuid[])`;
+  return sql`${estate} AND ${visibleGroups(access.applications, alias)}`;
 }
 
 interface EnvironmentRow {
@@ -129,21 +247,28 @@ export class EnvironmentService {
     return { all: false, environmentIds: rowsOf(result).map((r) => r.environment_id) };
   }
 
-  /** True when this access grants the environment. The single place that decision is made. */
+  /**
+   * True when this access grants the environment. The single place that decision is made.
+   *
+   * Takes the environment half alone, deliberately. This answers one question — may the
+   * caller reach this estate — and handing it the whole `ReadAccess` would invite a later
+   * edit to fold the application restriction in here, where it would silently become a
+   * second, different answer to "can you see this environment".
+   */
   private permits(access: EnvironmentAccess, environmentId: string): boolean {
     return access.all || access.environmentIds.includes(environmentId);
   }
 
-  async list(access: EnvironmentAccess): Promise<Environment[]> {
+  async list(access: ReadAccess): Promise<Environment[]> {
     /*
       A non-admin with no grants gets an empty list rather than every environment. The
       `= ANY(...)` form with an empty array yields no rows, which is the correct answer --
       but it is worth stating, because "no filter" and "a filter that matches nothing" look
       alike in SQL and differ by the whole estate.
     */
-    const visible = access.all
+    const visible = access.environments.all
       ? sql`TRUE`
-      : sql`e.id = ANY(${sql.param(access.environmentIds)}::uuid[])`;
+      : sql`e.id = ANY(${sql.param(access.environments.environmentIds)}::uuid[])`;
 
     const result = await this.deps.db.execute<Row<EnvironmentRow>>(sql`
       SELECT
@@ -159,7 +284,7 @@ export class EnvironmentService {
     return rowsOf(result).map(toEnvironment);
   }
 
-  async get(id: string, access: EnvironmentAccess): Promise<Environment> {
+  async get(id: string, access: ReadAccess): Promise<Environment> {
     const all = await this.list(access);
     const found = all.find((e) => e.id === id);
     if (!found) throw new NotFoundError("Environment");
@@ -177,7 +302,7 @@ export class EnvironmentService {
    * the estate exists, which tells someone who should not know that there is a `production`
    * they cannot see.
    */
-  async resolve(ref: string, access: EnvironmentAccess): Promise<EnvironmentScope> {
+  async resolve(ref: string, access: ReadAccess): Promise<ReadScope> {
     const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
       ref,
     );
@@ -189,8 +314,8 @@ export class EnvironmentService {
     );
     const row = rowsOf(result)[0];
     if (!row) throw new NotFoundError("Environment");
-    if (!this.permits(access, row.id)) throw new NotFoundError("Environment");
-    return scopeOf(row.id, row.name);
+    if (!this.permits(access.environments, row.id)) throw new NotFoundError("Environment");
+    return scopeOf(row.id, row.name, access.applications);
   }
 
   /**
@@ -202,19 +327,19 @@ export class EnvironmentService {
    * did. The UI never relies on this -- it puts the environment in the URL -- so the default
    * only ever serves callers that predate the concept.
    */
-  async requireDefault(access: EnvironmentAccess): Promise<EnvironmentScope> {
+  async requireDefault(access: ReadAccess): Promise<ReadScope> {
     const all = await this.list(access);
     const first = all[0];
     if (!first) {
       throw new ForbiddenError("You do not have access to any environment.");
     }
-    return scopeOf(first.id, first.name);
+    return scopeOf(first.id, first.name, access.applications);
   }
 
   /** Every scope the caller may read, for the searches that deliberately span estates. */
-  async scopesFor(access: EnvironmentAccess): Promise<EnvironmentScope[]> {
+  async scopesFor(access: ReadAccess): Promise<ReadScope[]> {
     const all = await this.list(access);
-    return all.map((e) => scopeOf(e.id, e.name));
+    return all.map((e) => scopeOf(e.id, e.name, access.applications));
   }
 
   /**
@@ -227,10 +352,10 @@ export class EnvironmentService {
    */
   async scopesForSelection(
     refs: string[] | undefined,
-    access: EnvironmentAccess,
-  ): Promise<EnvironmentScope[]> {
+    access: ReadAccess,
+  ): Promise<ReadScope[]> {
     if (!refs || refs.length === 0) return this.scopesFor(access);
-    const resolved: EnvironmentScope[] = [];
+    const resolved: ReadScope[] = [];
     for (const ref of refs) {
       resolved.push(await this.resolve(ref, access));
     }
@@ -256,11 +381,11 @@ export class EnvironmentService {
     `);
     const id = rowsOf(result)[0]?.id;
     if (!id) throw new NotFoundError("Environment");
-    return this.get(id, { all: true, environmentIds: [] });
+    return this.get(id, UNRESTRICTED_READ);
   }
 
   async update(id: string, input: UpdateEnvironmentRequest): Promise<Environment> {
-    const current = await this.get(id, { all: true, environmentIds: [] });
+    const current = await this.get(id, UNRESTRICTED_READ);
 
     if (input.name !== undefined && input.name.toLowerCase() !== current.name.toLowerCase()) {
       const clash = await this.deps.db.execute<Row<{ id: string }>>(sql`
@@ -280,7 +405,7 @@ export class EnvironmentService {
           updated_at = now()
       WHERE id = ${id}::uuid
     `);
-    return this.get(id, { all: true, environmentIds: [] });
+    return this.get(id, UNRESTRICTED_READ);
   }
 
   /**
@@ -297,7 +422,7 @@ export class EnvironmentService {
    * recoverable through the UI because every screen needs an environment to render.
    */
   async remove(id: string, confirmName: string): Promise<{ name: string; applications: number }> {
-    const target = await this.get(id, { all: true, environmentIds: [] });
+    const target = await this.get(id, UNRESTRICTED_READ);
 
     if (confirmName.trim().toLowerCase() !== target.name.toLowerCase()) {
       throw new BadRequestError(
@@ -374,13 +499,13 @@ export class EnvironmentService {
    * how the overview and the comparison end up disagreeing about the same estate.
    */
   async comparison(
-    access: EnvironmentAccess,
+    access: ReadAccess,
     staleInterval: SQL,
     includeVulnerabilities: boolean,
   ): Promise<EnvironmentComparison> {
-    const visible = access.all
+    const visible = access.environments.all
       ? sql`TRUE`
-      : sql`e.id = ANY(${sql.param(access.environmentIds)}::uuid[])`;
+      : sql`e.id = ANY(${sql.param(access.environments.environmentIds)}::uuid[])`;
 
     const result = await this.deps.db.execute<Row<ComparisonRow>>(sql`
       SELECT

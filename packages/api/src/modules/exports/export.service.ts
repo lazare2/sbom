@@ -1,5 +1,5 @@
 import type { EnvironmentAccess } from "@sbom/shared";
-import { readableBy } from "../environments/environment.service.js";
+import { applicationReadableBy, groupReadableBy, type ReadAccess } from "../environments/environment.service.js";
 import { sql } from "drizzle-orm";
 import {
   classifyComponentOrigin,
@@ -50,7 +50,7 @@ export class ExportService {
   async forScan(
     scanId: string,
     flavour: ExportFlavour,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<ExportDocument> {
     const { subject, scanIds } = await this.scanSubject(scanId, access);
     return this.assemble(subject, scanIds, flavour);
@@ -59,7 +59,7 @@ export class ExportService {
   async forApplication(
     applicationId: string,
     flavour: ExportFlavour,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<ExportDocument> {
     const { subject, scanIds } = await this.applicationSubject(applicationId, access);
     return this.assemble(subject, scanIds, flavour);
@@ -69,18 +69,18 @@ export class ExportService {
 
   async vexForApplication(
     applicationId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<VexDocument> {
     const { subject, scanIds } = await this.applicationSubject(applicationId, access);
     return this.assembleVex(subject, scanIds);
   }
 
-  async vexForScan(scanId: string, access: EnvironmentAccess): Promise<VexDocument> {
+  async vexForScan(scanId: string, access: ReadAccess): Promise<VexDocument> {
     const { subject, scanIds } = await this.scanSubject(scanId, access);
     return this.assembleVex(subject, scanIds);
   }
 
-  async vexForGroup(groupId: string, access: EnvironmentAccess): Promise<VexDocument> {
+  async vexForGroup(groupId: string, access: ReadAccess): Promise<VexDocument> {
     const { subject, scanIds } = await this.groupSubject(groupId, access);
     return this.assembleVex(subject, scanIds);
   }
@@ -88,7 +88,7 @@ export class ExportService {
   async forGroup(
     groupId: string,
     flavour: ExportFlavour,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<ExportDocument> {
     const { subject, scanIds } = await this.groupSubject(groupId, access);
     return this.assemble(subject, scanIds, flavour);
@@ -102,12 +102,12 @@ export class ExportService {
 
   private async applicationSubject(
     applicationId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<{ subject: ExportSubject; scanIds: string[] }> {
     const rows = rowsOf(
       await this.deps.db.execute<Row<{ id: string; name: string; latest_scan_id: string | null }>>(
         sql`SELECT id, name, latest_scan_id FROM application a WHERE a.id = ${applicationId}::uuid
-             AND ${readableBy("a.environment_id", access)}`,
+             AND ${applicationReadableBy("a", access)}`,
       ),
     );
     const app = rows[0];
@@ -132,7 +132,7 @@ export class ExportService {
 
   private async scanSubject(
     scanId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<{ subject: ExportSubject; scanIds: string[] }> {
     const sources = await this.sourcesForScans([scanId], access);
     if (sources.length === 0) throw new NotFoundError("Scan not found");
@@ -151,12 +151,12 @@ export class ExportService {
 
   private async groupSubject(
     groupId: string,
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<{ subject: ExportSubject; scanIds: string[] }> {
     const groups = rowsOf(
       await this.deps.db.execute<Row<{ id: string; name: string }>>(
         sql`SELECT id, name FROM application_group g WHERE g.id = ${groupId}::uuid
-             AND ${readableBy("g.environment_id", access)}`,
+             AND ${groupReadableBy("g", access)}`,
       ),
     );
     const group = groups[0];
@@ -195,7 +195,7 @@ export class ExportService {
   */
   private async sourcesForScans(
     scanIds: string[],
-    access: EnvironmentAccess,
+    access: ReadAccess,
   ): Promise<ExportSource[]> {
     if (scanIds.length === 0) return [];
     const rows = rowsOf(
@@ -218,7 +218,7 @@ export class ExportService {
         FROM scan s
         JOIN application a ON a.id = s.application_id
         WHERE s.id = ANY(${sql.param(scanIds)}::uuid[])
-          AND ${readableBy("a.environment_id", access)}
+          AND ${applicationReadableBy("a", access)}
         ORDER BY a.name ASC
       `),
     );

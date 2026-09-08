@@ -9,7 +9,7 @@ import type {
   UpdateApplicationRequest,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
-import { UNRESTRICTED_ACCESS, type EnvironmentScope } from "../environments/environment.service.js";
+import { UNRESTRICTED_READ, type ReadScope } from "../environments/environment.service.js";
 import { application, applicationAlias, attributeDefinition } from "../../db/schema.js";
 import {
   BadRequestError,
@@ -50,7 +50,7 @@ export class AdminApplicationsService {
   async create(
     input: CreateApplicationRequest,
     actor: Actor,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<ApplicationDetail> {
     const attributes = await this.validate(input.attributes);
 
@@ -79,7 +79,7 @@ export class AdminApplicationsService {
     });
 
     // Behind requireAdmin, so every estate is already readable by this caller.
-    return this.deps.applications.getById(created.id, UNRESTRICTED_ACCESS);
+    return this.deps.applications.getById(created.id, UNRESTRICTED_READ);
   }
 
   async update(id: string, input: UpdateApplicationRequest, actor: Actor): Promise<ApplicationDetail> {
@@ -133,7 +133,7 @@ export class AdminApplicationsService {
       },
     });
 
-    return this.deps.applications.getById(id, UNRESTRICTED_ACCESS);
+    return this.deps.applications.getById(id, UNRESTRICTED_READ);
   }
 
   /**
@@ -202,7 +202,7 @@ export class AdminApplicationsService {
       metadata: { name: patch.name ?? existing.name, previousName: existing.name },
     });
 
-    return this.deps.applications.getById(id, UNRESTRICTED_ACCESS);
+    return this.deps.applications.getById(id, UNRESTRICTED_READ);
   }
 
   /**

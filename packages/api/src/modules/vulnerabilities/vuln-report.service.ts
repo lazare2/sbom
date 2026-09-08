@@ -1,4 +1,4 @@
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import type { ReadScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import {
   EXPANDABLE_LIST_CAP,
@@ -117,7 +117,7 @@ export class VulnReportService {
   async report(
     filter: VulnFilterState,
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<VulnerabilityReport> {
     /*
      * With base image selected alone there is no application half to rank, so the
@@ -183,7 +183,7 @@ export class VulnReportService {
    */
   private async snapshotMeta(
     filter: VulnFilterState,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<{
     dbBuiltAt: string | null;
     applicationsScanned: number;
@@ -240,7 +240,7 @@ export class VulnReportService {
    */
   private async severityCounts(
     filter: VulnFilterState,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<{
     filtered: { app: SeverityCounts; os: SeverityCounts };
     unfiltered: { app: SeverityCounts; os: SeverityCounts };
@@ -293,7 +293,7 @@ export class VulnReportService {
    */
   private async findingTotals(
     filter: VulnFilterState,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<
     Record<"app" | "os", { fixable: number; knownExploited: number; affectedPackages: number }>
   > {
@@ -350,7 +350,7 @@ export class VulnReportService {
     filter: VulnFilterState,
     rankedScope: "app" | "os",
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<TopVulnerableApplication[]> {
     const rows =
       filter.severities.length === 0
@@ -387,7 +387,7 @@ export class VulnReportService {
       filter and must narrow this path too, or selecting a group would leave the ranking
       showing the whole estate while every other card on the page was scoped.
     */
-    scope: EnvironmentScope,
+    scope: ReadScope,
     groupId: string | null,
   ): Promise<TopApplicationRow[]> {
     const groupIn = applicationScopePredicate(groupId, scope);
@@ -434,7 +434,7 @@ export class VulnReportService {
     filter: VulnFilterState,
     rankedScope: "app" | "os",
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<TopApplicationRow[]> {
     const groupIn = applicationScopePredicate(filter.group, scope);
     const rows = await this.deps.db.execute<Row<TopApplicationRow>>(sql`
@@ -484,7 +484,7 @@ export class VulnReportService {
     filter: VulnFilterState,
     rankedScope: "app" | "os",
     limit: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<TopVulnerablePackage[]> {
     const groupIn = applicationScopePredicate(filter.group, scope);
     const rows = await this.deps.db.execute<
@@ -562,7 +562,7 @@ export class VulnReportService {
    */
   private async baseImageExposure(
     filter: VulnFilterState,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<NonNullable<VulnerabilityReport["baseImageExposure"]>> {
     const severities = severitiesForBuckets(filter.severities);
     const groupIn = applicationScopePredicate(filter.group, scope);

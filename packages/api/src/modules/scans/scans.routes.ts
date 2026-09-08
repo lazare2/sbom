@@ -1,4 +1,4 @@
-import { environmentAccess, requireScope } from "../environments/scope.js";
+import { readAccess, requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { idParamSchema, listScanComponentsQuerySchema } from "@sbom/shared";
@@ -29,7 +29,7 @@ export async function scanRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    return reply.send(await scans.getById(id, await environmentAccess(request)));
+    return reply.send(await scans.getById(id, await readAccess(request)));
   });
 
   /**
@@ -41,14 +41,14 @@ export async function scanRoutes(fastify: FastifyInstance): Promise<void> {
     const query = parseOrThrow(listScanComponentsQuerySchema, request.query, "Query");
     // Confirms the scan exists (and yields a clean 404 if not) before querying
     // its components, which would otherwise return a misleading empty page.
-    const access = await environmentAccess(request);
+    const access = await readAccess(request);
     await scans.getById(id, access);
     return reply.send(await applications.listComponentsOfScan(id, query, access));
   });
 
   fastify.get("/:id/ecosystems", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    const access = await environmentAccess(request);
+    const access = await readAccess(request);
     await scans.getById(id, access);
     return reply.send({ ecosystems: await applications.listEcosystemsOfScan(id, access) });
   });
@@ -61,7 +61,7 @@ export async function scanRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get("/:id/raw", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    const { body, filename } = await scans.getRawSbom(id, await environmentAccess(request));
+    const { body, filename } = await scans.getRawSbom(id, await readAccess(request));
     return reply
       .header("Content-Type", "application/json")
       .header("Content-Disposition", `attachment; filename="${filename}"`)

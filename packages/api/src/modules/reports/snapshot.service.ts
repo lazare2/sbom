@@ -1,4 +1,4 @@
-import { inScope, type EnvironmentScope } from "../environments/environment.service.js";
+import { applicationInScope, type ReadScope } from "../environments/environment.service.js";
 import { sql } from "drizzle-orm";
 import { REPORT_SNAPSHOT_VERSION, type ReportSnapshot } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
@@ -17,10 +17,10 @@ import { findingKey } from "./delta.js";
 export class SnapshotService {
   constructor(private readonly deps: { db: Database }) {}
 
-  async capture(scope: EnvironmentScope): Promise<ReportSnapshot> {
+  async capture(scope: ReadScope): Promise<ReportSnapshot> {
     const { db } = this.deps;
     /* Every section of a report describes one estate. See report-scheduler. */
-    const env = inScope("a.environment_id", scope);
+    const env = applicationInScope("a", scope);
 
     /*
       Inactive applications are included. They still exist, still carry findings, and the

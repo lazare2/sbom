@@ -11,7 +11,7 @@ import type {
 } from "@sbom/shared";
 import { BULK_MATCH_CAP_PER_ENTRY } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
-import type { EnvironmentScope } from "../environments/environment.service.js";
+import { applicationInScope, type ReadScope } from "../environments/environment.service.js";
 import { sha256Hex } from "../../lib/crypto.js";
 import { offsetOf, paginate, totalFromRows } from "../../lib/pagination.js";
 import { direction, directionNullsLast, orderBy } from "../../lib/sorting.js";
@@ -150,7 +150,7 @@ export class BulkSearchService {
     input: string;
     query: BulkSearchQuery;
     userId: string | null;
-    scope: EnvironmentScope;
+    scope: ReadScope;
   }): Promise<BulkSearchResult> {
     const { entries, summary } = parseBulkInput(args.input);
 
@@ -175,7 +175,7 @@ export class BulkSearchService {
     queryId: string;
     query: BulkSearchQuery;
     /* Re-running a saved list reads the estate it was saved in. */
-    scope: EnvironmentScope;
+    scope: ReadScope;
   }): Promise<BulkSearchResult> {
     const { db } = this.deps;
 
@@ -245,7 +245,7 @@ export class BulkSearchService {
     rawInput: string;
     entries: readonly BulkEntry[];
     userId: string | null;
-    scope: EnvironmentScope;
+    scope: ReadScope;
   }): Promise<string> {
     const fingerprint = args.entries.map(matchKeyOf).sort().join("\n");
     const inputHash = sha256Hex(Buffer.from(fingerprint, "utf8"));
@@ -282,7 +282,7 @@ export class BulkSearchService {
     parse: BulkSearchResult["parse"];
     query: BulkSearchQuery;
     /* A saved list belongs to one estate, so its results do too. */
-    scope: EnvironmentScope;
+    scope: ReadScope;
   }): Promise<BulkSearchResult> {
     const { queryId, entries, parse, query } = args;
 
@@ -327,7 +327,7 @@ export class BulkSearchService {
   private async rollup(
     entries: readonly BulkEntry[],
     query: BulkSearchQuery,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<{ rows: BulkRollupRow[]; applicationsAffected: number }> {
     const lines = entries.map((e) => e.line);
     const names = this.nameKeys(entries, query);
@@ -455,7 +455,7 @@ export class BulkSearchService {
         FROM capped m
         LEFT JOIN usage u      ON u.component_id = m.component_id
         LEFT JOIN application a ON a.id = u.application_id
-          AND a.environment_id = ${scope.id}::uuid ${statusCondition}
+          AND ${applicationInScope("a", scope)} ${statusCondition}
       ),
       /* Overflow is a property of the match, so it is read off matched, before the cap. */
       overflow AS (
@@ -542,7 +542,7 @@ export class BulkSearchService {
   private async matches(
     entries: readonly BulkEntry[],
     query: BulkSearchQuery,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<NonNullable<BulkSearchResult["matches"]>> {
     const names = this.nameKeys(entries, query);
     const versions = entries.map((e) => (e.versionKind === "exact" ? e.version : null));
@@ -618,7 +618,7 @@ export class BulkSearchService {
         count(*) OVER () AS total
       FROM usage u
       JOIN matched m      ON m.id = u.component_id
-      JOIN application a  ON a.id = u.application_id AND a.environment_id = ${scope.id}::uuid
+      JOIN application a  ON a.id = u.application_id AND ${applicationInScope("a", scope)}
       JOIN environment e  ON e.id = a.environment_id
       JOIN scan s         ON s.id = u.last_seen_scan_id
       WHERE true ${scopeCondition} ${statusCondition}
@@ -641,7 +641,7 @@ export class BulkSearchService {
     entries: readonly BulkEntry[],
     query: BulkSearchQuery,
     cap: number,
-    scope: EnvironmentScope,
+    scope: ReadScope,
   ): Promise<{ items: ComponentSearchHit[]; truncated: boolean }> {
     const page = await this.matches(entries, { ...query, page: 1, pageSize: cap + 1 }, scope);
     return {
