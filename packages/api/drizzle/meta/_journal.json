@@ -120,6 +120,13 @@
       "when": 1788874570515,
       "tag": "0016_user_application_access",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788962763000,
+      "tag": "0017_vuln_provider",
+      "breakpoints": true
     }
   ]
 }

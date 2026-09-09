@@ -33,6 +33,7 @@ import type {
   VexStatus,
   VulnDbUpdateOutcome,
   VulnDbUpdateTrigger,
+  VulnProvider,
   VulnSeverity,
 } from "@sbom/shared";
 
@@ -719,6 +720,23 @@ export const component = pgTable(
     vulnScannedAt: timestamp("vuln_scanned_at", { withTimezone: true }),
     /** `built` timestamp of the grype DB that produced this component's findings. */
     vulnDbBuiltAt: timestamp("vuln_db_built_at", { withTimezone: true }),
+    /**
+     * Which vulnerability database produced this component's findings.
+     *
+     * The third term in the derived work queue, and the whole of what makes switching
+     * providers safe. With it, the pending set becomes "never scanned, OR assessed by a
+     * provider that is no longer the active one, OR assessed against an older database
+     * build" — so changing the setting re-queues the estate on its own. Nothing is wiped,
+     * nothing is migrated, and a switch made by accident is undone by switching back.
+     *
+     * Without it there is no honest option. Keeping the old findings blends two databases
+     * that identify the same advisory differently; deleting them throws away assessment
+     * history to answer a question the column answers for free.
+     *
+     * Null means the component predates this column, which is indistinguishable from
+     * "assessed by nobody" and correctly re-queues it once.
+     */
+    vulnProvider: text("vuln_provider").$type<VulnProvider>(),
 
     /**
      * The same derived-work-queue pattern as the two columns above, for malicious-package

@@ -1,0 +1,1 @@
+ALTER TABLE "component" ADD COLUMN "vuln_provider" text;

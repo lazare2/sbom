@@ -40,6 +40,22 @@ const envSchema = z
     DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
 
     SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
+
+    /**
+     * Encrypts the one credential the platform has to be able to read back — the JFrog Xray
+     * API token, which is presented to Xray on every scan.
+     *
+     * Optional, and deliberately not defaulted. A deployment that never connects Xray needs
+     * no key, and inventing one silently would mean a token encrypted under a value nobody
+     * recorded — recoverable only by whoever still has that container. Saving a token
+     * without this set is refused, naming this variable.
+     *
+     * Separate from SESSION_SECRET rather than derived from it. Rotating the session secret
+     * is a routine action that signs everyone out; if it also decided this key, it would
+     * quietly destroy a stored credential at the same time, and the symptom would be Xray
+     * scans failing to authenticate days later.
+     */
+    SECRETS_KEY: z.string().min(32, "SECRETS_KEY must be at least 32 characters").optional(),
     SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 90).default(72),
     SESSION_COOKIE_NAME: z.string().min(1).default("sbom_session"),
 
