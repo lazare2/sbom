@@ -38,6 +38,7 @@ describe("parsing a purl", () => {
       namespace: "org.apache.logging.log4j",
       name: "log4j-core",
       version: "2.14.1",
+      qualifiers: {},
     });
   });
 
@@ -47,21 +48,18 @@ describe("parsing a purl", () => {
       namespace: "github.com/gin-gonic",
       name: "gin",
       version: "v1.9.0",
+      qualifiers: {},
     });
   });
 
-  it("discards qualifiers and subpaths", () => {
-    /*
-      Syft attaches `?distro=debian-12&arch=amd64` to every deb purl. Xray coordinates have
-      no equivalent, and passing one through produces an identifier that matches nothing
-      while looking entirely reasonable in a log line.
-    */
+  it("keeps qualifiers, because deb and rpm identifiers need the architecture", () => {
     const parsed = parsePurl("pkg:deb/debian/openssl@1.1.1n-0+deb10u3?distro=debian-10&arch=amd64");
     expect(parsed).toEqual({
       type: "deb",
       namespace: "debian",
       name: "openssl",
       version: "1.1.1n-0+deb10u3",
+      qualifiers: { distro: "debian-10", arch: "amd64" },
     });
   });
 
@@ -110,19 +108,43 @@ describe("mapping a package to an Xray coordinate", () => {
     ).toBe("go://golang.org/x/text:v0.3.0");
   });
 
-  it("qualifies a deb package by its distribution", () => {
-    // The same name and version carry different fix states on different releases, so the
-    // distribution is part of the identity rather than decoration.
+  it("puts the architecture in a deb identifier, and leaves the distribution out", () => {
+    /*
+      JFrog's form is `deb://[dist:]<arch>:<name>:<version>`. The dist segment is optional and
+      is omitted deliberately: their examples use release codenames (`lucid`), while Syft
+      supplies `debian-10`. Those are different vocabularies, and a wrong dist matches nothing
+      while reading perfectly well in a log.
+    */
     expect(
       toXrayCoordinate(
         pkg({
           ecosystem: "deb",
           name: "openssl",
           version: "1.1.1n-0+deb10u3",
-          purl: "pkg:deb/debian/openssl@1.1.1n-0+deb10u3?distro=debian-10",
+          purl: "pkg:deb/debian/openssl@1.1.1n-0+deb10u3?distro=debian-10&arch=amd64",
         }),
       ),
-    ).toBe("deb://debian:openssl:1.1.1n-0+deb10u3");
+    ).toBe("deb://amd64:openssl:1.1.1n-0+deb10u3");
+  });
+
+  it("refuses an OS package with no architecture rather than guessing one", () => {
+    // An OS package assessed against the wrong architecture is worse than one honestly
+    // reported as unassessed: the fix state genuinely differs between builds.
+    expect(
+      toXrayCoordinate(
+        pkg({ ecosystem: "deb", name: "openssl", version: "1.1.1n", purl: "pkg:deb/debian/openssl@1.1.1n" }),
+      ),
+    ).toBeNull();
+  });
+
+  it("uses pip, not pypi, for Python packages", () => {
+    // Corrected against JFrog's published examples after being written from memory the other
+    // way round. `pip://` is also the form the original manual investigation used.
+    expect(
+      toXrayCoordinate(
+        pkg({ ecosystem: "pypi", name: "django", version: "2.2.0", purl: "pkg:pypi/django@2.2.0" }),
+      ),
+    ).toBe("pip://django:2.2.0");
   });
 
   it("refuses maven without a group rather than guessing one", () => {
