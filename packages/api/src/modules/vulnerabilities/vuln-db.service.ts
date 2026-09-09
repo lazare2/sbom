@@ -143,7 +143,12 @@ export class VulnDbService {
    * reduced to a single "healthy" flag, because an administrator needs to know
    * *which* of them to fix.
    */
-  async status(): Promise<VulnScanStatus> {
+  /*
+    Everything except the active provider, which this service has no business knowing.
+    It describes the *local database*; which database is the authority is a settings
+    question, and the route that assembles the payload answers it.
+  */
+  async status(): Promise<Omit<VulnScanStatus, "provider">> {
     const [settings, availability, dbStatus] = await Promise.all([
       this.deps.settings.getVulnSettings(),
       this.deps.scanner.availability(),

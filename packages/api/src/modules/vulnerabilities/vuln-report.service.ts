@@ -111,8 +111,30 @@ interface TopApplicationRow {
   ranked_packages: number | string;
 }
 
+/**
+ * The ecosystems a base image is built from.
+ *
+ * Kept here rather than imported from `osPackageEcosystems`, which is a wider list used to
+ * classify a package. This is the narrower question of which ecosystems a *coverage probe*
+ * reports on, and the two lists moving together by accident would silently change what
+ * counts as an unassessable base image.
+ */
+const OS_ECOSYSTEMS = ["deb", "rpm", "apk"] as const;
+
 export class VulnReportService {
-  constructor(private readonly deps: { db: Database }) {}
+  constructor(
+    private readonly deps: {
+      db: Database;
+      /**
+       * Which package ecosystems the active database has no data for.
+       *
+       * Consulted so a figure whose packages are all in those ecosystems is reported as not
+       * assessed rather than as zero. Under Grype this is always empty -- it matches
+       * everything it is handed -- so the behaviour below is inert until Xray is selected.
+       */
+      uncoveredEcosystems: () => Promise<string[]>;
+    },
+  ) {}
 
   async report(
     filter: VulnFilterState,
@@ -138,6 +160,20 @@ export class VulnReportService {
           : Promise.resolve(null),
       ]);
 
+    /*
+      Whether the base-image half of this report can be believed at all.
+
+      The operating-system ecosystems are the ones the base image is made of. If the active
+      database has data for none of them, every figure on that side would be a zero produced
+      by not asking -- so the block is withheld rather than filled in.
+
+      Any one of them being covered is enough to report: a mixed estate of Debian and Alpine
+      images where only Debian is covered still yields real Debian numbers, and withholding
+      those would be its own kind of dishonesty.
+    */
+    const uncovered = new Set(await this.deps.uncoveredEcosystems());
+    const baseImageAssessable = OS_ECOSYSTEMS.some((eco) => !uncovered.has(eco));
+
     const builtAt = meta.dbBuiltAt;
     const scopeTotals = (group: "app" | "os"): VulnScopeTotals | null =>
       scopeIncludes(filter.scope, group)
@@ -159,11 +195,22 @@ export class VulnReportService {
       applicationsPending: meta.applicationsPending,
       filter,
       app: scopeTotals("app"),
-      baseImage: scopeTotals("os"),
+      /*
+        Null, not zero, when the active database cannot see operating-system packages.
+
+        Xray answers an ecosystem it holds no data for exactly the way it answers a clean
+        package: with nothing. Reporting that as a base image with no vulnerabilities is the
+        strongest claim this platform can make, made without having looked -- and on a
+        container image the OS packages are most of the component list.
+
+        The whole block goes null rather than its numbers going null, so the existing
+        "not assessed" rendering applies unchanged everywhere it is shown.
+      */
+      baseImage: baseImageAssessable ? scopeTotals("os") : null,
       applicationsAffected: meta.applicationsAffected,
       topVulnerableApplications,
       topVulnerablePackages,
-      baseImageExposure: exposure,
+      baseImageExposure: baseImageAssessable ? exposure : null,
       /*
        * Only when something was narrowed. Carrying it unconditionally would duplicate the
        * figures above and invite a reader to compare a number with itself.

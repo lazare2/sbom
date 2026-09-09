@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import type {
   SuppressionSummary,
@@ -6,6 +6,8 @@ import type {
   VexStatus,
   VulnDbUpdateAttempt,
   VulnScanStatus,
+  XrayCoverage,
+  XrayDiagnosis,
 } from "@sbom/shared";
 import {
   requiresJustification,
@@ -22,8 +24,16 @@ import {
   useUpdateVulnSettings,
   useDeleteSuppression,
   useClassifySuppression,
+  useSetVulnProvider,
+  useSetXrayConnection,
+  useTestXrayConnection,
 } from "../../lib/mutations.ts";
-import { useVulnAdminStatus, useVulnHistory, useVulnSuppressions } from "../../lib/queries.ts";
+import {
+  useVulnAdminStatus,
+  useVulnHistory,
+  useVulnProvider,
+  useVulnSuppressions,
+} from "../../lib/queries.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../../lib/format.ts";
 import {
   Badge,
@@ -38,6 +48,7 @@ import {
   FormRow,
   LoadingBlock,
   Modal,
+  TextInput,
   Mono,
   Select,
   Table,
@@ -72,12 +83,274 @@ export function AdminVulnerabilitiesPage() {
 
   return (
     <div className="space-y-4">
+      <ProviderCard />
       <EnableCard status={status} />
       <ScannerCard status={status} />
       <DatabaseCard status={status} />
       <CoverageCard status={status} />
       <HistoryCard />
       <SuppressionsCard />
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Which vulnerability database
+// ---------------------------------------------------------------------------
+
+/**
+ * Choosing between the local Grype database and the organisation's own JFrog Xray.
+ *
+ * First on the page, above the switch that enables scanning at all, because it decides what
+ * every card below it is describing: the database card is about a local file under Grype and
+ * about somebody else's server under Xray.
+ *
+ * ## The coverage result is the point of the test button
+ *
+ * Xray answers an ecosystem it holds no data for exactly the way it answers a package it
+ * checked and found safe — with nothing. So the test submits a known-vulnerable package in
+ * each ecosystem and reports which came back. Without that, a base-image figure of zero
+ * would be unreadable: it could mean a clean image or an unasked question, and on a typical
+ * container image two thirds of the packages are operating-system ones.
+ */
+function ProviderCard() {
+  const query = useVulnProvider();
+  const setProvider = useSetVulnProvider();
+  const saveConnection = useSetXrayConnection();
+  const test = useTestXrayConnection();
+
+  const [baseUrl, setBaseUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [token, setToken] = useState("");
+  const [allowSelfSigned, setAllowSelfSigned] = useState(false);
+  const [seeded, setSeeded] = useState(false);
+
+  const settings = query.data;
+
+  // Seeded once from the server, then left alone so typing is not overwritten by a refetch.
+  useEffect(() => {
+    if (settings && !seeded) {
+      setBaseUrl(settings.xray.connection?.baseUrl ?? "");
+      setUsername(settings.xray.connection?.username ?? "");
+      setAllowSelfSigned(settings.xray.connection?.allowSelfSignedCertificate ?? false);
+      setSeeded(true);
+    }
+  }, [settings, seeded]);
+
+  if (query.isLoading) {
+    return (
+      <Card>
+        <LoadingBlock />
+      </Card>
+    );
+  }
+  if (query.error || !settings) {
+    return (
+      <Card>
+        <ErrorBanner error={query.error} onRetry={() => void query.refetch()} />
+      </Card>
+    );
+  }
+
+  const active = settings.provider;
+  const connection = settings.xray.connection;
+  const coverage = settings.xray.coverage;
+  /* A saved token may be kept; a connection that has never had one must be given one. */
+  const canSave =
+    baseUrl.trim() !== "" &&
+    username.trim() !== "" &&
+    (token.trim() !== "" || connection?.tokenConfigured === true);
+
+  const connectionInput = {
+    baseUrl: baseUrl.trim(),
+    username: username.trim(),
+    ...(token.trim() === "" ? {} : { token: token.trim() }),
+    allowSelfSignedCertificate: allowSelfSigned,
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        title="Vulnerability database"
+        subtitle="Which database findings are matched against. One at a time — the two identify the same advisory differently, so their numbers are never mixed."
+      />
+      <div className="space-y-4 p-4">
+        <div className="flex flex-col gap-1.5">
+          <Checkbox
+            checked={active === "grype"}
+            onChange={() => setProvider.mutate("grype")}
+            disabled={setProvider.isPending}
+            label="Grype — a local database this platform downloads and keeps"
+          />
+          <Checkbox
+            checked={active === "xray"}
+            onChange={() => setProvider.mutate("xray")}
+            /*
+              Not selectable until a connection exists. The server refuses it anyway; a
+              checkbox that fails with a validation error is worse than one that explains
+              why it is unavailable.
+            */
+            disabled={setProvider.isPending || !connection?.tokenConfigured}
+            label="JFrog Xray — your organisation's own database, queried over the network"
+          />
+        </div>
+
+        <FormError error={setProvider.error} />
+
+        {/*
+          Said once, where the choice is made. Switching is safe and reversible, and an
+          administrator who does not know that will not try it.
+        */}
+        <p className="text-xs text-text-muted">
+          Switching re-assesses every package against the new database. Existing findings are
+          kept but not counted while the other database is active, so figures read “not
+          assessed” until the sweep catches up — and switching back restores them.
+        </p>
+
+        <div className="space-y-3 border-t border-border-base pt-4">
+          <h3 className="text-xs font-medium text-text-muted">JFrog Xray connection</h3>
+
+          {!settings.secretsKeyConfigured ? (
+            <div className="rounded-md border border-warn/40 bg-warn-subtle p-2.5 text-[11px] text-warn">
+              <code>SECRETS_KEY</code> is not set on this deployment, so an API token cannot be
+              stored. Add it to the environment and restart before saving a connection.
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormRow label="Xray URL" htmlFor="xray-url" hint="The Artifactory or Xray base URL.">
+              <TextInput
+                id="xray-url"
+                value={baseUrl}
+                onChange={setBaseUrl}
+                placeholder="https://artifactory.example.org"
+              />
+            </FormRow>
+            <FormRow label="User name" htmlFor="xray-user">
+              <TextInput id="xray-user" value={username} onChange={setUsername} placeholder="svc-sbom" />
+            </FormRow>
+            <FormRow
+              label="API token"
+              htmlFor="xray-token"
+              hint={
+                connection?.tokenConfigured
+                  ? "A token is stored. Leave blank to keep it."
+                  : "Stored encrypted, and never shown again."
+              }
+            >
+              <TextInput
+                id="xray-token"
+                type="password"
+                value={token}
+                onChange={setToken}
+                placeholder={connection?.tokenConfigured ? "••••••••" : "Paste the token"}
+                autoComplete="off"
+              />
+            </FormRow>
+            <div className="flex items-end pb-1">
+              <Checkbox
+                checked={allowSelfSigned}
+                onChange={setAllowSelfSigned}
+                label="Accept a private certificate authority"
+              />
+            </div>
+          </div>
+
+          {allowSelfSigned ? (
+            /* What the checkbox gives up, said plainly. Silently disabling verification
+               would be worse than not offering it. */
+            <p className="text-[11px] text-warn">
+              The certificate will not be verified. Use this only for an internal Xray whose
+              certificate is issued by your own authority.
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!canSave || saveConnection.isPending || !settings.secretsKeyConfigured}
+              onClick={() => saveConnection.mutate(connectionInput)}
+            >
+              {saveConnection.isPending ? "Saving…" : "Save connection"}
+            </Button>
+            <Button
+              size="sm"
+              disabled={test.isPending || baseUrl.trim() === "" || username.trim() === ""}
+              onClick={() => test.mutate(connectionInput)}
+              title="Connects, then asks about a known-vulnerable package in each ecosystem."
+            >
+              {test.isPending ? "Testing…" : "Test connection"}
+            </Button>
+          </div>
+
+          <FormError error={saveConnection.error ?? test.error} />
+          <XrayTestResult diagnosis={test.data ?? null} />
+          {!test.data && coverage ? <CoverageSummary coverage={coverage} /> : null}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** The connection test's answer: what happened, what to change, and what came back. */
+function XrayTestResult({ diagnosis }: { diagnosis: XrayDiagnosis | null }) {
+  if (!diagnosis) return null;
+
+  return (
+    <div
+      className={`space-y-2 rounded-md border p-3 text-xs ${
+        diagnosis.ok
+          ? "border-ok/40 bg-ok-subtle text-ok"
+          : "border-danger/40 bg-danger-subtle text-danger"
+      }`}
+    >
+      <p className="font-medium">{diagnosis.summary}</p>
+      {diagnosis.hint ? <p className="opacity-90">{diagnosis.hint}</p> : null}
+      {diagnosis.detail ? (
+        <p className="font-mono text-[11px] break-all opacity-75">{diagnosis.detail}</p>
+      ) : null}
+      {diagnosis.coverage ? <CoverageSummary coverage={diagnosis.coverage} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Which ecosystems this Xray answered for.
+ *
+ * Rendered as two lists rather than a percentage, because the useful question is never "how
+ * much is covered" but "is the thing I care about covered" — and for a container estate the
+ * thing that matters is whether `deb`, `rpm` or `apk` is in the second list.
+ */
+function CoverageSummary({ coverage }: { coverage: XrayCoverage }) {
+  const osUncovered = coverage.uncovered.filter((eco) => ["deb", "rpm", "apk"].includes(eco));
+
+  return (
+    <div className="space-y-1.5 text-[11px]">
+      <p className="text-text-muted">
+        Coverage measured {formatRelative(coverage.checkedAt)} by asking about a known
+        vulnerable package in each ecosystem.
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {coverage.covered.map((eco) => (
+          <span key={eco} className="rounded bg-ok-subtle px-1.5 py-0.5 text-ok">
+            {eco}
+          </span>
+        ))}
+        {coverage.uncovered.map((eco) => (
+          <span key={eco} className="rounded bg-warn-subtle px-1.5 py-0.5 text-warn">
+            {eco} — no data
+          </span>
+        ))}
+      </div>
+      {osUncovered.length > 0 ? (
+        <p className="text-warn">
+          Operating-system packages ({osUncovered.join(", ")}) are not covered, and on a
+          container image those are most of the packages. Base-image findings will read as not
+          assessed rather than as zero.
+        </p>
+      ) : null}
     </div>
   );
 }

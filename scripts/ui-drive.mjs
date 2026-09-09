@@ -1302,6 +1302,66 @@ await shot("admin-audit");
  *
  * The run leaves the flag exactly as it found it.
  */
+
+/*
+  22b-prov. Choosing the vulnerability database.
+
+  Two things the API tests cannot reach. First, that the JFrog Xray option is *unselectable*
+  until a connection works — the server refuses it either way, but a checkbox that fails with
+  a validation error tells an administrator less than one that is visibly unavailable.
+
+  Second, that a failed connection produces a readable diagnosis rather than a stack trace or
+  a bare status code. Driven against a host that cannot resolve, which is reliable from any
+  machine and is also the most likely real failure in a corporate network.
+*/
+log("22b-prov. the vulnerability database provider");
+{
+  await page.goto(`${BASE}/admin/vulnerabilities`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+
+  await expectText("Vulnerability database", "the provider card");
+  await expectText("Grype", "the local database option");
+
+  const xrayOption = page.getByRole("checkbox", { name: /JFrog Xray/ });
+  await xrayOption.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+  if ((await xrayOption.count()) === 0) {
+    problems.push("the provider card does not offer JFrog Xray");
+  } else if (!(await xrayOption.isDisabled())) {
+    /*
+      A previous smoke run stores a connection, so this is only asserted when none exists.
+      Reporting it unconditionally would fail on a database that has been smoke-tested,
+      which is most of them.
+    */
+    log("  NOTE a connection is already stored on this estate, so the option is selectable");
+  } else {
+    log("  OK   JFrog Xray cannot be selected until a connection is configured");
+  }
+
+  log("22b-prov2. a connection that cannot be reached is diagnosed");
+  await page.locator("#xray-url").fill("https://xray.invalid.example");
+  await page.locator("#xray-user").fill("ui-drive-svc");
+  await page.locator("#xray-token").fill("ui-drive-token");
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Test connection" }).click();
+  // DNS failure plus the client's own timeout budget, generously.
+  await page.waitForTimeout(14000);
+
+  const after = await page.locator("body").innerText();
+  if (/Internal server error/i.test(after)) {
+    problems.push("an unreachable Xray is reported as an internal server error");
+  } else if (!/Could not reach JFrog Xray/.test(after)) {
+    problems.push("an unreachable Xray produced no diagnosis on screen");
+  } else {
+    log("  OK   the failure names the host and says what to check");
+  }
+  await shot("admin-vuln-provider");
+
+  // Reloaded so nothing typed above leaks into a later step. Nothing was saved: the test
+  // button does not persist, and Save was never pressed.
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+}
+
 log("22b. vulnerability scanning admin panel");
 await page.goto(`${BASE}/admin/vulnerabilities`, { waitUntil: "networkidle" });
 await page.waitForTimeout(1200);

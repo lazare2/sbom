@@ -3857,6 +3857,125 @@ try {
     }
 
     # ======================================================================
+    <#
+      Choosing the vulnerability database.
+
+      Two properties matter more than the rest and neither is visible from the UI: the API
+      token must never come back out, and selecting a provider that cannot work must be
+      refused rather than accepted and left silently broken.
+
+      The connection is pointed at a host that cannot resolve. That is deliberate -- there is
+      no Xray to talk to from a test run, and what is being asserted is that the platform
+      reports the failure as a connection problem rather than as a clean estate.
+    #>
+    Write-Host ""
+    Write-Host "Vulnerability database provider" -ForegroundColor Cyan
+
+    $vulnUrl = "$adminUrl/vuln"
+    $script:providerBefore = $null
+
+    Assert-That "reports which database is active" {
+        $r = Invoke-Api @("$vulnUrl/provider", "-b", $readJar)
+        Show-Body $r 200
+        if ($r.Status -ne 200) { return $false }
+        $script:providerBefore = $r.Json.provider
+        # Grype unless somebody has changed it; either is a valid answer, a missing one is not.
+        return $r.Json.provider -eq "grype" -or $r.Json.provider -eq "xray"
+    }
+
+    Assert-That "refuses to select JFrog Xray before a connection works" {
+        <#
+          The switch decides which database every figure on the platform comes from. Accepting
+          it with nothing to connect to would leave the estate reporting "not assessed"
+          indefinitely, with the cause three screens away.
+        #>
+        $p = New-JsonFile -Name "provider-xray.json" -Data @{ provider = "xray" }
+        $r = Invoke-Api @("-X", "PUT", "$vulnUrl/provider", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($r.Status -ne 400) { Show-Body $r 400 }
+        return $r.Status -eq 400
+    }
+
+    Assert-That "refuses a connection URL that is not https" {
+        # The API token rides on every request. Plain http to another machine would put it on
+        # the wire, so it is rejected at the schema rather than warned about later.
+        $p = New-JsonFile -Name "xray-http.json" -Data @{
+            baseUrl = "http://xray.example.org"; username = "svc"; token = "t"
+            allowSelfSignedCertificate = $false
+        }
+        $r = Invoke-Api @("-X", "PUT", "$vulnUrl/provider/xray", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        return $r.Status -eq 400
+    }
+
+    Assert-That "stores a connection without ever handing the token back" {
+        <#
+          The one recoverable secret this platform keeps. It is encrypted at rest and write
+          only across the whole API: the screen shows whether a token exists, never what it
+          is. A response that echoed it would put a live credential into every browser
+          history and proxy log between here and the client.
+        #>
+        $secret = "smoke-xray-token-$([guid]::NewGuid().ToString('N'))"
+        $p = New-JsonFile -Name "xray-conn.json" -Data @{
+            baseUrl = "https://xray-smoke.invalid"; username = "smoke-svc"; token = $secret
+            allowSelfSignedCertificate = $false
+        }
+        $save = Invoke-Api @("-X", "PUT", "$vulnUrl/provider/xray", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        Show-Body $save 200
+        if ($save.Status -ne 200) { return $false }
+        if ($save.Body -like "*$secret*") {
+            Write-Host "        the save response contained the token" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $read = Invoke-Api @("$vulnUrl/provider", "-b", $readJar)
+        if ($read.Body -like "*$secret*") {
+            Write-Host "        the provider endpoint returned the token" -ForegroundColor DarkYellow
+            return $false
+        }
+        # Stored, and reported as stored -- the distinction the screen needs to decide whether
+        # to ask for a new one.
+        return $read.Json.xray.connection.tokenConfigured -eq $true -and
+               $read.Json.xray.connection.baseUrl -eq "https://xray-smoke.invalid"
+    }
+
+    Assert-That "an unreachable Xray is diagnosed, not reported as an empty result" {
+        <#
+          The failure this whole provider is most likely to hit in a corporate network, and
+          the one with the worst silent outcome: Xray answers an ecosystem it has no data for
+          exactly the way it answers a clean package. A connection that cannot be established
+          at all must therefore say so, loudly, rather than resolving to "nothing found".
+        #>
+        $r = Invoke-Api @("-X", "POST", "$vulnUrl/provider/xray/test", "-H", $jsonCt, "-d", "{}", "-b", $readJar)
+        Show-Body $r 200
+        if ($r.Status -ne 200) { return $false }
+        if ($r.Json.ok -ne $false) {
+            Write-Host "        an unreachable host reported ok=$($r.Json.ok)" -ForegroundColor DarkYellow
+            return $false
+        }
+        # The relay's own words survive, which is what gets pasted to whoever runs Xray.
+        return $r.Json.code -eq "unreachable" -and $null -ne $r.Json.detail
+    }
+
+    Assert-That "the audit trail records the connection change without the credential" {
+        $r = Invoke-Api @("$adminUrl/audit-log?action=vuln.xray_connection_set&pageSize=20", "-b", $readJar)
+        if ($r.Status -ne 200) { return $false }
+        $row = @($r.Json.items)[0]
+        if (-not $row) { return $false }
+        # The host and whether a token was replaced; never the token itself.
+        return $row.metadata.baseUrl.to -eq "https://xray-smoke.invalid" -and
+               $row.metadata.tokenReplaced -eq $true -and
+               $row.metadata.PSObject.Properties.Name -notcontains "token"
+    }
+
+    Assert-That "the scanner status names the active database" {
+        # Carried on the status payload because it changes how every figure below it reads:
+        # a base-image zero means "clean" under one provider and "nobody looked" under another.
+        $r = Invoke-Api @("$vulnUrl/status", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        return $r.Json.provider.active -eq "grype" -and
+               @($r.Json.provider.uncoveredEcosystems).Count -eq 0
+    }
+
+    # ======================================================================
     Write-Host ""
     Write-Host "Error handling" -ForegroundColor Cyan
 

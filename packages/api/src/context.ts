@@ -196,7 +196,27 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   // guarantee that as either one changes.
   // The estate's vulnerability aggregates, which the report composes in alongside the
   // inventory sections it owns itself.
-  const vulnReport = new VulnReportService({ db });
+  const vulnReport = new VulnReportService({
+    db,
+    /*
+      A thunk rather than a value: coverage is measured when an administrator tests the
+      connection, so a value captured at construction would be whatever was true when the
+      process started.
+    */
+    uncoveredEcosystems: async () => {
+      if ((await settings.vulnProvider()) !== "xray") return [];
+      const coverage = (await settings.xraySettings()).coverage;
+      /*
+        Never measured is not the same as nothing uncovered, and defaulting to the empty
+        list would make the two identical -- reporting a base image with no vulnerabilities
+        on the strength of a probe that never ran. Selecting Xray requires a tested
+        connection, so this is reachable mainly when the probe itself failed; the answer
+        there is "we cannot vouch for these", not "they are clean".
+      */
+      if (!coverage) return ["deb", "rpm", "apk"];
+      return coverage.uncovered;
+    },
+  });
   const analytics = new AnalyticsService({ db, config, dashboard, settings, vulnReport });
 
   const snapshots = new SnapshotService({ db });

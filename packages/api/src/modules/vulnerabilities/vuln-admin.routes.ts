@@ -54,8 +54,21 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    */
   async function status(): Promise<VulnScanStatus> {
     const base = await vulnDb.status();
+    const active = await settings.vulnProvider();
+    const xray = await settings.xraySettings();
+
     return {
       ...base,
+      /*
+        Grype matches everything it is handed, so nothing is uncovered. Xray's coverage is
+        whatever the last probe measured -- and until one has run, nothing is known to be
+        covered, which is reported as an unmeasured state rather than as full coverage.
+      */
+      provider: {
+        active,
+        uncoveredEcosystems: active === "xray" ? (xray.coverage?.uncovered ?? []) : [],
+        coverageCheckedAt: active === "xray" ? (xray.coverage?.checkedAt ?? null) : null,
+      },
       coverage: {
         ...base.coverage,
         sweeping: vulnWorker.sweeping,

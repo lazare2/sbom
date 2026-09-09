@@ -41,6 +41,7 @@ import type {
   VulnDbUpdateAttempt,
   VulnerabilityFinding,
   VulnerabilityReport,
+  VulnProviderSettings,
   VulnScanStatus,
   CoverageReport,
   PlatformSettings,
@@ -632,6 +633,14 @@ export function useEnvironmentComparison() {
   return useQuery({
     queryKey: queryKeys.environmentComparison,
     queryFn: () => api.get<EnvironmentComparison>("/admin/environments/comparison"),
+  });
+}
+
+/** Which vulnerability database is active, and how to reach it. Never carries the token. */
+export function useVulnProvider() {
+  return useQuery({
+    queryKey: ["admin", "vuln-provider"] as const,
+    queryFn: () => api.get<VulnProviderSettings>("/admin/vuln/provider"),
   });
 }
 

@@ -33,7 +33,12 @@ import type {
   SetUserApplicationAccess,
   UserApplicationAccess,
   UserSummary,
+  VulnProvider,
+  VulnProviderSettings,
   VulnScanStatus,
+  XrayConnectionInput,
+  XrayDiagnosis,
+  XraySettings,
   PlatformSettings,
   ReportRunSummary,
   ReportSettings,
@@ -285,6 +290,62 @@ export function useSetUserApplicationAccess() {
   return useMutation({
     mutationFn: (vars: { id: string; body: SetUserApplicationAccess }) =>
       api.put<UserApplicationAccess>(`/admin/users/${vars.id}/application-access`, vars.body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+  });
+}
+
+/**
+ * Everything about the vulnerability provider invalidates everything.
+ *
+ * Switching the database re-queues the whole estate, so every count, ranking and status on
+ * the platform is about to change. A targeted invalidation here would be a guess about which
+ * cached answers mentioned a vulnerability.
+ */
+function invalidateVulnProvider(qc: QueryClient): Promise<unknown> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["admin"] }),
+    qc.invalidateQueries({ queryKey: ["vulnerabilities"] }),
+    qc.invalidateQueries({ queryKey: ["dashboard"] }),
+    qc.invalidateQueries({ queryKey: ["applications"] }),
+  ]);
+}
+
+export function useSetVulnProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: VulnProvider) =>
+      api.put<VulnProviderSettings>("/admin/vuln/provider", { provider }),
+    onSuccess: () => {
+      void invalidateVulnProvider(qc);
+    },
+  });
+}
+
+export function useSetXrayConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: XrayConnectionInput) =>
+      api.put<XraySettings>("/admin/vuln/provider/xray", body),
+    onSuccess: () => {
+      void invalidateVulnProvider(qc);
+    },
+  });
+}
+
+/**
+ * Tests the connection and measures coverage in one action.
+ *
+ * Resolves rather than rejects when the connection fails: the diagnosis is the answer, and
+ * turning it into an ApiError would discard the hint and the coverage result that make it
+ * worth having.
+ */
+export function useTestXrayConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connection?: XrayConnectionInput) =>
+      api.post<XrayDiagnosis>("/admin/vuln/provider/xray/test", connection ? { connection } : {}),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["admin"] });
     },
