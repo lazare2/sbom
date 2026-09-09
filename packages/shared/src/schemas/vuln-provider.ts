@@ -142,3 +142,27 @@ export interface XrayDiagnosis {
   /** Populated when the probe ran, so an administrator sees coverage before switching. */
   coverage: XrayCoverage | null;
 }
+
+export const setVulnProviderSchema = z.object({ provider: vulnProviderSchema });
+export type SetVulnProvider = z.infer<typeof setVulnProviderSchema>;
+
+/**
+ * Body for the connection test.
+ *
+ * `connection` is optional: absent means test what is saved. Supplying it lets an
+ * administrator try a change before it replaces a working configuration -- without that, the
+ * only way to test is to save first, and a failed test has already destroyed the values that
+ * worked.
+ */
+export const testXrayConnectionSchema = z.object({
+  connection: xrayConnectionInputSchema.optional(),
+});
+export type TestXrayConnection = z.infer<typeof testXrayConnectionSchema>;
+
+/** What the admin screen reads back about the active database and its connection. */
+export interface VulnProviderSettings {
+  provider: VulnProvider;
+  xray: XraySettings;
+  /** False when SECRETS_KEY is unset, so the screen can say why a token cannot be saved. */
+  secretsKeyConfigured: boolean;
+}

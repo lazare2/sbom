@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { VulnProvider } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import type { ParsedFinding, ScannablePackage, VulnerabilityScanner } from "../../services/scanner/index.js";
@@ -135,35 +136,55 @@ export class SweepService {
       };
     }
 
+    /*
+      Resolved once and passed down rather than read again per query. Every statement in one
+      run has to agree about which database is the authority: a provider changed mid-sweep
+      would claim components under one name and stamp them under another, leaving rows that
+      look assessed and belong to nobody.
+
+      After the guards above, not before, so a tick that declines for any of those reasons
+      costs no settings read at all.
+    */
+    const provider = await this.deps.settings.vulnProvider();
+
     const availability = await this.deps.scanner.availability();
     if (!availability.available) {
       return {
         ...empty,
         status: "unavailable",
         message: "The grype binary is not available.",
-        remaining: await this.pendingCount(null),
+        remaining: await this.pendingCount(null, provider),
       };
     }
 
+    /*
+      The data set being matched against, asked of the scanner rather than read off a local
+      database file. Grype answers with its database build timestamp; Xray answers with the
+      assessment epoch it keeps on this side, because it publishes no build date of its own.
+
+      Null means the scanner cannot say, and the sweep refuses rather than guessing --
+      findings recorded against an unknown data set can never be invalidated later.
+    */
     const dbStatus = await this.deps.scanner.dbStatus();
-    if (!dbStatus.present || dbStatus.builtAt === null) {
+    const watermark = await this.deps.scanner.watermark();
+    if (!dbStatus.present || watermark === null) {
       return {
         ...empty,
         status: "no-database",
-        message:
-          "No vulnerability database is installed. Update it from the admin panel, or import an archive.",
-        remaining: await this.pendingCount(null),
+        message: dbStatus.error
+          ? `The vulnerability database is not usable: ${dbStatus.error}`
+          : "No vulnerability database is installed. Update it from the admin panel, or import an archive.",
+        remaining: await this.pendingCount(null, provider),
       };
     }
 
     this.running = true;
-    const watermark = dbStatus.builtAt;
     const progress: SweepProgress = { ...empty };
     const maxBatches = options.maxBatches ?? Number.POSITIVE_INFINITY;
 
     try {
       while (progress.batches < maxBatches) {
-        const packages = await this.claimBatch(watermark, this.deps.config.GRYPE_BATCH_SIZE);
+        const packages = await this.claimBatch(watermark, provider, this.deps.config.GRYPE_BATCH_SIZE);
         if (packages.length === 0) break;
 
         const result = await this.deps.scanner.match(packages);
@@ -183,6 +204,7 @@ export class SweepService {
         await this.markScanned(
           result.submittedComponentIds,
           result.dbBuiltAt ?? watermark,
+          provider,
         );
 
         progress.componentsScanned += packages.length;
@@ -195,7 +217,7 @@ export class SweepService {
       // drop in exposure.
       await this.refreshScanSummaries(watermark, availability.version);
 
-      const remaining = await this.pendingCount(watermark);
+      const remaining = await this.pendingCount(watermark, provider);
       this.lastFinishedAt = new Date();
 
       this.deps.logger.info(
@@ -219,7 +241,7 @@ export class SweepService {
         ...progress,
         status: "failed",
         message,
-        remaining: await this.pendingCount(watermark).catch(() => 0),
+        remaining: await this.pendingCount(watermark, provider).catch(() => 0),
       };
     } finally {
       this.running = false;
@@ -237,20 +259,37 @@ export class SweepService {
    * sees is the same set the sweep will actually process — two hand-written variants
    * of this expression would eventually disagree.
    */
-  private pendingPredicate(watermark: Date | null) {
+  /**
+   * What still needs assessing, as an expression rather than a queue.
+   *
+   * Three terms, and the third is what makes changing the vulnerability database safe:
+   *
+   *   never assessed            a new package, or the first sweep after enabling scanning
+   *   assessed by someone else  the active provider changed, so the finding was produced
+   *                             by a database that is no longer the authority here
+   *   assessed against older    a newer Grype build, or a new Xray assessment epoch
+   *
+   * The provider term means switching between Grype and Xray re-queues the estate on its
+   * own -- nothing to migrate, nothing to wipe, and switching back undoes it. The
+   * alternative was blending two databases that identify the same advisory differently.
+   */
+  private pendingPredicate(watermark: Date | null, provider: VulnProvider) {
+    const wrongProvider = sql`c.vuln_provider IS DISTINCT FROM ${provider}`;
+
     if (watermark === null) {
-      return sql`(c.vuln_scanned_at IS NULL OR c.vuln_db_built_at IS NULL)`;
+      return sql`(c.vuln_scanned_at IS NULL OR c.vuln_db_built_at IS NULL OR ${wrongProvider})`;
     }
     return sql`(
       c.vuln_scanned_at IS NULL
       OR c.vuln_db_built_at IS NULL
+      OR ${wrongProvider}
       OR c.vuln_db_built_at < ${watermark.toISOString()}::timestamptz
     )`;
   }
 
-  private async pendingCount(watermark: Date | null): Promise<number> {
+  private async pendingCount(watermark: Date | null, provider: VulnProvider): Promise<number> {
     const rows = await this.deps.db.execute<Row<{ pending: number | string }>>(sql`
-      SELECT count(*)::int AS pending FROM component c WHERE ${this.pendingPredicate(watermark)}
+      SELECT count(*)::int AS pending FROM component c WHERE ${this.pendingPredicate(watermark, provider)}
     `);
     return Number(rowsOf(rows)[0]?.pending ?? 0);
   }
@@ -266,7 +305,11 @@ export class SweepService {
    * vulnerable and excluding them from matching would make the base-image figure
    * impossible to produce at all.
    */
-  private async claimBatch(watermark: Date, limit: number): Promise<ScannablePackage[]> {
+  private async claimBatch(
+    watermark: Date,
+    provider: VulnProvider,
+    limit: number,
+  ): Promise<ScannablePackage[]> {
     const rows = await this.deps.db.execute<
       Row<{
         id: number | string;
@@ -278,7 +321,7 @@ export class SweepService {
     >(sql`
       SELECT c.id, c.name, c.version, c.purl, c.ecosystem
       FROM component c
-      WHERE ${this.pendingPredicate(watermark)}
+      WHERE ${this.pendingPredicate(watermark, provider)}
       ORDER BY c.id
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -416,7 +459,11 @@ export class SweepService {
    * would clear it from the dashboards. Scoped to the components just processed and to
    * pairings not confirmed by this pass.
    */
-  private async markScanned(componentIds: readonly number[], dbBuiltAt: Date): Promise<void> {
+  private async markScanned(
+    componentIds: readonly number[],
+    dbBuiltAt: Date,
+    provider: VulnProvider,
+  ): Promise<void> {
     if (componentIds.length === 0) return;
     const ids = sql`${sql.param(componentIds)}::bigint[]`;
     const stamp = dbBuiltAt.toISOString();
@@ -428,9 +475,16 @@ export class SweepService {
         AND cv.last_confirmed_at < now() - interval '1 second'
     `);
 
+    /*
+      The provider is stamped in the same statement as the watermark, so a component can
+      never be recorded as assessed without recording what assessed it. Two statements would
+      leave a window where a crash produces rows that look current and belong to nobody.
+    */
     await this.deps.db.execute(sql`
       UPDATE component
-      SET vuln_scanned_at = now(), vuln_db_built_at = ${stamp}::timestamptz
+      SET vuln_scanned_at = now(),
+          vuln_db_built_at = ${stamp}::timestamptz,
+          vuln_provider = ${provider}
       WHERE id = ANY(${ids})
     `);
   }

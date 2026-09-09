@@ -292,6 +292,16 @@ export class GrypeScanner implements VulnerabilityScanner {
    * does not exist"}` and exits **0**. Treating a zero exit as "database present"
    * would report an empty install as healthy.
    */
+  /**
+   * The installed database's build timestamp.
+   *
+   * Read from the database itself rather than tracked separately, so the value the sweep
+   * scopes its work by cannot drift from the database actually in use.
+   */
+  async watermark(): Promise<Date | null> {
+    return (await this.dbStatus()).builtAt;
+  }
+
   async dbStatus(): Promise<ScannerDbStatus> {
     const absent: ScannerDbStatus = {
       present: false,

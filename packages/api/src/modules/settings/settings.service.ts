@@ -11,6 +11,10 @@ import {
   updateMaliciousSettingsSchema,
   MALICIOUS_DEFAULT_FEED_URL,
   type MaliciousSettings,
+  type VulnProvider,
+  type XrayConnectionInput,
+  type XrayCoverage,
+  type XraySettings,
   type PlatformSettings,
   type ReportSettings,
 } from "@sbom/shared";
@@ -19,6 +23,9 @@ import type { Database } from "../../db/client.js";
 import { setting } from "../../db/schema.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
 import type { Actor } from "../admin/audit.service.js";
+import { BadRequestError } from "../../lib/errors.js";
+import { openSecret, sealSecret } from "../../lib/secret-box.js";
+import type { XrayCredentials } from "../../services/scanner/xray-client.js";
 
 /**
  * Admin-editable runtime settings.
@@ -55,6 +62,14 @@ export const SETTING_KEYS = {
    * would make disabling either of them rewrite the other's configuration.
    */
   maliciousDetection: "malicious.detection",
+  /**
+   * Which vulnerability database is the authority, and how to reach it.
+   *
+   * One key rather than two, because the provider choice and the Xray connection are one
+   * decision: switching to Xray with no connection configured is not a state anybody means
+   * to be in, and separate keys would let a half-applied write produce exactly that.
+   */
+  vulnProvider: "vuln.provider",
 } as const;
 
 /**
@@ -91,6 +106,35 @@ export const DEFAULT_MALICIOUS_SETTINGS: MaliciousSettings = {
   feedUrl: MALICIOUS_DEFAULT_FEED_URL,
   alertsEnabled: false,
   alertRecipients: [],
+};
+
+/** The stored shape. `tokenEnvelope` is ciphertext and never leaves this service as-is. */
+interface StoredXray {
+  baseUrl: string;
+  username: string;
+  tokenEnvelope: string | null;
+  allowSelfSignedCertificate: boolean;
+}
+
+interface StoredProviderSettings {
+  provider: VulnProvider;
+  xray: StoredXray;
+  coverage: XrayCoverage | null;
+  /** ISO timestamp standing in for a database build date, which Xray does not publish. */
+  assessmentEpoch: string;
+}
+
+/**
+ * Grype, and no connection.
+ *
+ * The default has to be the local database: a deployment that has never opened this screen,
+ * or whose stored value cannot be read, must keep scanning rather than silently stop.
+ */
+const DEFAULT_PROVIDER_SETTINGS: StoredProviderSettings = {
+  provider: "grype",
+  xray: { baseUrl: "", username: "", tokenEnvelope: null, allowSelfSignedCertificate: false },
+  coverage: null,
+  assessmentEpoch: new Date(0).toISOString(),
 };
 
 export interface VulnSettings {
@@ -150,6 +194,15 @@ export class SettingsService {
    * the same short TTL as the vulnerability flag for the same reason.
    */
   private maliciousCache: { value: MaliciousSettings; expiresAt: number } | null = null;
+
+  /**
+   * Provider settings, cached like the rest.
+   *
+   * Read on every sweep tick and by the scanner resolver, so an uncached read would put a
+   * query in front of every match. Its own entry rather than a shared one so that changing
+   * the relay or a vulnerability toggle does not invalidate the credentials.
+   */
+  private providerCache: { value: StoredProviderSettings; expiresAt: number } | null = null;
 
   constructor(private readonly deps: { db: Database; config: Config }) {}
 
@@ -360,6 +413,195 @@ export class SettingsService {
    * disabled rather than assumed on. A database problem must not cause the platform
    * to start rendering half-populated vulnerability figures.
    */
+
+  // -- vulnerability provider -------------------------------------------------
+
+  /**
+   * Which vulnerability database is the authority, and how to reach it.
+   *
+   * Stored as one object under a single key, like the report's delivery settings, because
+   * the provider choice and the Xray connection are one decision: switching to Xray with no
+   * connection configured is not a state anybody means to be in, and two keys would let a
+   * half-applied write produce exactly that.
+   *
+   * The token is held encrypted and is never part of what this method returns. Callers that
+   * need to *use* it go through `xrayCredentials`, which is the only path that decrypts.
+   */
+  private async getProviderSettings(): Promise<StoredProviderSettings> {
+    if (this.providerCache && this.providerCache.expiresAt > Date.now()) {
+      return this.providerCache.value;
+    }
+
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${SETTING_KEYS.vulnProvider}
+    `);
+
+    const stored = rowsOf(rows)[0]?.value;
+    const value: StoredProviderSettings = { ...DEFAULT_PROVIDER_SETTINGS };
+    if (stored && typeof stored === "object") {
+      const raw = stored as Record<string, unknown>;
+      if (raw.provider === "grype" || raw.provider === "xray") value.provider = raw.provider;
+      if (raw.xray && typeof raw.xray === "object") {
+        value.xray = { ...value.xray, ...(raw.xray as Record<string, unknown>) } as StoredXray;
+      }
+      if (raw.coverage && typeof raw.coverage === "object") {
+        value.coverage = raw.coverage as XrayCoverage;
+      }
+      if (typeof raw.assessmentEpoch === "string") value.assessmentEpoch = raw.assessmentEpoch;
+    }
+
+    this.providerCache = { value, expiresAt: Date.now() + SettingsService.CACHE_TTL_MS };
+    return value;
+  }
+
+  /**
+   * The active provider, defaulting to Grype.
+   *
+   * Read on every sweep and by the scanner resolver, so it is cached like the rest. The
+   * fallback matters: a deployment that has never touched this setting, or one whose stored
+   * value is unreadable, must keep matching against the local database rather than silently
+   * stop scanning.
+   */
+  async vulnProvider(): Promise<VulnProvider> {
+    try {
+      return (await this.getProviderSettings()).provider;
+    } catch {
+      return "grype";
+    }
+  }
+
+  /** What the admin screen reads back. Never the token — only whether one is stored. */
+  async xraySettings(): Promise<XraySettings> {
+    const stored = await this.getProviderSettings();
+    const configured = stored.xray.baseUrl !== "" && stored.xray.username !== "";
+    return {
+      connection: configured
+        ? {
+            baseUrl: stored.xray.baseUrl,
+            username: stored.xray.username,
+            tokenConfigured: stored.xray.tokenEnvelope !== null,
+            allowSelfSignedCertificate: stored.xray.allowSelfSignedCertificate,
+          }
+        : null,
+      coverage: stored.coverage,
+    };
+  }
+
+  /**
+   * The data set the Xray scanner is matching against.
+   *
+   * Xray publishes no database build date, so one is kept here. It moves when the connection
+   * changes — new credentials may reach a different server with different data — and
+   * otherwise only when `advanceAssessmentEpoch` is called on the configured interval.
+   * Deriving it from the current time instead would make every component look stale on every
+   * tick and re-scan the whole estate against a shared corporate server continuously.
+   */
+  async xrayAssessmentEpoch(): Promise<Date> {
+    const stored = await this.getProviderSettings();
+    const parsed = new Date(stored.assessmentEpoch);
+    return Number.isNaN(parsed.getTime()) ? new Date(0) : parsed;
+  }
+
+  /**
+   * The credentials, decrypted, or null when they cannot be used.
+   *
+   * The only path in the platform that decrypts a stored secret. Null rather than throwing
+   * for a missing or unreadable token: an unusable credential is an operational state the
+   * scanner reports as unavailable, not an exception that should escape into a sweep running
+   * on a timer with nothing to catch it.
+   */
+  async xrayCredentials(): Promise<XrayCredentials | null> {
+    const stored = await this.getProviderSettings();
+    if (stored.xray.baseUrl === "" || stored.xray.tokenEnvelope === null) return null;
+
+    const key = this.deps.config.SECRETS_KEY;
+    if (!key) return null;
+
+    try {
+      return {
+        baseUrl: stored.xray.baseUrl,
+        username: stored.xray.username,
+        token: openSecret(stored.xray.tokenEnvelope, key),
+        allowSelfSigned: stored.xray.allowSelfSignedCertificate,
+      };
+    } catch {
+      // A rotated SECRETS_KEY, or a value edited by hand. Reported by the scanner as an
+      // unavailable connection, which is what an administrator can act on.
+      return null;
+    }
+  }
+
+  async setVulnProvider(provider: VulnProvider): Promise<void> {
+    const current = await this.getProviderSettings();
+    await this.writeProviderSettings({ ...current, provider });
+  }
+
+  /**
+   * Saves the connection, encrypting the token.
+   *
+   * An omitted token leaves the stored one alone, which is what lets an administrator
+   * correct a typo in the URL without pasting the credential again. Saving *any* change
+   * advances the assessment epoch: different credentials may reach a different Xray with
+   * different data, so every existing finding is now of unknown provenance and the estate
+   * is re-assessed rather than trusted.
+   */
+  async setXrayConnection(input: XrayConnectionInput): Promise<void> {
+    const current = await this.getProviderSettings();
+
+    let envelope = current.xray.tokenEnvelope;
+    if (input.token !== undefined && input.token !== "") {
+      const key = this.deps.config.SECRETS_KEY;
+      if (!key) {
+        throw new BadRequestError(
+          "SECRETS_KEY is not set on this deployment, so an API token cannot be stored. Add it to the environment and restart, then save again.",
+        );
+      }
+      envelope = sealSecret(input.token, key);
+    }
+
+    await this.writeProviderSettings({
+      ...current,
+      xray: {
+        baseUrl: input.baseUrl,
+        username: input.username,
+        tokenEnvelope: envelope,
+        allowSelfSignedCertificate: input.allowSelfSignedCertificate,
+      },
+      // The connection changed, so what was measured about the old one no longer applies.
+      coverage: null,
+      assessmentEpoch: new Date().toISOString(),
+    });
+  }
+
+  /** Records what the probe found, so the platform knows which results it may trust. */
+  async setXrayCoverage(coverage: XrayCoverage): Promise<void> {
+    const current = await this.getProviderSettings();
+    await this.writeProviderSettings({ ...current, coverage });
+  }
+
+  /**
+   * Moves the epoch forward, re-queueing the estate for re-assessment.
+   *
+   * Xray's equivalent of a newly published Grype database. Called by the worker once the
+   * configured interval has elapsed, which is the only thing that makes a component
+   * assessed against Xray go stale.
+   */
+  async advanceAssessmentEpoch(): Promise<void> {
+    const current = await this.getProviderSettings();
+    await this.writeProviderSettings({ ...current, assessmentEpoch: new Date().toISOString() });
+  }
+
+  private async writeProviderSettings(next: StoredProviderSettings): Promise<void> {
+    await this.deps.db
+      .insert(setting)
+      .values({ key: SETTING_KEYS.vulnProvider, value: next })
+      .onConflictDoUpdate({
+        target: setting.key,
+        set: { value: next, updatedAt: new Date() },
+      });
+    this.providerCache = null;
+  }
+
   async vulnScanningEnabled(): Promise<boolean> {
     try {
       return (await this.getVulnSettings()).enabled;

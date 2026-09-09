@@ -44,7 +44,19 @@ export class XrayScanner implements VulnerabilityScanner {
       behaviour worth testing here is which packages get submitted and which get marked as
       assessed, and neither needs a socket to establish.
     */
-    private readonly deps: { logger: FastifyBaseLogger; client?: XrayClient },
+    private readonly deps: {
+      logger: FastifyBaseLogger;
+      client?: XrayClient;
+      /**
+       * The data set this scanner is matching against, as a timestamp.
+       *
+       * Xray publishes no database build date, so one is kept on this side: it is advanced
+       * when the connection changes and once per configured interval, and never otherwise.
+       * Using the current time instead would make every component look stale on every tick
+       * and re-scan the entire estate against a shared corporate server continuously.
+       */
+      assessmentEpoch: Date;
+    },
   ) {
     this.client = deps.client ?? new XrayClient(credentials);
   }
@@ -103,6 +115,18 @@ export class XrayScanner implements VulnerabilityScanner {
       error: reachable.reachable ? null : reachable.message,
       path: this.credentials.baseUrl,
     };
+  }
+
+  /**
+   * The epoch, not a database date.
+   *
+   * Deliberately not derived from anything that moves on its own. A component assessed at
+   * the current epoch is up to date until somebody changes the connection or the interval
+   * rolls over — which is the same contract Grype's build timestamp provides, expressed by
+   * the only side that can know it.
+   */
+  async watermark(): Promise<Date | null> {
+    return this.deps.assessmentEpoch;
   }
 
   async listingUrl(): Promise<string> {

@@ -42,7 +42,11 @@ import { VulnWorker } from "./modules/vulnerabilities/vuln-worker.js";
 import { VulnerabilityService } from "./modules/vulnerabilities/vulnerability.service.js";
 import { VulnReportService } from "./modules/vulnerabilities/vuln-report.service.js";
 import { createBlobStore, type BlobStore } from "./services/blob-store/index.js";
-import { createScanner, type VulnerabilityScanner } from "./services/scanner/index.js";
+import { type VulnerabilityScanner } from "./services/scanner/index.js";
+import {
+  ProviderScanner,
+  providerResolver,
+} from "./services/scanner/provider-scanner.js";
 
 /**
  * Wiring for the whole application.
@@ -202,7 +206,20 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
 
   // Vulnerability scanning. The scanner is a port so the wiring tests can supply a
   // fake and never spawn grype.
-  const scanner = overrides.scanner ?? createScanner(config);
+  /*
+    Resolved per call rather than constructed once. The provider is a runtime setting now, so
+    a scanner chosen at boot would keep talking to the database it was born with until
+    somebody restarted the process -- and nothing on the admin panel would say so.
+
+    Constructed after `settings`, which it reads on every resolve.
+  */
+  const scanner =
+    overrides.scanner ??
+    new ProviderScanner({
+      config,
+      logger,
+      resolve: providerResolver({ config, logger, settings }),
+    });
   const vulnerabilities = new VulnerabilityService({ db });
   /*
     These two guard each other: a database may not be replaced while a sweep holds it

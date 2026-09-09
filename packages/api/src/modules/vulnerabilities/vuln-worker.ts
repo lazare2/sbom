@@ -108,6 +108,31 @@ export class VulnWorker {
    */
   private async maybeUpdateDatabase(reason: "scheduled" | "startup" | "enable"): Promise<boolean> {
     const settings = await this.deps.settings.getVulnSettings();
+
+    /*
+      Under Xray there is nothing to download: the database is somebody else's and is
+      synchronised on their server. What this platform still has to decide is when its own
+      assessments have gone stale, and the answer is the same interval an administrator
+      already configured for database checks.
+
+      Advancing the epoch re-queues the estate, which is Xray's equivalent of a newly
+      published Grype build. Everything below this point is about fetching a local database
+      and does not apply.
+    */
+    if ((await this.deps.settings.vulnProvider()) === "xray") {
+      const epoch = await this.deps.settings.xrayAssessmentEpoch();
+      const elapsed = Date.now() - epoch.getTime();
+      if (elapsed >= settings.intervalHours * 60 * 60 * 1000) {
+        await this.deps.settings.advanceAssessmentEpoch();
+        this.deps.logger.info(
+          { intervalHours: settings.intervalHours },
+          "re-assessing the estate against JFrog Xray",
+        );
+        return true;
+      }
+      return false;
+    }
+
     const status = await this.deps.vulnDb.status();
 
     if (!status.scanner.available) {

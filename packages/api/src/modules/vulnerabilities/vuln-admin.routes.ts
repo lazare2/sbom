@@ -10,13 +10,20 @@ import {
   classifySuppressionSchema,
   createSuppressionSchema,
   idParamSchema,
+  setVulnProviderSchema,
+  testXrayConnectionSchema,
   updateVulnSettingsSchema,
+  updateXrayConnectionSchema,
   type VulnScanStatus,
+  type XrayCoverage,
+  type XrayDiagnosis,
 } from "@sbom/shared";
 import { BadRequestError, NotFoundError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
 import type { Actor } from "../admin/audit.service.js";
+import { XrayScanner } from "../../services/scanner/xray.js";
+import type { XrayCredentials } from "../../services/scanner/xray-client.js";
 
 /** The acting admin, denormalised onto every audit row this request writes. */
 function actorOf(request: FastifyRequest): Actor {
@@ -347,6 +354,216 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    * both about disk: the database is ~1.9 GB expanded, and in a container it has to be
    * on a mounted volume or a restart throws away a 141 MB download.
    */
+
+  // -------------------------------------------------------------------------
+  // Which vulnerability database is the authority
+  // -------------------------------------------------------------------------
+
+  /**
+   * The provider, the connection, and what the last probe found.
+   *
+   * The API token is never in this payload. The screen shows whether one is stored, which
+   * is the only thing an administrator needs in order to decide whether to replace it.
+   */
+  fastify.get("/provider", async (_request, reply) => {
+    return reply.send({
+      provider: await settings.vulnProvider(),
+      xray: await settings.xraySettings(),
+      /*
+        Whether a token could be stored at all. Without SECRETS_KEY the save is refused, and
+        an administrator deserves to know that before typing a credential into a form rather
+        than after.
+      */
+      secretsKeyConfigured: config.SECRETS_KEY !== undefined,
+    });
+  });
+
+  /**
+   * Switches the active database.
+   *
+   * Nothing is deleted and nothing is migrated. Every component carries the provider that
+   * assessed it, and the sweep's queue treats "assessed by someone else" as needing
+   * re-assessment — so the estate re-scans itself and switching back undoes it.
+   *
+   * The figures read as not assessed in the meantime, which is the honest state: the
+   * existing findings were produced by a database that is no longer the authority here.
+   */
+  fastify.put("/provider", async (request, reply) => {
+    const body = parseOrThrow(setVulnProviderSchema, request.body, "Body");
+    const before = await settings.vulnProvider();
+
+    if (body.provider === "xray") {
+      const credentials = await settings.xrayCredentials();
+      if (!credentials) {
+        throw new BadRequestError(
+          "Configure and test the JFrog Xray connection before making it the active database.",
+        );
+      }
+    }
+
+    await settings.setVulnProvider(body.provider);
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "vuln.provider_change",
+      targetType: "setting",
+      targetId: "vuln.provider",
+      metadata: { provider: { from: before, to: body.provider } },
+    });
+
+    return reply.send({ provider: body.provider, xray: await settings.xraySettings() });
+  });
+
+  /**
+   * Saves the Xray connection.
+   *
+   * Saving anything advances the assessment epoch, because different credentials may reach a
+   * different Xray holding different data — so every existing finding becomes of unknown
+   * provenance and the estate is re-assessed rather than trusted.
+   *
+   * The token is encrypted before storage and never returned. It is also absent from the
+   * audit row: the trail records that the connection changed and to which host, which is
+   * what it exists to answer, and a credential copied into a table nobody prunes is not.
+   */
+  fastify.put("/provider/xray", async (request, reply) => {
+    const body = parseOrThrow(updateXrayConnectionSchema, request.body, "Body");
+    const before = await settings.xraySettings();
+
+    await settings.setXrayConnection(body);
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "vuln.xray_connection_set",
+      targetType: "setting",
+      targetId: "vuln.provider",
+      metadata: {
+        baseUrl: { from: before.connection?.baseUrl ?? null, to: body.baseUrl },
+        username: { from: before.connection?.username ?? null, to: body.username },
+        tokenReplaced: body.token !== undefined && body.token !== "",
+        allowSelfSignedCertificate: body.allowSelfSignedCertificate,
+      },
+    });
+
+    return reply.send(await settings.xraySettings());
+  });
+
+  /**
+   * Tests the connection and measures what this Xray actually covers.
+   *
+   * Two questions in one action, because the second is worthless without the first and an
+   * administrator asking "does this work" means both. Reachability proves the URL and the
+   * credentials; the coverage probe asks about a known-vulnerable package in each ecosystem
+   * and reports the ones that answer nothing.
+   *
+   * That probe is the difference between a base-image figure that means something and one
+   * that was fabricated: Xray answers an ecosystem it holds no data for exactly the way it
+   * answers a clean package, and on a container image the operating-system packages are most
+   * of the component list.
+   *
+   * 200 either way. A relay that refuses is the answer to the question that was asked, not a
+   * failure of the request -- and a non-2xx would become an ApiError in the client, which
+   * keeps the status and discards the body carrying the diagnosis.
+   */
+  fastify.post("/provider/xray/test", async (request, reply) => {
+    const body = parseOrThrow(testXrayConnectionSchema, request.body ?? {}, "Body");
+
+    /*
+      Test what is on screen when it is supplied, falling back to what is stored. Without
+      that, the only way to try a connection is to save it first -- which overwrites a
+      working configuration with an unproven one and leaves nothing to fall back to.
+    */
+    let credentials: XrayCredentials | null;
+    if (body.connection && body.connection.token) {
+      credentials = {
+        baseUrl: body.connection.baseUrl,
+        username: body.connection.username,
+        token: body.connection.token,
+        allowSelfSigned: body.connection.allowSelfSignedCertificate,
+      };
+    } else {
+      credentials = await settings.xrayCredentials();
+      if (credentials && body.connection) {
+        // A saved token with an edited URL: keep the credential, use the new address.
+        credentials = {
+          ...credentials,
+          baseUrl: body.connection.baseUrl,
+          username: body.connection.username,
+          allowSelfSigned: body.connection.allowSelfSignedCertificate,
+        };
+      }
+    }
+
+    if (!credentials) {
+      return reply.send({
+        ok: false,
+        code: "not_configured",
+        summary: "No JFrog Xray connection is configured.",
+        hint: "Enter the URL, user name and API token, then test again.",
+        detail: null,
+        version: null,
+        coverage: null,
+      } satisfies XrayDiagnosis);
+    }
+
+    const scanner = new XrayScanner(credentials, {
+      logger: fastify.log,
+      assessmentEpoch: new Date(),
+    });
+
+    const availability = await scanner.availability();
+    if (!availability.available) {
+      const reason = availability.attempts[0]?.reason ?? "The connection failed.";
+      return reply.send({
+        ok: false,
+        code: "unreachable",
+        summary: `Could not reach JFrog Xray at ${credentials.baseUrl}.`,
+        hint: "Check the URL, the credentials, and whether this server is allowed to reach that host. A private certificate authority needs the checkbox below.",
+        detail: reason,
+        version: null,
+        coverage: null,
+      } satisfies XrayDiagnosis);
+    }
+
+    let coverage: XrayCoverage | null = null;
+    let probeError: string | null = null;
+    try {
+      coverage = await scanner.probeCoverage();
+      // Only stored when it describes the saved connection, not an unsaved experiment.
+      if (!body.connection?.token) await settings.setXrayCoverage(coverage);
+    } catch (error) {
+      probeError = error instanceof Error ? error.message : String(error);
+    }
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "vuln.xray_connection_test",
+      targetType: "setting",
+      targetId: "vuln.provider",
+      // Never the credentials. The host and the outcome are what the trail is for.
+      metadata: {
+        baseUrl: credentials.baseUrl,
+        ok: true,
+        version: availability.version,
+        covered: coverage?.covered.length ?? null,
+        uncovered: coverage?.uncovered.length ?? null,
+      },
+    });
+
+    return reply.send({
+      ok: true,
+      code: "ok",
+      summary: `Connected to JFrog Xray ${availability.version}.`,
+      hint: probeError
+        ? "The connection works, but the coverage probe failed, so which ecosystems this server holds data for is unknown."
+        : coverage && coverage.uncovered.length > 0
+          ? `No data came back for ${coverage.uncovered.join(", ")}. Packages in those ecosystems will be reported as not assessed rather than as clean.`
+          : null,
+      detail: probeError,
+      version: availability.version,
+      coverage,
+    } satisfies XrayDiagnosis);
+  });
+
   fastify.get("/storage", async (_request, reply) => {
     return reply.send({
       cacheDir: path.resolve(config.GRYPE_DB_CACHE_DIR),

@@ -80,6 +80,22 @@ export interface VulnerabilityScanner {
   availability(): Promise<ScannerAvailability>;
   dbStatus(): Promise<ScannerDbStatus>;
   /**
+   * The identity of the data set being matched against.
+   *
+   * The sweep's work queue is derived, not stored: a component needs re-assessment when it
+   * was last assessed against something older than this. For Grype that is the database
+   * build timestamp, so a newly published database re-queues the estate exactly once.
+   *
+   * It exists as its own method because the sweep used to read `dbStatus().builtAt` directly,
+   * which quietly made "has a local database with a build date" a precondition for scanning
+   * at all. A remote database has no build date to read — Xray publishes none — and faking
+   * one from the current time would re-queue the whole estate on every tick.
+   *
+   * Null means "cannot be determined", and the sweep refuses to run rather than guessing.
+   * Scanning against an unknown data set produces findings nothing can later invalidate.
+   */
+  watermark(): Promise<Date | null>;
+  /**
    * The exact URL consulted for updates, derived from the binary's supported schema.
    *
    * Exposed so the admin panel can show it even when nothing has failed yet — an

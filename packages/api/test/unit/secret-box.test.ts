@@ -51,10 +51,22 @@ describe("sealing a credential", () => {
   it("refuses a ciphertext that has been altered", () => {
     const sealed = sealSecret("token", KEY);
     const parts = sealed.split(".");
-    // Flip the last character of the body. Without authentication this would decrypt to
-    // corrupted bytes and be used; with it, the tag check fails first.
-    const body = parts[3]!;
-    parts[3] = body.slice(0, -1) + (body.endsWith("A") ? "B" : "A");
+
+    /*
+      A bit is flipped in the decoded bytes, not in the base64url text.
+
+      Editing the last character was the obvious way to do it and was flaky: base64url's
+      final character carries unused bits when the length is not a multiple of four, so
+      several different characters decode to identical bytes. Roughly one run in three left
+      the ciphertext unchanged and the test failed for the right reason about the wrong
+      thing.
+    */
+    const body = Buffer.from(parts[3]!, "base64url");
+    body[0] ^= 0x01;
+    parts[3] = body.toString("base64url");
+
+    // Without authentication this would decrypt to corrupted bytes and be used as a
+    // credential; the tag check refuses it first.
     expect(() => openSecret(parts.join("."), KEY)).toThrow(SecretBoxError);
   });
 
