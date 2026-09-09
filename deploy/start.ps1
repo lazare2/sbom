@@ -173,6 +173,7 @@ if (-not (Test-Path $envPath)) {
     Write-Step "First run — generating secrets for this deployment"
 
     $sessionSecret = New-Secret -Length 64
+    $secretsKey = New-Secret -Length 48
     $ingestToken = New-Secret -Length 64 -Hex
     # Comfortably over the 12-character minimum the API enforces.
     $adminPassword = New-Secret -Length 20
@@ -195,6 +196,9 @@ SBOM_PORT=$Port
 PUBLIC_URL=http://localhost:$Port
 
 SESSION_SECRET=$sessionSecret
+
+# Encrypts the JFrog Xray API token at rest. Only used if you connect Xray.
+SECRETS_KEY=$secretsKey
 
 # Bearer token for CI/CD: POST /api/v1/scans
 INGEST_TOKENS=ci:$ingestToken
@@ -231,6 +235,25 @@ These values are also in .env. Delete this file once you have stored them.
 }
 else {
     Write-Step "Using the existing .env"
+
+    <#
+      Add keys introduced after this deployment was first started.
+
+      The .env is written once and then left alone, which is right -- it holds generated
+      secrets nobody can recover. But it means a deployment upgraded from an older bundle
+      never gains a setting added since, and the symptom is a feature that refuses to save
+      with no obvious cause. Appending a missing key is the only step of an upgrade that
+      would otherwise have to be done by hand, on a machine where editing files is awkward.
+    #>
+    $existing = Get-Content $envPath -Raw
+    if ($existing -notmatch '(?m)^SECRETS_KEY=') {
+        Add-Content -Path $envPath -Encoding ascii -Value @"
+
+# Encrypts the JFrog Xray API token at rest. Added by an upgrade.
+SECRETS_KEY=$(New-Secret -Length 48)
+"@
+        Write-Note "Added SECRETS_KEY for the JFrog Xray connection"
+    }
     # An explicit -Port overrides what the file says, so the flag is not
     # silently ignored on a machine that has already been started once.
     if ($PSBoundParameters.ContainsKey('Port')) {

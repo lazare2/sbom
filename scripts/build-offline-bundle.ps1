@@ -157,6 +157,51 @@ foreach ($file in @("docker-compose.yml", "start.ps1", "start.sh", "README.md"))
     Write-Note $file
 }
 
+<#
+  The certificate directory, which compose bind-mounts.
+
+  Omitted from the bundle originally, on the assumption that Docker creates a missing
+  bind-mount source. It does -- tested -- so nothing was broken by its absence, which is
+  exactly why it went unnoticed. What was lost is the README inside it explaining where to
+  put a corporate root certificate, on the one kind of deployment most likely to need it.
+#>
+$caSource = Join-Path $deployDir "ca"
+if (Test-Path $caSource) {
+    $caTarget = Join-Path $bundleDir "ca"
+    New-Item -ItemType Directory -Path $caTarget -Force | Out-Null
+    Get-ChildItem $caSource -File | ForEach-Object {
+        Copy-Item $_.FullName (Join-Path $caTarget $_.Name)
+    }
+    Write-Note "ca/"
+}
+
+<#
+  A launcher that runs where start.ps1 cannot.
+
+  PowerShell's execution policy governs script *files*, not commands typed into a console.
+  On a machine set to AllSigned -- which is a real and reasonable corporate setting --
+  start.ps1 is refused outright no matter how it is invoked, and the first deployment of
+  this bundle was blocked by exactly that. A .cmd is not a PowerShell script, so it runs;
+  it then passes the work to PowerShell with a policy scoped to that one process.
+
+  -ExecutionPolicy Bypass affects only the child process. It changes nothing on the machine
+  and needs no administrator, which is why this is preferable to asking somebody to weaken
+  a policy their security team set.
+#>
+$launcher = @'
+@echo off
+REM Starts the SBOM platform on a machine whose PowerShell execution policy
+REM refuses script files. See start.ps1 for what actually happens.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" %*
+if errorlevel 1 (
+  echo.
+  echo Startup failed. The output above says why.
+  pause
+)
+'@
+$launcher | Out-File -FilePath (Join-Path $bundleDir "start.cmd") -Encoding ascii
+Write-Note "start.cmd (for machines where script files are blocked)"
+
 # The compose file resolves image tags from these, so a bundle built at one
 # version cannot accidentally start a differently-tagged image left on the host.
 @"
@@ -203,9 +248,14 @@ Write-Host "  $((Resolve-Path $bundleDir).Path)" -ForegroundColor White
 Write-Host ""
 Write-Host "On the offline machine:" -ForegroundColor Yellow
 Write-Host "  1. Copy the whole folder across" -ForegroundColor White
-Write-Host "  2. Windows:  .\start.ps1" -ForegroundColor White
+Write-Host "  2. Windows:  .\start.cmd    (or .\start.ps1)" -ForegroundColor White
 Write-Host "     Linux:    ./start.sh" -ForegroundColor White
 Write-Host "  3. Open http://localhost:8080 and sign in with CREDENTIALS.txt" -ForegroundColor White
+Write-Host ""
+Write-Note "start.cmd is there for machines whose PowerShell policy refuses script"
+Write-Note "files. It does the same thing; start.ps1 works where the policy allows it."
+Write-Note "Upgrading an existing deployment? Do NOT use 'docker compose down -v' --"
+Write-Note "the -v deletes the volumes holding every SBOM and the database."
 Write-Host ""
 Write-Note "No secrets are in this bundle. The start script generates them per machine."
 Write-Note "If you test-run it here first, delete the .env and CREDENTIALS.txt it writes"

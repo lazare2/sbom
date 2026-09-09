@@ -90,6 +90,7 @@ if [ ! -f .env ]; then
   step "First run — generating secrets for this deployment"
 
   SESSION_SECRET="$(rand_b64 64)"
+  SECRETS_KEY="$(rand_b64 48)"
   INGEST_TOKEN="$(rand_hex 64)"
   # Comfortably over the 12-character minimum the API enforces.
   ADMIN_PASSWORD="$(rand_b64 20)"
@@ -113,6 +114,9 @@ SBOM_PORT=$PORT
 PUBLIC_URL=http://localhost:$PORT
 
 SESSION_SECRET=$SESSION_SECRET
+
+# Encrypts the JFrog Xray API token at rest. Only used if you connect Xray.
+SECRETS_KEY=$SECRETS_KEY
 
 # Bearer token for CI/CD: POST /api/v1/scans
 INGEST_TOKENS=ci:$INGEST_TOKEN
@@ -148,6 +152,17 @@ EOF
   note "Wrote .env and CREDENTIALS.txt"
 else
   step "Using the existing .env"
+  # Add keys introduced after this deployment was first started. The .env is written once
+  # and then left alone -- it holds generated secrets nobody can recover -- so an upgraded
+  # deployment would otherwise never gain a setting added since, and the symptom is a
+  # feature that refuses to save with no obvious cause.
+  if ! grep -q '^SECRETS_KEY=' .env; then
+    printf '
+# Encrypts the JFrog Xray API token at rest. Added by an upgrade.
+SECRETS_KEY=%s
+' "$(rand_b64 48)" >> .env
+    note "Added SECRETS_KEY for the JFrog Xray connection"
+  fi
 fi
 
 # --- 3. start --------------------------------------------------------------
