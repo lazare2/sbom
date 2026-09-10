@@ -32,9 +32,20 @@ export const VULN_PROVIDER_LABELS: Record<VulnProvider, string> = {
  *
  * Narrow for the same reason the SMTP host is: this value is handed to an HTTP client with a
  * credential attached, so anything that could redirect where that credential goes has to be
- * rejected here rather than interpreted later. `https` is required unless the host is
- * loopback — sending a bearer token over plaintext to another machine is not a mistake worth
- * making convenient.
+ * rejected here rather than interpreted later.
+ *
+ * ## Why plaintext http is accepted
+ *
+ * This first refused `http` to anything but loopback, on the reasoning that a bearer token
+ * should not cross a network in the clear. That reasoning is sound and the rule was still
+ * wrong: Artifactory is very commonly published inside a corporate network on plain port 80,
+ * which is exactly the deployment this provider was written for. The rule did not protect
+ * that token, because there was no https listener to fall back to — it just made the feature
+ * unusable and reported the refusal as "validation failed".
+ *
+ * So the scheme is accepted and the exposure is *stated*, on the screen where the URL is
+ * entered, rather than being decided on the administrator's behalf by a validator that
+ * cannot see their network. `xrayUrlIsPlaintext` is what the screen warns from.
  */
 export const xrayBaseUrlSchema = z
   .string()
@@ -48,7 +59,7 @@ export const xrayBaseUrlSchema = z
     try {
       url = new URL(value);
     } catch {
-      fail('Must be a full URL, like "https://artifactory.example.org".');
+      fail('Must be a full URL including http:// or https://, like "https://artifactory.example.org".');
       return;
     }
 
@@ -58,13 +69,25 @@ export const xrayBaseUrlSchema = z
     }
     if (url.username || url.password) {
       fail("Enter the URL on its own. Credentials go in the fields below.");
-      return;
-    }
-    const loopback = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname);
-    if (url.protocol === "http:" && !loopback) {
-      fail("Use https. The API token is sent on every request and http would expose it.");
     }
   });
+
+/**
+ * Whether this URL sends the API token in the clear.
+ *
+ * Loopback is excluded because the traffic never reaches a network interface, so there is
+ * nothing to intercept and a warning there would be noise that teaches people to ignore the
+ * one that matters.
+ */
+export function xrayUrlIsPlaintext(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "http:") return false;
+    return !["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The connection, as an administrator enters it.

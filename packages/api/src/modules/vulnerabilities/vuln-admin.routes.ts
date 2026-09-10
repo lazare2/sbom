@@ -412,6 +412,30 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
           "Configure and test the JFrog Xray connection before making it the active database.",
         );
       }
+
+      /*
+        Reachable, not merely stored.
+
+        This used to check only that a connection existed, which let an administrator switch
+        to an Xray that answers nothing -- and the estate then reads "not assessed" everywhere
+        with the cause three screens away. That is the exact failure this provider is most
+        likely to hit in a corporate network, and the one with the worst silent outcome, so
+        the switch pays the cost of a round trip to prove the choice is usable.
+
+        Only the switch *to* Xray is gated. Returning to the local database must always be
+        possible, including from a broken Xray -- especially from a broken Xray.
+      */
+      const scanner = new XrayScanner(credentials, {
+        logger: fastify.log,
+        assessmentEpoch: new Date(),
+      });
+      const availability = await scanner.availability();
+      if (!availability.available) {
+        const reason = availability.attempts[0]?.reason ?? "The connection failed.";
+        throw new BadRequestError(
+          `Could not reach JFrog Xray at ${credentials.baseUrl}, so it cannot be made the active database. ${reason}`,
+        );
+      }
     }
 
     await settings.setVulnProvider(body.provider);

@@ -2918,6 +2918,125 @@ try {
     }
 
     # ======================================================================
+    <#
+      The error log.
+
+      Written from the error handler rather than from any route, so it is the one table whose
+      contents cannot be checked by calling the endpoint that fills it -- the way to test it
+      is to make a request fail on purpose and then go looking for the row.
+
+      What it guarantees is narrow and was learned the hard way: a rejected request must be
+      readable afterwards, by name of field, on a machine with no browser dev tools. Before
+      this, the API produced that sentence, serialised it, sent it, and every layer above
+      discarded it -- so a one-word configuration mistake could not be diagnosed at all.
+    #>
+    Write-Host ""
+    Write-Host "Error log" -ForegroundColor Cyan
+
+    $errorsUrl = "$adminUrl/errors"
+
+    Assert-That "records a rejected request, naming the field that was wrong" {
+        # Deliberately invalid: a URL with no scheme, which is the exact mistake that sent an
+        # administrator to the browser's network tab to find out what was wrong.
+        $p = New-JsonFile -Name "errlog-bad.json" -Data @{
+            baseUrl = "not-a-url-at-all"; username = "svc"; token = "t"
+            allowSelfSignedCertificate = $false
+        }
+        $bad = Invoke-Api @("-X", "PUT", "$adminUrl/vuln/provider/xray", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($bad.Status -ne 400) { Show-Body $bad 400; return $false }
+
+        # The write is deliberately not awaited by the error handler, so a failing request is
+        # never made slower or hung by its own logging. That makes the row eventually
+        # consistent by design, hence the short retry rather than a single read.
+        $row = $null
+        foreach ($attempt in 1..10) {
+            $r = Invoke-Api @("$errorsUrl`?path=provider/xray&pageSize=20", "-b", $readJar)
+            if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+            $row = @($r.Json.items) | Where-Object { $_.code -eq "validation_failed" } | Select-Object -First 1
+            if ($row) { break }
+            Start-Sleep -Milliseconds 300
+        }
+        if (-not $row) {
+            Write-Host "        no row was recorded for the rejected request" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        # The whole point: the field, and the reason, not just "validation failed".
+        return $row.statusCode -eq 400 -and
+               $row.method -eq "PUT" -and
+               $null -ne $row.details.baseUrl -and
+               $row.actorEmail -eq $adminEmail
+    }
+
+    Assert-That "never records the API token, even when the request carrying it was rejected" {
+        <#
+          The log is durable and readable by every administrator, which makes it the worst
+          possible place for a credential. No schema quotes a secret back today, so this is
+          asserted against the whole recent log rather than one row -- what is being checked
+          is the absence of a class of value, not the behaviour of one endpoint.
+        #>
+        $secret = "errlog-token-$([guid]::NewGuid().ToString('N'))"
+        $p = New-JsonFile -Name "errlog-secret.json" -Data @{
+            baseUrl = "still-not-a-url"; username = ""; token = $secret
+            allowSelfSignedCertificate = $false
+        }
+        $bad = Invoke-Api @("-X", "PUT", "$adminUrl/vuln/provider/xray", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($bad.Status -ne 400) { Show-Body $bad 400; return $false }
+        Start-Sleep -Milliseconds 600
+
+        $r = Invoke-Api @("$errorsUrl`?pageSize=100", "-b", $readJar)
+        if ($r.Status -ne 200) { return $false }
+        if ($r.Body -like "*$secret*") {
+            Write-Host "        the error log contained the submitted token" -ForegroundColor DarkYellow
+            return $false
+        }
+        return $true
+    }
+
+    Assert-That "does not fill itself with expired sessions" {
+        <#
+          An error log nobody can bear to read is the same as no error log. An unauthenticated
+          request is what every idle browser tab produces, and recording those would bury the
+          handful of rows that mean something.
+        #>
+        $anon = Invoke-Api @("$adminUrl/audit-log")
+        if ($anon.Status -ne 401) { Show-Body $anon 401; return $false }
+        Start-Sleep -Milliseconds 600
+
+        $r = Invoke-Api @("$errorsUrl`?pageSize=100", "-b", $readJar)
+        $unauthorized = @($r.Json.items) | Where-Object { $_.code -eq "unauthorized" }
+        if ($unauthorized.Count -gt 0) {
+            Write-Host "        $($unauthorized.Count) expired-session rows were recorded" -ForegroundColor DarkYellow
+            return $false
+        }
+        return $true
+    }
+
+    Assert-That "summarises the log so an empty one is readable" {
+        # "Nothing has failed" and "nothing is being recorded" look identical from an empty
+        # table, and the first is the good news.
+        $r = Invoke-Api @("$errorsUrl/summary", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        return $r.Json.total -ge 1 -and $r.Json.retentionDays -ge 1 -and $null -ne $r.Json.oldestOccurredAt
+    }
+
+    Assert-That "clearing the log is itself recorded, with how much was discarded" {
+        $before = Invoke-Api @("$errorsUrl/summary", "-b", $readJar)
+        $r = Invoke-Api @("-X", "DELETE", $errorsUrl, "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        if ($r.Json.removed -lt 1) { return $false }
+
+        $after = Invoke-Api @("$errorsUrl/summary", "-b", $readJar)
+        if ($after.Json.total -ne 0) { return $false }
+
+        # Diagnostics can be discarded; the fact that somebody discarded them cannot.
+        $audit = Invoke-Api @("$adminUrl/audit-log?action=error_log.clear&pageSize=5", "-b", $readJar)
+        $entry = @($audit.Json.items)[0]
+        return $null -ne $entry -and $entry.metadata.removed -ge 1 -and
+               $entry.metadata.removed -le $before.Json.total
+    }
+
+    # ======================================================================
     Write-Host ""
     Write-Host "Table sorting" -ForegroundColor Cyan
 
@@ -3895,15 +4014,50 @@ try {
         return $r.Status -eq 400
     }
 
-    Assert-That "refuses a connection URL that is not https" {
-        # The API token rides on every request. Plain http to another machine would put it on
-        # the wire, so it is rejected at the schema rather than warned about later.
+    Assert-That "accepts a plain http URL, which is how Artifactory is often published internally" {
+        <#
+          This was refused until it was found to break the only server it was written for.
+
+          The reasoning for refusing was sound -- a bearer token should not cross a network in
+          the clear -- and the rule was still wrong, because there was no https listener to
+          fall back to. It did not protect the token; it made the provider unusable and
+          reported the refusal as "validation failed" with no field named. The exposure is now
+          stated on the screen, which can be read by someone who knows their own network.
+        #>
         $p = New-JsonFile -Name "xray-http.json" -Data @{
-            baseUrl = "http://xray.example.org"; username = "svc"; token = "t"
+            baseUrl = "http://xray-smoke-plaintext.invalid"; username = "svc"; token = "t"
             allowSelfSignedCertificate = $false
         }
         $r = Invoke-Api @("-X", "PUT", "$vulnUrl/provider/xray", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
-        return $r.Status -eq 400
+        if ($r.Status -ne 200) { Show-Body $r 200 }
+        return $r.Status -eq 200
+    }
+
+    Assert-That "refuses a malformed URL and says which field was wrong" {
+        <#
+          Two guarantees in one. The narrowing that remains: the value is handed to an HTTP
+          client with a credential attached, so it must be a URL and must not carry its own
+          identity. And the rejection must name the field -- a 400 whose body says only
+          "Body validation failed" is what sent an administrator to the browser's network tab
+          to find out that a URL needed a scheme.
+        #>
+        $bare = New-JsonFile -Name "xray-bare.json" -Data @{
+            baseUrl = "artifactory.example.org"; username = "svc"; token = "t"
+            allowSelfSignedCertificate = $false
+        }
+        $r1 = Invoke-Api @("-X", "PUT", "$vulnUrl/provider/xray", "-H", $jsonCt, "--data-binary", "@$bare", "-b", $readJar)
+        if ($r1.Status -ne 400) { Show-Body $r1 400; return $false }
+        if (-not $r1.Json.error.details.baseUrl) {
+            Write-Host "        the rejection did not name baseUrl" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $creds = New-JsonFile -Name "xray-creds.json" -Data @{
+            baseUrl = "https://someone:secret@artifactory.example.org"; username = "svc"; token = "t"
+            allowSelfSignedCertificate = $false
+        }
+        $r2 = Invoke-Api @("-X", "PUT", "$vulnUrl/provider/xray", "-H", $jsonCt, "--data-binary", "@$creds", "-b", $readJar)
+        return $r2.Status -eq 400
     }
 
     Assert-That "stores a connection without ever handing the token back" {
@@ -3971,8 +4125,32 @@ try {
         # a base-image zero means "clean" under one provider and "nobody looked" under another.
         $r = Invoke-Api @("$vulnUrl/status", "-b", $readJar)
         if ($r.Status -ne 200) { Show-Body $r 200; return $false }
-        return $r.Json.provider.active -eq "grype" -and
+        return $r.Json.provider.active -eq $script:providerBefore -and
                @($r.Json.provider.uncoveredEcosystems).Count -eq 0
+    }
+
+    Assert-That "leaves the active database as it found it" {
+        <#
+          The provider decides which database every figure on this platform comes from, so a
+          test run that changes it and walks away leaves the estate assessed against something
+          nobody chose -- and reading "not assessed" everywhere until someone notices.
+
+          This is a no-op on a healthy run, because selecting Xray is refused unless the
+          server actually answers. It is here for the run where that is not true: the
+          assertion above was previously written against a hardcoded "grype", so a run that
+          had switched the provider reported the *symptom* two assertions later and left the
+          cause in place.
+        #>
+        if (-not $script:providerBefore) { return $true }
+        $now = Invoke-Api @("$vulnUrl/provider", "-b", $readJar)
+        if ($now.Json.provider -eq $script:providerBefore) { return $true }
+
+        $p = New-JsonFile -Name "provider-restore.json" -Data @{ provider = $script:providerBefore }
+        $r = Invoke-Api @("-X", "PUT", "$vulnUrl/provider", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        Write-Host "        restored the active database to $($script:providerBefore)" -ForegroundColor DarkGray
+        $after = Invoke-Api @("$vulnUrl/provider", "-b", $readJar)
+        return $after.Json.provider -eq $script:providerBefore
     }
 
     # ======================================================================

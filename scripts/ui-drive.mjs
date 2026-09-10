@@ -102,6 +102,19 @@ function watch(target, prefix = "") {
     ) {
       return;
     }
+    /*
+     * The rejected Xray URL in step 22-err.
+     *
+     * Same reasoning as the mail server above, and the same narrow match: that step exists
+     * to prove a refusal is *explained*, so the refusal itself is the expected outcome. A
+     * blanket /400/ filter would hide the next genuine one.
+     */
+    if (
+      /400/.test(msg.text()) &&
+      /\/admin\/vuln\/provider\/xray(\?|$)/.test(msg.location()?.url ?? "")
+    ) {
+      return;
+    }
     problems.push(`${prefix}console.error: ${msg.text()}`);
   });
 
@@ -1294,6 +1307,77 @@ await expectText("Created account", "the create entry from step 18");
 await expectText(EMAIL, "the actor");
 await shot("admin-audit");
 
+/*
+  22-err. The error log.
+
+  The page exists because of a failure this drive can reproduce exactly: a form that says
+  "Body validation failed" and nothing else. So the step causes a real rejection through the
+  real UI, then checks both places the reason has to appear -- inline on the form, and in the
+  error log afterwards.
+
+  Asserting the inline message is the more important half. The field-level reasons were being
+  produced by the API, serialised, sent, parsed by the client, and then dropped at render, so
+  every layer looked correct in isolation and the screen was still unreadable. Only a browser
+  sees that.
+*/
+log("22-err. a rejected form explains itself, and the rejection is logged");
+{
+  await page.goto(`${BASE}/admin/vulnerabilities`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1000);
+
+  // A URL with no scheme: the exact mistake that produced an unexplained refusal.
+  await page.locator("#xray-url").fill("repository.example.com");
+  await page.locator("#xray-user").fill("ui-drive-svc");
+  await page.locator("#xray-token").fill("ui-drive-token");
+  await page.waitForTimeout(200);
+  await page.getByRole("button", { name: "Save connection" }).click();
+  await page.waitForTimeout(2500);
+
+  const shown = await page.locator("body").innerText();
+  if (!/Body validation failed|validation failed/i.test(shown)) {
+    problems.push("saving an invalid Xray URL produced no visible error at all");
+  } else if (!/http:\/\/ or https:\/\//.test(shown)) {
+    // The whole point of the fix: the summary alone is not an explanation.
+    problems.push("the rejected URL was reported without saying what was wrong with it");
+  } else {
+    log("  OK   the form names the field and the reason, not just 'validation failed'");
+  }
+  await shot("admin-vuln-validation-detail");
+
+  // A plain http host must now be accepted, since that is how Artifactory is commonly
+  // published internally -- refusing it is what made this provider unusable.
+  await page.locator("#xray-url").fill("http://repository.example.com");
+  await page.waitForTimeout(400);
+  const warned = await page.locator("body").innerText();
+  if (!/unencrypted/i.test(warned)) {
+    problems.push("a plain http Xray URL is accepted without warning that the token is exposed");
+  } else {
+    log("  OK   a plaintext URL is allowed and the exposure is stated");
+  }
+
+  // Reloaded so nothing typed above leaks into a later step. Nothing was saved: the URL that
+  // was submitted was rejected, and the valid one was never submitted.
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+
+  await page.goto(`${BASE}/admin/errors`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+  await expectText("Error log", "the error log page");
+
+  const logged = await page.locator("body").innerText();
+  if (!/provider\/xray/.test(logged)) {
+    problems.push("the rejected request was not recorded in the error log");
+  } else if (!/validation_failed/.test(logged)) {
+    problems.push("the error log recorded the request without its error code");
+  } else {
+    log("  OK   the rejection is readable afterwards, without developer tools");
+  }
+  if (/ui-drive-token/.test(logged)) {
+    problems.push("the error log page displayed the submitted API token");
+  }
+  await shot("admin-error-log");
+}
+
 // --- 22b. vulnerability scanning ---------------------------------------------
 /*
  * Drives the feature through the real UI, including the state that matters most: with
@@ -2412,6 +2496,8 @@ const OVERFLOW_ROUTES = [
   // rather than the empty state.
   listUrl.replace(BASE, ""),
   "/admin/audit",
+  // Wide rows: a method, a full path, a code and a message all on one line.
+  "/admin/errors",
 ];
 for (const route of OVERFLOW_ROUTES) {
   await darkPage.goto(`${BASE}${route}`, { waitUntil: "networkidle" });

@@ -37,6 +37,67 @@ export interface AuditLogEntry {
   createdAt: string;
 }
 
+// --- API error log ----------------------------------------------------------
+
+/**
+ * Sortable columns of the error log. Newest first, for the same reason as the audit trail:
+ * it is opened to answer "what just failed".
+ */
+export const apiErrorSort = defineSortTable(
+  { occurredAt: "date", statusCode: "number", code: "text", path: "text" } as const,
+  "occurredAt",
+);
+
+/**
+ * Which failures to show.
+ *
+ * `serverOnly` exists because the two audiences want opposite halves. Somebody configuring a
+ * screen wants their own 400s, which are the majority and are mostly self-inflicted;
+ * somebody investigating a broken deployment wants the 5xx, which are rare and are the
+ * platform's own fault. One list containing both, with no way to separate them, serves
+ * neither.
+ */
+export const listApiErrorsQuerySchema = paginationQuerySchema
+  .extend({
+    code: z.string().trim().max(64).optional(),
+    /** Exact status, e.g. 400. */
+    statusCode: z.coerce.number().int().min(400).max(599).optional(),
+    /** Only 5xx — the platform's own failures, as opposed to a rejected request. */
+    serverOnly: z.coerce.boolean().optional(),
+    /** Substring match on the path, for narrowing to one screen's endpoint. */
+    path: z.string().trim().max(200).optional(),
+  })
+  .merge(apiErrorSort.querySchema);
+export type ListApiErrorsQuery = z.infer<typeof listApiErrorsQuerySchema>;
+
+export interface ApiErrorEntry {
+  id: string;
+  occurredAt: string;
+  method: string;
+  path: string;
+  statusCode: number;
+  code: string;
+  message: string;
+  /**
+   * Field path to the reasons it was rejected. Null when the failure had no fields — a 500,
+   * or a refusal that is about the request as a whole rather than one value in it.
+   */
+  details: Record<string, string[]> | null;
+  actorUserId: string | null;
+  /** Denormalised, so the row stays readable after the account is deleted. */
+  actorEmail: string | null;
+}
+
+/** What the admin screen shows above the list, so an empty list is readable. */
+export interface ApiErrorLogSummary {
+  /** Rows kept at all. Zero with `retentionDays` set means nothing has failed lately. */
+  total: number;
+  serverErrors: number;
+  retentionDays: number;
+  /** Null when the log is empty, which is different from "the log is not recording". */
+  oldestOccurredAt: string | null;
+}
+
 // --- CI ingest tokens -------------------------------------------------------
 
 export const createIngestTokenRequestSchema = z.object({

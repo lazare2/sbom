@@ -1026,6 +1026,58 @@ export const auditLog = pgTable(
   ],
 );
 
+/**
+ * Requests the API refused or failed, kept so a failure can be read after the fact.
+ *
+ * Distinct from `audit_log`, which records what an administrator successfully *did*. This
+ * records what did not work, and exists because the platform is routinely deployed on a
+ * machine with no developer tooling: when a screen said "Body validation failed", the field
+ * that was actually rejected could only be seen in the browser's network tab, and the server
+ * logged nothing but the status code.
+ *
+ * ## Not append-only, unlike the audit trail
+ *
+ * The audit trail is evidence and must never be pruned. This is diagnostics, and unbounded
+ * growth on a long-running deployment is a real cost -- a stuck CI pipeline can produce
+ * thousands of identical rows overnight. Rows older than the retention window are deleted,
+ * and an administrator can clear the table outright.
+ *
+ * ## What must never land here
+ *
+ * No request bodies, no headers, no credentials. `details` carries only the field-path to
+ * message map that validation produces -- names and reasons, never submitted values -- and
+ * is redacted by field name on the way in so a future schema whose message quotes what it
+ * received cannot turn this into a log of secrets.
+ */
+export const apiError = pgTable(
+  "api_error",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    method: text("method").notNull(),
+    /** Path and query. Query values named like a secret are redacted before storage. */
+    path: text("path").notNull(),
+    statusCode: integer("status_code").notNull(),
+    /** The platform's own error code, e.g. `validation_failed`, not an HTTP phrase. */
+    code: text("code").notNull(),
+    message: text("message").notNull(),
+    /** Field path to messages, for a rejected body. NULL when the failure had no fields. */
+    details: jsonb("details").$type<Record<string, string[]>>(),
+    /**
+     * Who hit it. Denormalised like the audit trail so the row still means something after
+     * the account is deleted -- and null for an unauthenticated or CI request, which is
+     * itself worth seeing.
+     */
+    actorUserId: uuid("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email"),
+  },
+  (t) => [
+    index("api_error_occurred_idx").on(t.occurredAt.desc()),
+    index("api_error_code_idx").on(t.code),
+    index("api_error_status_idx").on(t.statusCode),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Vulnerabilities
 // ---------------------------------------------------------------------------

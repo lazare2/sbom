@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ScanSource } from "@sbom/shared";
 import { STATUS_LABELS } from "../lib/format.ts";
+import { ApiError } from "../lib/api.ts";
 
 /**
  * Shared primitives.
@@ -768,13 +769,65 @@ export function SecretReveal({ label, value, note }: { label: string; value: str
   );
 }
 
-/** Inline error for a form submission, distinct from the page-level ErrorBanner. */
+/**
+ * Inline error for a form submission, distinct from the page-level ErrorBanner.
+ *
+ * The field-level reasons matter more than the summary. A rejected body arrives as
+ * "Body validation failed" plus a map of which field failed and why — and rendering only the
+ * summary throws away the entire useful half of a message the API went to the trouble of
+ * writing. That is what made a rejected SMTP host and a rejected Xray URL both read as an
+ * unexplained refusal, with the actual sentence sitting unread in the response.
+ */
 export function FormError({ error }: { error: unknown }) {
   if (!error) return null;
   const message = error instanceof Error ? error.message : "Something went wrong";
+  const fields = error instanceof ApiError ? error.fieldErrors : {};
+  const entries = Object.entries(fields);
+
   return (
     <div role="alert" className="rounded-md border border-danger bg-danger-subtle px-3 py-2 text-xs text-danger">
       {message}
+      {entries.length > 0 ? (
+        <ul className="mt-1.5 space-y-1">
+          {entries.map(([field, messages]) => (
+            <li key={field}>
+              {/* The path as the API names it. "_" is its key for a whole-body issue, which
+                  has no field to point at. */}
+              {field === "_" ? null : (
+                <span className="font-medium">{humaniseFieldPath(field)}: </span>
+              )}
+              {messages.join(" ")}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
+}
+
+/** Words that look wrong in sentence case. Only acronyms — see `humaniseFieldPath`. */
+const ACRONYMS = new Set(["url", "id", "api", "smtp", "tls", "ssl", "ca", "cve", "sbom", "ci"]);
+
+/**
+ * `baseUrl` -> `Base URL`. Cosmetic.
+ *
+ * Deliberately not a map of field names to labels: one that has to be extended for every new
+ * field degrades to a raw path for the newest one, which is the case where a reader most
+ * needs help. Acronyms are a closed set rather than a growing list, so they are safe to
+ * enumerate — and a missing one merely reads as `Url`, not as `connection.baseUrl`.
+ */
+function humaniseFieldPath(path: string): string {
+  const leaf = path.split(".").pop() ?? path;
+  const words = leaf
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .split(" ")
+    .filter(Boolean);
+
+  return words
+    .map((word, index) => {
+      if (ACRONYMS.has(word.toLowerCase())) return word.toUpperCase();
+      return index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word.toLowerCase();
+    })
+    .join(" ");
 }

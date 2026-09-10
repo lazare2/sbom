@@ -8,6 +8,8 @@ import type {
   ApplicationGroupSummary,
   ApplicationSummary,
   AttributeDefinition,
+  ApiErrorEntry,
+  ApiErrorLogSummary,
   AuditLogEntry,
   BulkSearchResult,
   ComponentRef,
@@ -107,6 +109,8 @@ export const queryKeys = {
   userApplicationAccess: (id: string) => ["admin", "user-application-access", id] as const,
   environmentComparison: ["admin", "environment-comparison"] as const,
   auditLog: (params: Record<string, unknown>) => ["admin", "audit-log", params] as const,
+  apiErrors: (params: Record<string, unknown>) => ["admin", "errors", params] as const,
+  apiErrorSummary: ["admin", "errors", "summary"] as const,
   ingestTokens: ["admin", "ingest-tokens"] as const,
   // --- vulnerabilities ---
   vulnStatus: ["vuln", "status"] as const,
@@ -649,6 +653,28 @@ export function useAuditLog(params: Record<string, unknown>) {
     queryKey: queryKeys.auditLog(params),
     queryFn: () => api.get<Paginated<AuditLogEntry>>(`/admin/audit-log${toQueryString(params)}`),
     placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * Requests the API refused or failed.
+ *
+ * Separate from the audit trail, which records what an administrator successfully did. This
+ * answers the other question: why a screen said no.
+ */
+export function useApiErrors(params: Record<string, unknown>) {
+  return useQuery({
+    queryKey: queryKeys.apiErrors(params),
+    queryFn: () => api.get<Paginated<ApiErrorEntry>>(`/admin/errors${toQueryString(params)}`),
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** The counts above the list, so an empty log reads as good news rather than as a broken page. */
+export function useApiErrorSummary() {
+  return useQuery({
+    queryKey: queryKeys.apiErrorSummary,
+    queryFn: () => api.get<ApiErrorLogSummary>("/admin/errors/summary"),
   });
 }
 

@@ -10,6 +10,7 @@ import {
   createIngestTokenRequestSchema,
   createUserRequestSchema,
   idParamSchema,
+  listApiErrorsQuerySchema,
   listAuditLogQuerySchema,
   listMaliciousHistoryQuerySchema,
   listUsersQuerySchema,
@@ -78,6 +79,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     maliciousFeed,
     attributeDefinitions,
     audit,
+    apiErrors,
     ingestTokens,
     sbomBackfill,
     settings,
@@ -594,5 +596,38 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/audit-log", async (request, reply) => {
     const query = parseOrThrow(listAuditLogQuerySchema, request.query, "Query");
     return reply.send(await audit.list(query));
+  });
+
+  // -------------------------------------------------------------------------
+  // Error log
+  // -------------------------------------------------------------------------
+  //
+  // Deliberately separate from the audit trail rather than a filter on it. The audit trail
+  // is evidence of what an administrator did and is never pruned; this is diagnostics of
+  // what failed, and is. Merging them would mean either pruning the evidence or keeping
+  // every rejected request forever.
+
+  fastify.get("/errors", async (request, reply) => {
+    const query = parseOrThrow(listApiErrorsQuerySchema, request.query, "Query");
+    return reply.send(await apiErrors.list(query));
+  });
+
+  fastify.get("/errors/summary", async (_request, reply) => {
+    return reply.send(await apiErrors.summary());
+  });
+
+  fastify.delete("/errors", async (request, reply) => {
+    const user = getUser(request);
+    const removed = await apiErrors.clear();
+    await audit.record({
+      actor: { id: user.id, email: user.email },
+      action: "error_log.clear",
+      targetType: "setting",
+      targetId: "error.log",
+      // The count is the whole outcome: clearing an empty log and discarding a thousand
+      // failures are the same action and want telling apart.
+      metadata: { removed },
+    });
+    return reply.send({ removed });
   });
 }

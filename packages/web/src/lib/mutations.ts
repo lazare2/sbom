@@ -685,6 +685,23 @@ export function useRunVulnSweep() {
   });
 }
 
+/**
+ * Empty the error log.
+ *
+ * Offered because the log is diagnostics rather than evidence: once a problem is fixed, the
+ * rows describing it are noise that hides the next one. Clearing is itself recorded in the
+ * audit trail, with the number of rows discarded.
+ */
+export function useClearApiErrors() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete<{ removed: number }>("/admin/errors"),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "errors"] });
+    },
+  });
+}
+
 export function useCreateSuppression() {
   const qc = useQueryClient();
   return useMutation({

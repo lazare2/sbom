@@ -11,6 +11,7 @@ import type {
 } from "@sbom/shared";
 import {
   requiresJustification,
+  xrayUrlIsPlaintext,
   vexJustifications,
   vexStatuses,
   VEX_JUSTIFICATION_LABELS,
@@ -256,6 +257,20 @@ function ProviderCard() {
               />
             </div>
           </div>
+
+          {xrayUrlIsPlaintext(baseUrl) ? (
+            /*
+              Stated, not enforced. Refusing http here is what previously made this feature
+              unusable against an Artifactory published on port 80 — which is a common way to
+              run it inside a corporate network, and the exact server this was built for. The
+              administrator can see their own network; this validator cannot.
+            */
+            <p className="text-[11px] text-warn">
+              This is a plain <code>http</code> address, so the user name and API token are sent
+              over the network unencrypted on every request. Fine on a trusted internal network;
+              use <code>https</code> if your Xray offers it.
+            </p>
+          ) : null}
 
           {allowSelfSigned ? (
             /* What the checkbox gives up, said plainly. Silently disabling verification

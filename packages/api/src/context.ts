@@ -9,6 +9,7 @@ import { AdminApplicationsService } from "./modules/admin/applications.admin.ser
 import { AdminUsersService } from "./modules/admin/users.service.js";
 import { AttributeDefinitionsService } from "./modules/admin/attribute-definitions.service.js";
 import { AuditService } from "./modules/admin/audit.service.js";
+import { ApiErrorService } from "./modules/admin/api-error.service.js";
 import { AnalyticsService } from "./modules/analytics/analytics.service.js";
 import { ApplicationsService } from "./modules/applications/applications.service.js";
 import { BulkSearchService } from "./modules/components/bulk-search.service.js";
@@ -125,6 +126,11 @@ export interface AppContext {
   maliciousWorker: MaliciousWorker;
   // Write side. Every one of these is reachable only through `requireAdmin`.
   audit: AuditService;
+  /**
+   * The record of failed requests. Written from the error handler rather than from a route,
+   * which is why it is constructed early and depends on nothing but the database.
+   */
+  apiErrors: ApiErrorService;
   adminUsers: AdminUsersService;
   adminApplications: AdminApplicationsService;
   adminGroups: GroupsAdminService;
@@ -305,6 +311,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
 
   // Write side.
   const audit = new AuditService({ db });
+  const apiErrors = new ApiErrorService({ db });
   const adminUsers = new AdminUsersService({ db, sessions, audit, environments });
   const adminApplications = new AdminApplicationsService({ db, audit, applications });
   const adminGroups = new GroupsAdminService({ db, audit, groups });
@@ -356,6 +363,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     maliciousWorker,
     exports,
     audit,
+    apiErrors,
     adminUsers,
     adminApplications,
     adminGroups,

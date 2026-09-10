@@ -23,6 +23,7 @@ import { AdminApplicationsPage } from "./pages/admin/AdminApplicationsPage.tsx";
 import { AdminGroupsPage } from "./pages/admin/AdminGroupsPage.tsx";
 import { AdminAttributesPage } from "./pages/admin/AdminAttributesPage.tsx";
 import { AdminAuditPage } from "./pages/admin/AdminAuditPage.tsx";
+import { AdminErrorsPage } from "./pages/admin/AdminErrorsPage.tsx";
 import { AdminLayout } from "./pages/admin/AdminLayout.tsx";
 import { AdminPendingPage } from "./pages/admin/AdminPendingPage.tsx";
 import { AdminConfigurationPage } from "./pages/admin/AdminConfigurationPage.tsx";
@@ -143,6 +144,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="vulnerabilities" element={<AdminVulnerabilitiesPage />} />
                 <Route path="malicious" element={<AdminMaliciousPage />} />
                 <Route path="audit" element={<AdminAuditPage />} />
+                <Route path="errors" element={<AdminErrorsPage />} />
               </Route>
 
               <Route path="*" element={<NotFoundPage />} />
