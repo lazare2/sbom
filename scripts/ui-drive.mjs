@@ -792,6 +792,11 @@ await page.getByRole("button", { name: "Create account" }).click();
 await page.waitForTimeout(1200);
 await expectText("Shown once and never again", "the one-time-password warning");
 await expectText(`Password for ${TEST_USER}`);
+// Kept for step 18z, which signs in as this account. The value is shown exactly once.
+const TEST_USER_TEMP_PASSWORD = (await page.locator("code.select-all").first().innerText()).trim();
+if (!TEST_USER_TEMP_PASSWORD || TEST_USER_TEMP_PASSWORD.length < 12) {
+  problems.push("could not read the generated password out of the dialog");
+}
 await shot("admin-user-created");
 await page.getByRole("button", { name: "Done" }).click();
 await page.waitForTimeout(800);
@@ -799,6 +804,89 @@ await page.waitForLoadState("networkidle");
 await expectText("temp password", "the must-change-password badge");
 await shot("admin-users-after-create");
 
+
+/*
+  18z. The account an administrator just created can actually get in.
+
+  This is the whole point of creating one, and it was broken in a way no API test could see.
+  An admin-issued password sets `mustChangePassword`, and while that flag is set the API
+  refuses every authenticated route except whoami, change-password and logout. The
+  change-password screen was nested inside the application shell, whose EnvironmentProvider
+  fetches the environment list -- one of the refused routes. So the page rendered as that
+  refusal's error banner and a Retry button that could never succeed, and the account was
+  permanently unable to reach the only form that would release it.
+
+  Every layer was individually correct: the API allowed the route, the router redirected to
+  it, the page existed. Only a browser signing in as a genuinely new user shows it.
+
+  The run ends signed back in as the administrator, because everything after this depends on
+  that session.
+*/
+log("18z. a new account can change its password and get in");
+{
+  await page.goto(`${BASE}/applications`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL(/\/login/, { timeout: 10000 });
+  await page.waitForLoadState("networkidle");
+
+  await login(page, TEST_USER, TEST_USER_TEMP_PASSWORD);
+  await page.waitForTimeout(2500);
+  await page.waitForLoadState("networkidle");
+
+  if (!/\/change-password/.test(page.url())) {
+    problems.push(`a new account was not sent to the change-password screen (at ${page.url()})`);
+  }
+
+  /*
+    The form itself, not a message about it. The broken version still said the right words --
+    it rendered the API's "must be changed before you can continue" as an error -- so
+    asserting on that text would have passed against a screen with no way forward. What
+    distinguishes working from broken is whether there is something to type into.
+  */
+  const newPasswordField = page.locator("#new-password");
+  if ((await newPasswordField.count()) === 0) {
+    problems.push("the forced change-password screen shows no password form");
+  } else {
+    log("  OK   the form is on screen, not an error about it");
+  }
+  const body = await page.locator("body").innerText();
+  if (/Retry/.test(body)) {
+    problems.push("the forced change-password screen offers Retry instead of a form");
+  }
+  // The way out, for someone who cannot type the password they were sent.
+  if (!/Sign out instead/.test(body)) {
+    problems.push("the forced change-password screen offers no way to sign out");
+  }
+  await shot("forced-password-change");
+
+  const CHOSEN = `ui-drive-chosen-${SUFFIX}-aA1!`;
+  await page.locator("#current-password").fill(TEST_USER_TEMP_PASSWORD);
+  await newPasswordField.fill(CHOSEN);
+  await page.locator("#confirm-password").fill(CHOSEN);
+  await page.getByRole("button", { name: "Change password" }).click();
+
+  // Cleared flag, refetched session, then the redirect. Generous: three round trips.
+  await page.waitForTimeout(5000);
+  await page.waitForLoadState("networkidle");
+
+  if (/\/change-password/.test(page.url())) {
+    problems.push(`still stranded on the change-password screen after changing it (${page.url()})`);
+  } else {
+    log("  OK   lands in the application once the password is their own");
+  }
+  await shot("after-forced-password-change");
+
+  // Back to the administrator. Everything below this point assumes that session.
+  await page.goto(`${BASE}/applications`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL(/\/login/, { timeout: 10000 });
+  await login(page, EMAIL, PASSWORD);
+  await page.waitForTimeout(2000);
+  await page.waitForLoadState("networkidle");
+  if (/\/login/.test(page.url())) {
+    problems.push("could not sign back in as the administrator after step 18z");
+  }
+}
 
 // --- 18a. narrowing an account to particular groups and applications --------
 //

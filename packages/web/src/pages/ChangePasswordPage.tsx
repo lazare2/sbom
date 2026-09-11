@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useChangePassword } from "../lib/mutations.ts";
@@ -14,9 +14,14 @@ const MIN_LENGTH = 12;
  * this credential, so someone other than its owner has seen it — the router
  * pins the user here and the API refuses every other authenticated route until
  * it clears.
+ *
+ * Rendered outside the application shell in both cases, because in the forced one it
+ * cannot afford to depend on anything the shell loads: the environment list the layout
+ * fetches is among the routes refused while the flag is set, so a version of this page
+ * nested inside it showed that refusal instead of the form, with no way forward.
  */
 export function ChangePasswordPage() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const changePassword = useChangePassword();
 
@@ -47,22 +52,37 @@ export function ChangePasswordPage() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      // On the forced path, the redirect happens once `mustChangePassword`
-      // clears on the refetched session — navigating eagerly would race it and
-      // bounce straight back here.
-      if (!forced) setTimeout(() => navigate("/"), 1200);
     } catch {
       // Surfaced from the mutation's error state.
     }
   }
 
+  /*
+    Into the application, once the change has actually taken effect.
+
+    Keyed on `forced` going false rather than on the submission succeeding, because those are
+    not the same moment: the mutation invalidates the session query, and until the refetch
+    lands `mustChangePassword` is still set — so navigating on success alone would race the
+    refetch and be bounced straight back here by the router.
+
+    This page no longer sits inside the application shell, so there is no navigation on screen
+    to fall back on. Without this, a person who successfully changed their password would be
+    left looking at a confirmation message with nowhere to go.
+  */
+  useEffect(() => {
+    if (!done || forced) return;
+    const timer = setTimeout(() => navigate("/", { replace: true }), 1200);
+    return () => clearTimeout(timer);
+  }, [done, forced, navigate]);
+
   return (
-    <div className={forced ? "mx-auto max-w-lg px-4 py-10" : ""}>
+    /* Its own container in both cases now — there is no surrounding layout to provide one. */
+    <div className="mx-auto max-w-lg px-4 py-10">
       <PageHeader
         title={forced ? "Change your password" : "Change password"}
         subtitle={
           forced
-            ? "This password was issued by an administrator, so it is known to someone other than you. Choose your own before continuing."
+            ? `This password was issued by an administrator, so it is known to someone other than you. Choose your own before continuing as ${user?.email ?? ""}.`
             : `Signed in as ${user?.email ?? ""}`
         }
       />
@@ -140,7 +160,26 @@ export function ChangePasswordPage() {
             <Button type="submit" variant="primary" disabled={!canSubmit}>
               {changePassword.isPending ? "Changing…" : "Change password"}
             </Button>
-            {!forced ? <Button onClick={() => navigate(-1)}>Cancel</Button> : null}
+            {forced ? (
+              /*
+                The way out of a screen that otherwise has none.
+
+                On the forced path every other route is refused, so without this a person who
+                mistypes the password their administrator sent them — or who is signed in as
+                the wrong account — has no action available but to clear their cookies. It is
+                worded as a way back to the sign-in page rather than as an escape, because
+                that is what it is for.
+              */
+              <Button
+                onClick={() => {
+                  void logout().then(() => navigate("/login", { replace: true }));
+                }}
+              >
+                Sign out instead
+              </Button>
+            ) : (
+              <Button onClick={() => navigate(-1)}>Cancel</Button>
+            )}
           </div>
         </form>
       </Card>

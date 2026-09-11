@@ -71,6 +71,31 @@ createRoot(document.getElementById("root")!).render(
             {/* Unauthenticated */}
             <Route path="/login" element={<LoginPage />} />
 
+            {/*
+              Changing your own password, signed in but outside the application shell.
+
+              Deliberately NOT inside the Layout route below, and this is the whole point of
+              the screen working at all. An account whose password was issued by an
+              administrator is refused every authenticated route except whoami, change-password
+              and logout -- and the shell's own EnvironmentProvider fetches the environment
+              list, which is one of the refused ones. Nested inside it, this page rendered as
+              that refusal's error banner and a Retry button that could never succeed: the
+              account was permanently unable to reach the only form that would release it.
+
+              The same nesting locked out an account with no environment grants yet, which
+              stops at the provider's "No environments" state before any page renders.
+
+              So this route depends on the session and nothing else.
+            */}
+            <Route
+              path="/change-password"
+              element={
+                <RequireAuth>
+                  <ChangePasswordPage />
+                </RequireAuth>
+              }
+            />
+
             {/* Authenticated */}
             {/*
               Inside RequireAuth: the environment list is itself an authenticated read, and
@@ -110,7 +135,6 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/vulnerabilities/:vulnerabilityId" element={<AdvisoryDetailPage />} />
               <Route path="/malicious" element={<MaliciousPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
-              <Route path="/change-password" element={<ChangePasswordPage />} />
 
               {/*
                 Nested under RequireAuth so an admin with a temporary password is
