@@ -234,10 +234,18 @@ function ProviderCard() {
             <FormRow
               label="API token"
               htmlFor="xray-token"
+              /*
+                The token *type* is named because getting it wrong produces a message that
+                blames the credential rather than the way it was sent. An enterprise reference
+                token is not a JWT, so a client that presents it as a bearer token is told the
+                token is invalid — which reads as "wrong token", not "wrong scheme". This
+                platform always sends it as a password, so either kind works, and saying so is
+                what stops someone going to look for a different token they do not need.
+              */
               hint={
                 connection?.tokenConfigured
                   ? "A token is stored. Leave blank to keep it."
-                  : "Stored encrypted, and never shown again."
+                  : "An access token or a reference token — either works. Stored encrypted, and never shown again."
               }
             >
               <TextInput

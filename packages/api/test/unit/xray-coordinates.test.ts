@@ -180,6 +180,99 @@ describe("mapping a package to an Xray coordinate", () => {
   });
 });
 
+describe("Alpine packages, against identifiers a real Xray produced", () => {
+  /*
+    Every expectation here is copied from a live server rather than from documentation.
+
+    An SBOM this platform exported was enriched by an organisation's own Xray, and the file
+    came back listing that server's identifiers for the packages it recognised. Those strings
+    are the only direct evidence this repository has of what Xray actually matches on, and
+    they disagreed with what this module was generating.
+
+    The bug they exposed is the one the whole module is written to prevent. `alpine` had been
+    inferred from the single-segment pattern the other ecosystems use, so every apk package on
+    every image was submitted as `alpine://<name>:<version>`, matched nothing, and came back
+    indistinguishable from a package that had been checked and found clean. On an Alpine image
+    that is most of the component list.
+  */
+
+  function apk(name: string, version: string, purl: string): ScannablePackage {
+    return pkg({ ecosystem: "apk", name, version, purl });
+  }
+
+  it("carries the release, which is what the server keys on", () => {
+    expect(
+      toXrayCoordinate(
+        apk("libssl3", "3.1.4-r5", "pkg:apk/alpine/libssl3@3.1.4-r5?arch=x86_64&distro=alpine-3.18.6"),
+      ),
+    ).toBe("alpine://3.18:libssl3:3.1.4-r5");
+  });
+
+  it("shortens the release to two components, as the server does", () => {
+    // Syft records `alpine-3.18.6`; the identifier that came back said `3.18`. Submitting the
+    // patch version is submitting a release Xray has no index for.
+    expect(
+      toXrayCoordinate(
+        apk("musl", "1.2.4-r2", "pkg:apk/alpine/musl@1.2.4-r2?arch=x86_64&distro=alpine-3.18.6"),
+      ),
+    ).toBe("alpine://3.18:musl:1.2.4-r2");
+  });
+
+  it("decodes a percent-encoded name", () => {
+    // `libstdc++` travels through a purl as `libstdc%2B%2B` and came back from the server
+    // decoded. A coordinate still carrying the escapes is a different string entirely.
+    expect(
+      toXrayCoordinate(
+        apk(
+          "libstdc++",
+          "12.2.1_git20220924-r10",
+          "pkg:apk/alpine/libstdc%2B%2B@12.2.1_git20220924-r10?arch=x86_64&distro=alpine-3.18.6",
+        ),
+      ),
+    ).toBe("alpine://3.18:libstdc++:12.2.1_git20220924-r10");
+  });
+
+  it("keeps a name that already contains a dash", () => {
+    expect(
+      toXrayCoordinate(
+        apk(
+          "busybox-binsh",
+          "1.36.1-r5",
+          "pkg:apk/alpine/busybox-binsh@1.36.1-r5?arch=x86_64&distro=alpine-3.18.6&upstream=busybox",
+        ),
+      ),
+    ).toBe("alpine://3.18:busybox-binsh:1.36.1-r5");
+  });
+
+  it("carries no architecture, unlike deb and rpm", () => {
+    // The purl has `arch=x86_64` and the server's identifier does not mention it. Assuming
+    // the OS ecosystems share one shape is what produced the original mistake.
+    const coordinate = toXrayCoordinate(
+      apk("apk-tools", "2.14.0-r2", "pkg:apk/alpine/apk-tools@2.14.0-r2?arch=x86_64&distro=alpine-3.18.6"),
+    );
+    expect(coordinate).not.toContain("x86_64");
+  });
+
+  it("refuses a package whose release cannot be read", () => {
+    /*
+      Null, not a best guess. A rolling release has no number to submit, and a package with no
+      distro qualifier gives nothing to derive one from — in both cases the coordinate would
+      match nothing while reporting as assessed.
+    */
+    expect(
+      toXrayCoordinate(apk("musl", "1.2.4-r2", "pkg:apk/alpine/musl@1.2.4-r2?arch=x86_64&distro=alpine-edge")),
+    ).toBeNull();
+    expect(toXrayCoordinate(apk("musl", "1.2.4-r2", "pkg:apk/alpine/musl@1.2.4-r2?arch=x86_64"))).toBeNull();
+  });
+
+  it("accepts a release with no distribution name in front of it", () => {
+    // Not every producer writes `alpine-`; a bare version is still a release.
+    expect(
+      toXrayCoordinate(apk("musl", "1.2.4-r2", "pkg:apk/alpine/musl@1.2.4-r2?distro=3.18.6")),
+    ).toBe("alpine://3.18:musl:1.2.4-r2");
+  });
+});
+
 describe("the coverage canaries", () => {
   it("covers every ecosystem that can be mapped", () => {
     /*
@@ -193,11 +286,56 @@ describe("the coverage canaries", () => {
   });
 
   it("uses coordinates this module would itself produce", () => {
-    // A canary in a form the mapper never generates would prove the wrong thing: it could
-    // pass while every real package of that ecosystem was built wrongly.
-    for (const canary of XRAY_CANARIES) {
-      expect(canary.coordinate).toMatch(/^[a-z]+:\/\/.+:.+$/);
-    }
+    /*
+      This assertion used to be `/^[a-z]+:\/\/.+:.+$/`, and the broken Alpine canary passed
+      it: `alpine://openssl:1.1.1k-r0` is well formed, just in a different ecosystem's shape.
+      So the probe reported Alpine as uncovered, which read as a fact about the server rather
+      than a bug here, and every apk package went unassessed behind a plausible explanation.
+
+      Checking each canary against a coordinate the mapper genuinely builds is what turns this
+      from a spelling check into a proof that the probe tests what the sweep submits.
+    */
+    const samples: Record<string, ScannablePackage> = {
+      npm: pkg({ purl: "pkg:npm/axios@0.21.4", name: "axios", version: "0.21.4" }),
+      apk: pkg({
+        ecosystem: "apk",
+        name: "libssl3",
+        version: "3.1.4-r5",
+        purl: "pkg:apk/alpine/libssl3@3.1.4-r5?arch=x86_64&distro=alpine-3.18.6",
+      }),
+      deb: pkg({
+        ecosystem: "deb",
+        name: "openssl",
+        version: "1.1.1n-0+deb10u3",
+        purl: "pkg:deb/debian/openssl@1.1.1n-0%2Bdeb10u3?arch=amd64",
+      }),
+      rpm: pkg({
+        ecosystem: "rpm",
+        name: "openssl",
+        version: "1.1.1k-4.el8",
+        purl: "pkg:rpm/rhel/openssl@1.1.1k-4.el8?arch=x86_64",
+      }),
+      maven: pkg({
+        ecosystem: "maven",
+        name: "log4j-core",
+        version: "2.14.1",
+        purl: "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+      }),
+    };
+
+    /** How many colon-separated fields follow the scheme — the part that differs per shape. */
+    const fields = (coordinate: string) =>
+      coordinate.slice(coordinate.indexOf("://") + 3).split(":").length;
+
+    const wrongShape = Object.entries(samples)
+      .filter(([ecosystem, sample]) => {
+        const produced = toXrayCoordinate(sample);
+        const canary = XRAY_CANARIES.find((c) => c.ecosystem === ecosystem)!;
+        return produced === null || fields(produced) !== fields(canary.coordinate);
+      })
+      .map(([ecosystem]) => ecosystem);
+
+    expect(wrongShape).toEqual([]);
   });
 
   it("includes the operating-system ecosystems, which are the point", () => {

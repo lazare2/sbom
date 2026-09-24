@@ -57,12 +57,32 @@ const SCHEMES: Record<string, string> = {
   // Inferred, not documented. Proven or disproven by the canary probe, never assumed.
   gem: "gem",
   cargo: "cargo",
-  // Operating-system packages. Whether a given Xray covers these is what the probe settles.
+  /*
+    Operating-system packages. Whether a given Xray covers these is what the probe settles.
+
+    `deb` and `rpm` are the documented forms and remain unverified against a live server.
+    That is worth stating plainly, because `alpine` was in exactly that position and turned
+    out to be wrong -- inferred from the single-segment pattern, and silently matching
+    nothing. Whatever the docs say, the form is not confirmed until a real Xray echoes it.
+  */
   deb: "deb",
   rpm: "rpm",
-  // Also inferred. Alpine images therefore get OS coverage only if the probe confirms it.
   apk: "alpine",
 };
+
+/**
+ * `alpine-3.18.6` -> `3.18`, the release Xray identifies an Alpine package by.
+ *
+ * Syft records the distribution down to the patch and prefixes it with the distribution's
+ * name; Xray's identifier carries neither. Anything without a numeric release -- `edge`, or a
+ * qualifier that is missing altogether -- yields null, and the package goes unsubmitted.
+ */
+function alpineRelease(distro: string | undefined): string | null {
+  if (!distro) return null;
+  const withoutName = distro.trim().replace(/^[a-z]+-/i, "");
+  const match = /^(\d+)\.(\d+)/.exec(withoutName);
+  return match ? `${match[1]}.${match[2]}` : null;
+}
 
 interface ParsedPurl {
   type: string;
@@ -179,6 +199,31 @@ export function toXrayCoordinate(pkg: ScannablePackage): string | null {
     return `${scheme}://${arch}:${parsed?.name ?? pkg.name}:${version}`;
   }
 
+  if (scheme === "alpine") {
+    /*
+      `alpine://<release>:<name>:<version>`.
+
+      Confirmed, unlike most of this table: an SBOM this platform exported was enriched by a
+      real Xray, and came back carrying that server's own identifiers for the packages it
+      recognised -- `alpine://3.18:libssl3:3.1.4-r5`,
+      `alpine://3.18:libstdc++:12.2.1_git20220924-r10`.
+
+      Two things that shape is not, and this module had both wrong. It is not the bare
+      `alpine://<name>:<version>` that every other single-segment ecosystem uses, which is
+      what "inferred from the pattern" produced and which matches nothing at all. And unlike
+      deb and rpm it carries no architecture -- what it carries is the release, to two
+      components, so the `alpine-3.18.6` Syft writes becomes `3.18`.
+
+      A package whose release cannot be read is not submitted. The failure mode being avoided
+      is the one this whole module exists for: an Alpine package sent under a release Xray
+      does not know is not matched badly, it is matched against nothing, and comes back
+      looking exactly like a package that was checked and found clean.
+    */
+    const release = alpineRelease(parsed?.qualifiers.distro);
+    if (!release) return null;
+    return `alpine://${release}:${parsed?.name ?? pkg.name}:${version}`;
+  }
+
   if (scheme === "npm") {
     // Scoped packages keep their `@scope/name` form; purl percent-encodes the `@`.
     const name = parsed?.namespace ? `${parsed.namespace}/${parsed.name}` : (parsed?.name ?? pkg.name);
@@ -213,7 +258,12 @@ export const XRAY_CANARIES: ReadonlyArray<{
   label: string;
 }> = [
   { ecosystem: "maven", coordinate: "gav://org.apache.logging.log4j:log4j-core:2.14.1", label: "log4j-core 2.14.1 (Log4Shell)" },
-  { ecosystem: "npm", coordinate: "npm://lodash:4.17.15", label: "lodash 4.17.15" },
+  /*
+    Observed rather than assumed: a real Xray reported four advisories against this exact
+    coordinate. A canary that a live server has been seen to answer for makes the negative
+    case -- "this ecosystem is not covered" -- worth believing.
+  */
+  { ecosystem: "npm", coordinate: "npm://axios:0.21.4", label: "axios 0.21.4" },
   { ecosystem: "pypi", coordinate: "pip://django:2.2.0", label: "django 2.2.0" },
   { ecosystem: "golang", coordinate: "go://golang.org/x/text:v0.3.0", label: "golang.org/x/text v0.3.0" },
   { ecosystem: "nuget", coordinate: "nuget://Newtonsoft.Json:12.0.2", label: "Newtonsoft.Json 12.0.2" },
@@ -227,5 +277,11 @@ export const XRAY_CANARIES: ReadonlyArray<{
   */
   { ecosystem: "deb", coordinate: "deb://amd64:openssl:1.1.1n-0+deb10u3", label: "openssl 1.1.1n (amd64)" },
   { ecosystem: "rpm", coordinate: "rpm://x86_64:openssl:1.1.1k-4.el8", label: "openssl 1.1.1k (x86_64)" },
-  { ecosystem: "apk", coordinate: "alpine://openssl:1.1.1k-r0", label: "openssl 1.1.1k on Alpine" },
+  /*
+    Also observed: twelve advisories against this coordinate on a live server. The previous
+    canary here was `alpine://openssl:1.1.1k-r0`, which carried no release and so could never
+    match -- meaning Alpine reported as uncovered on a server that covers it fully, and every
+    apk package on every image read as not assessed.
+  */
+  { ecosystem: "apk", coordinate: "alpine://3.18:libssl3:3.1.4-r5", label: "libssl3 3.1.4-r5 on Alpine 3.18" },
 ];
