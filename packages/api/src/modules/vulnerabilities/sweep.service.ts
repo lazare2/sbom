@@ -2,7 +2,12 @@ import { sql } from "drizzle-orm";
 import type { VulnProvider } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
-import type { ParsedFinding, ScannablePackage, VulnerabilityScanner } from "../../services/scanner/index.js";
+import type {
+  ParsedFinding,
+  ScannablePackage,
+  ScannerAvailability,
+  VulnerabilityScanner,
+} from "../../services/scanner/index.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
 import type { Logger } from "../ingestion/ingestion.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
@@ -31,6 +36,70 @@ import { SCOPE_GROUP_EXPR } from "./scope.js";
 /** Bind-parameter ceiling is 65535; these keep the widest insert comfortably under it. */
 const VULN_UPSERT_CHUNK = 500;
 const FINDING_UPSERT_CHUNK = 1000;
+
+/**
+ * Collapses findings onto the pairing upsert's conflict target.
+ *
+ * `INSERT ... ON CONFLICT (component_id, vulnerability_id)` is rejected outright by
+ * Postgres when a single statement proposes that pair twice -- SQLSTATE 21000, "ON
+ * CONFLICT DO UPDATE command cannot affect row a second time". It fails the whole
+ * statement, so one duplicated pair costs the entire batch and with it the sweep.
+ *
+ * Grype never produced one: it reports a package/vulnerability match once. Xray reports per
+ * *issue*, and one CVE is routinely carried by several issue records naming the same
+ * component, so `toFindings` emits that pair more than once for an ordinary response. Every
+ * sweep under Xray therefore aborted in `storeFindings`, leaving no component stamped and
+ * the previous provider's findings standing -- which reads as "switching provider did
+ * nothing" rather than as a failure, and is why this went unnoticed for a full day.
+ *
+ * Collapsed here rather than in the Xray mapper because the constraint being respected
+ * belongs to this statement, and any provider is free to report a pair twice.
+ */
+/**
+ * Why the sweep cannot run, phrased for the provider that is actually configured.
+ *
+ * The message an administrator reads is the whole diagnosis -- the sweep declines quietly
+ * and this is the only account of it. Reporting a missing grype binary under Xray points
+ * the reader at the filesystem when the real failure is an unreachable server.
+ *
+ * `attempts` is where every provider's availability check records why it failed, so the
+ * specific reason travels with the summary instead of living only in a log line.
+ */
+export function unavailableMessage(provider: VulnProvider, availability: ScannerAvailability): string {
+  const detail = availability.attempts[0]?.reason ?? null;
+  const summary =
+    provider === "xray"
+      ? `JFrog Xray at ${availability.path ?? "the configured URL"} could not be reached.`
+      : "The grype binary is not available.";
+  return detail ? `${summary} ${detail}` : summary;
+}
+
+export function collapsePairings(findings: readonly ParsedFinding[]): ParsedFinding[] {
+  const byPair = new Map<string, ParsedFinding>();
+  for (const finding of findings) {
+    // A null byte cannot occur in either half, so no two distinct pairs can collide on
+    // the joined key -- which a plain separator like ":" would allow.
+    const key = `${finding.componentId}\u0000${finding.vulnerabilityId}`;
+    const existing = byPair.get(key);
+    if (!existing || namesABetterFix(finding, existing)) byPair.set(key, finding);
+  }
+  return [...byPair.values()];
+}
+
+/**
+ * Whether `next` should displace `current` as the surviving copy of a pair.
+ *
+ * "Fixed in 2.15.0" is the actionable half of a finding, and two records of the same pair
+ * can disagree about it: Xray states fixed versions per issue, and one issue may name them
+ * where another does not. Keeping the copy that knows about a fix means which duplicate
+ * happened to arrive last never silently removes the upgrade an administrator would act on.
+ */
+function namesABetterFix(next: ParsedFinding, current: ParsedFinding): boolean {
+  if (next.fixVersions.length !== current.fixVersions.length) {
+    return next.fixVersions.length > current.fixVersions.length;
+  }
+  return current.fixState === "unknown" && next.fixState !== "unknown";
+}
 
 export interface SweepProgress {
   batches: number;
@@ -149,10 +218,18 @@ export class SweepService {
 
     const availability = await this.deps.scanner.availability();
     if (!availability.available) {
+      /*
+        Named rather than assumed. Under Xray there is no binary at all, and reporting a
+        missing grype binary points the reader at the filesystem when the actual failure is
+        an unreachable server -- a wrong turn that cost a real diagnosis a day.
+
+        `attempts` is where every provider's availability check records why it failed, so the
+        specific reason travels with the message instead of being logged somewhere else.
+      */
       return {
         ...empty,
         status: "unavailable",
-        message: "The grype binary is not available.",
+        message: unavailableMessage(provider, availability),
         remaining: await this.pendingCount(null, provider),
       };
     }
@@ -424,7 +501,7 @@ export class SweepService {
       `);
     }
 
-    for (const batch of chunk(findings, FINDING_UPSERT_CHUNK)) {
+    for (const batch of chunk(collapsePairings(findings), FINDING_UPSERT_CHUNK)) {
       const values = batch.map(
         (f) => sql`(
           ${f.componentId},
