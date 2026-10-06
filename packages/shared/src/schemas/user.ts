@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { uuidSchema } from "./common.js";
-import { userRoleSchema } from "../enums.js";
+import { userRoleSchema, type AuthProviderName } from "../enums.js";
 import { emailSchema, passwordSchema } from "./auth.js";
 import { paginationQuerySchema } from "./common.js";
 import { defineSortTable } from "./sort.js";
@@ -85,7 +85,12 @@ export interface UserSummary {
   id: string;
   email: string;
   role: "admin" | "user";
-  authProvider: "local" | "ldap";
+  /*
+    The shared union, not a copy of it. Spelled out, this narrowed every consumer to
+    whatever the providers happened to be on the day it was written, so adding one broke
+    a field that only carries the value through.
+  */
+  authProvider: AuthProviderName;
   isActive: boolean;
   mustChangePassword: boolean;
   /**
