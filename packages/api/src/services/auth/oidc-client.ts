@@ -217,20 +217,37 @@ export class OidcClient {
    *
    * Asks for a client-credentials grant and ignores whether the grant itself is allowed. Only
    * one thing is being measured: did client authentication pass. A wrong secret is refused as
-   * `invalid_client`; a correct secret on an application that holds no application permissions,
-   * or on a provider where this grant is disabled, is refused for some other reason. Treating
-   * every refusal as a bad secret would tell an administrator to re-issue a credential that
-   * was never the problem.
+   * `invalid_client`; a correct secret on an application holding delegated permissions only is
+   * refused for a different reason entirely. Reading every refusal as a bad secret would send
+   * an administrator to re-issue a credential that was never the problem.
    *
-   * No scope is requested, deliberately. A scope would have to be either vendor-specific or
-   * meaningless, and the answer this needs arrives before any scope is considered.
+   * ## Why a scope is sent, and why it looks like Microsoft's
+   *
+   * This first sent none, reasoning that a scope would have to be vendor-specific and that
+   * client authentication happens first anyway. Both halves were wrong. Entra ID validates the
+   * request shape *before* authenticating the client and answers AADSTS90014 -- the scope field
+   * is missing -- whatever the credentials are, so the check passed a deliberately invented
+   * client id and a nonsense secret. A test that cannot fail is worse than no test, because
+   * the screen reported the credentials as accepted.
+   *
+   * `.default` against Microsoft Graph is syntactically valid for every Entra tenant and
+   * meaningless elsewhere, which is the point: a provider that does not know it rejects it
+   * *after* authenticating the client, which is the answer being measured.
+   *
+   * ## And why the answer may be null
+   *
+   * When the provider refuses over the scope rather than the credentials, nothing was learned
+   * about them. Reporting that as accepted is the same defect in a new place, so it is
+   * reported as unknown and the screen says the credential could not be verified without a
+   * sign-in.
    */
-  async credentialsAccepted(): Promise<{ accepted: boolean; detail: string | null }> {
+  async credentialsAccepted(): Promise<{ accepted: boolean | null; detail: string | null }> {
     const metadata = await this.discover();
     const body = new URLSearchParams({
       grant_type: "client_credentials",
       client_id: this.config.clientId,
       client_secret: this.config.clientSecret,
+      scope: "https://graph.microsoft.com/.default",
     });
 
     const response = await this.send(metadata.tokenEndpoint, {
@@ -254,11 +271,24 @@ export class OidcClient {
         ? payload.error_description.slice(0, 300)
         : null;
 
-    const rejected = error === "invalid_client" || response.status === 401;
-    return {
-      accepted: !rejected,
-      detail: description ?? error ?? `token endpoint answered ${response.status}`,
-    };
+    const detail = description ?? error ?? `token endpoint answered ${response.status}`;
+
+    // The client was named and refused: a wrong secret, or an application the provider does
+    // not have. Both need the same thing checked and both are the administrator's to fix.
+    if (error === "invalid_client" || error === "unauthorized_client" || response.status === 401) {
+      return { accepted: false, detail };
+    }
+
+    /*
+      Refused over the request rather than the credentials, so nothing was learned about them.
+      `invalid_request` is Entra's answer to a malformed or unacceptable scope, and
+      `invalid_scope` is the same answer from providers that do not know Microsoft Graph.
+    */
+    if (error === "invalid_request" || error === "invalid_scope") {
+      return { accepted: null, detail };
+    }
+
+    return { accepted: true, detail };
   }
 
   /**
@@ -322,7 +352,7 @@ export class OidcClient {
         credentialsAccepted: credentials.accepted,
       };
 
-      if (!credentials.accepted) {
+      if (credentials.accepted === false) {
         return {
           ...found,
           ok: false,
@@ -335,11 +365,32 @@ export class OidcClient {
         };
       }
 
+      const host = new URL(metadata.issuer).host;
+
+      /*
+        Reachable, but the credential was not actually exercised. Said plainly rather than
+        rounded up to success: the first person to find out otherwise would be a user who has
+        already authenticated and is looking at an error.
+      */
+      if (credentials.accepted === null) {
+        return {
+          ...found,
+          ok: true,
+          code: "ok",
+          summary: `Reached ${host}. The credentials could not be verified without a sign-in.`,
+          hint:
+            "The provider declined to evaluate them outside a sign-in, which is normal for an " +
+            "application holding delegated permissions only. Confirm this exact redirect URI " +
+            `is registered, then sign in to prove the rest: ${redirectUri}`,
+          detail: credentials.detail,
+        };
+      }
+
       return {
         ...found,
         ok: true,
         code: "ok",
-        summary: `Reached ${new URL(metadata.issuer).host} and the credentials were accepted.`,
+        summary: `Reached ${host} and the credentials were accepted.`,
         hint: `Confirm this exact redirect URI is registered with the provider: ${redirectUri}`,
         detail: credentials.detail,
       };

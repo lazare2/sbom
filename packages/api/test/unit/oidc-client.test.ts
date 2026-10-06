@@ -143,20 +143,70 @@ describe("establishing whether the credentials work, with nobody signed in", () 
     expect(d.hint).toContain("secret id");
   });
 
-  it("treats any other refusal as the credentials being fine", async () => {
+  it("treats an unknown application as a rejected client, not a working one", async () => {
+    // A mistyped client id and a wrong secret need the same thing checked, and Entra reports
+    // the former as unauthorized_client. Reading it as success put a green tick beside a
+    // configuration that could never sign anybody in.
+    const { client } = harness({
+      token: () =>
+        json({ error: "unauthorized_client", error_description: "AADSTS700016: not found" }, 400),
+    });
+    const d = await client.diagnose(REDIRECT);
+
+    expect(d.credentialsAccepted).toBe(false);
+    expect(d.code).toBe("client_rejected");
+  });
+
+  it("reports unknown, not accepted, when the provider refuses over the scope", async () => {
     /*
-      The load-bearing distinction. This application holds delegated permissions only, so a
-      client-credentials grant is refused even when the secret is perfect. Reading every
-      refusal as a bad secret would tell an administrator to re-issue a credential that was
-      never the problem -- and re-issuing is the one step that needs the directory team.
+      The regression this exists for. The check first sent no scope at all, on the reasoning
+      that client authentication happens before scope is considered. Entra validates the
+      request shape first and answers AADSTS90014 -- scope is missing -- whatever the
+      credentials are, so an invented client id and a nonsense secret were reported as
+      accepted. A check that cannot fail is worse than no check, because the screen said the
+      credentials were fine.
+
+      A scope is sent now. If a provider still refuses over the request rather than the
+      credentials, nothing was learned about them, and saying so is the only honest answer.
     */
-    for (const error of ["unauthorized_client", "invalid_scope", "unsupported_grant_type"]) {
-      const { client } = harness({ token: () => json({ error }, 400) });
+    for (const error of ["invalid_request", "invalid_scope"]) {
+      const { client } = harness({
+        token: () => json({ error, error_description: "AADSTS90014: scope is missing" }, 400),
+      });
       const d = await client.diagnose(REDIRECT);
 
-      expect(d.credentialsAccepted, error).toBe(true);
+      expect(d.credentialsAccepted, error).toBeNull();
+      // Still reachable, so not a failure -- but the summary must not claim the credentials
+      // were accepted, because they were never examined.
       expect(d.ok, error).toBe(true);
+      expect(d.summary, error).toContain("could not be verified");
     }
+  });
+
+  it("sends a scope, or the provider never reaches the credentials at all", async () => {
+    let sent: string | null = null;
+    const { client } = harness({
+      token: () => json({ access_token: "a" }),
+    });
+    // Re-wrap the fetch so the request body can be inspected: the absence of this parameter
+    // is precisely what made the check vacuous.
+    const inner = (client as unknown as { http: (u: string, i?: RequestInit) => Promise<Response> }).http;
+    (client as unknown as { http: unknown }).http = async (u: string, i?: RequestInit) => {
+      if (u.endsWith("/token")) sent = String(i?.body ?? "");
+      return inner(u, i);
+    };
+
+    await client.diagnose(REDIRECT);
+    expect(sent).not.toBeNull();
+    expect(sent!).toContain("scope=");
+  });
+
+  it("treats a refusal unrelated to either as the credentials being fine", async () => {
+    const { client } = harness({ token: () => json({ error: "unsupported_grant_type" }, 400) });
+    const d = await client.diagnose(REDIRECT);
+
+    expect(d.credentialsAccepted).toBe(true);
+    expect(d.ok).toBe(true);
   });
 
   it("accepts a grant that simply succeeds", async () => {

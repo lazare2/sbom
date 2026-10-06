@@ -1,5 +1,8 @@
 import { sql, type SQL } from "drizzle-orm";
 import {
+  type OidcSettings,
+  type OidcDiagnosis,
+  type OidcConnectionInput,
   DEFAULT_REPORT_BODY,
   DEFAULT_REPORT_SUBJECT,
   REPORT_DEFAULT_TIMEZONE,
@@ -25,6 +28,7 @@ import { rowsOf, type Row } from "../applications/applications.service.js";
 import type { Actor } from "../admin/audit.service.js";
 import { BadRequestError } from "../../lib/errors.js";
 import { openSecret, sealSecret } from "../../lib/secret-box.js";
+import type { OidcClientConfig } from "../../services/auth/oidc-client.js";
 import type { XrayCredentials } from "../../services/scanner/xray-client.js";
 
 /**
@@ -70,6 +74,15 @@ export const SETTING_KEYS = {
    * to be in, and separate keys would let a half-applied write produce exactly that.
    */
   vulnProvider: "vuln.provider",
+  /**
+   * Single sign-on: the provider connection and the last verdict on it.
+   *
+   * Its own key rather than fields beside the password-auth settings, because the two are
+   * independently switchable on purpose -- a deployment runs local accounts, or single
+   * sign-on, or both at once -- and one combined object would make disabling either rewrite
+   * the other's configuration.
+   */
+  oidc: "auth.oidc",
 } as const;
 
 /**
@@ -115,6 +128,36 @@ interface StoredXray {
   tokenEnvelope: string | null;
   allowSelfSignedCertificate: boolean;
 }
+
+interface StoredOidc {
+  issuerUrl: string;
+  clientId: string;
+  /** Sealed with SECRETS_KEY. Never returned by any endpoint, in any form. */
+  clientSecretEnvelope: string | null;
+  enabled: boolean;
+  securityGroupName: string | null;
+  secretExpiresOn: string | null;
+  /** The last connection test, so the screen opens with a verdict rather than a blank. */
+  lastTest: OidcDiagnosis | null;
+}
+
+/**
+ * No connection, and switched off.
+ *
+ * `enabled` is stored rather than inferred from whether a connection exists, because the two
+ * states differ and the difference is operationally useful: a connection can be configured
+ * and tested before anybody is allowed to use it, and can be switched off during an incident
+ * without destroying a credential that would then need re-issuing by the directory team.
+ */
+const DEFAULT_OIDC: StoredOidc = {
+  issuerUrl: "",
+  clientId: "",
+  clientSecretEnvelope: null,
+  enabled: false,
+  securityGroupName: null,
+  secretExpiresOn: null,
+  lastTest: null,
+};
 
 interface StoredProviderSettings {
   provider: VulnProvider;
@@ -203,6 +246,7 @@ export class SettingsService {
    * the relay or a vulnerability toggle does not invalidate the credentials.
    */
   private providerCache: { value: StoredProviderSettings; expiresAt: number } | null = null;
+  private oidcCache: { value: StoredOidc; expiresAt: number } | null = null;
 
   constructor(private readonly deps: { db: Database; config: Config }) {}
 
@@ -529,6 +573,148 @@ export class SettingsService {
       // unavailable connection, which is what an administrator can act on.
       return null;
     }
+  }
+
+  // -- single sign-on --------------------------------------------------------
+
+  private async getOidc(): Promise<StoredOidc> {
+    if (this.oidcCache && this.oidcCache.expiresAt > Date.now()) return this.oidcCache.value;
+
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${SETTING_KEYS.oidc}
+    `);
+
+    const value: StoredOidc = { ...DEFAULT_OIDC };
+    const stored = rowsOf(rows)[0]?.value;
+    if (stored && typeof stored === "object") {
+      const raw = stored as Record<string, unknown>;
+      if (typeof raw.issuerUrl === "string") value.issuerUrl = raw.issuerUrl;
+      if (typeof raw.clientId === "string") value.clientId = raw.clientId;
+      if (typeof raw.clientSecretEnvelope === "string") {
+        value.clientSecretEnvelope = raw.clientSecretEnvelope;
+      }
+      if (typeof raw.enabled === "boolean") value.enabled = raw.enabled;
+      if (typeof raw.securityGroupName === "string") value.securityGroupName = raw.securityGroupName;
+      if (typeof raw.secretExpiresOn === "string") value.secretExpiresOn = raw.secretExpiresOn;
+      if (raw.lastTest && typeof raw.lastTest === "object") {
+        value.lastTest = raw.lastTest as OidcDiagnosis;
+      }
+    }
+
+    this.oidcCache = { value, expiresAt: Date.now() + SettingsService.CACHE_TTL_MS };
+    return value;
+  }
+
+  private async writeOidc(next: StoredOidc): Promise<void> {
+    await this.deps.db
+      .insert(setting)
+      .values({ key: SETTING_KEYS.oidc, value: next })
+      .onConflictDoUpdate({ target: setting.key, set: { value: next, updatedAt: new Date() } });
+    this.oidcCache = null;
+  }
+
+  /** What the admin screen reads back. Never the secret, only whether one is stored. */
+  async getOidcSettings(): Promise<OidcSettings> {
+    const stored = await this.getOidc();
+    if (stored.issuerUrl === "" && stored.clientId === "") {
+      return { connection: null, lastTest: stored.lastTest };
+    }
+    return {
+      connection: {
+        issuerUrl: stored.issuerUrl,
+        clientId: stored.clientId,
+        clientSecretConfigured: stored.clientSecretEnvelope !== null,
+        enabled: stored.enabled,
+        securityGroupName: stored.securityGroupName,
+        secretExpiresOn: stored.secretExpiresOn,
+      },
+      lastTest: stored.lastTest,
+    };
+  }
+
+  /**
+   * Saves the connection, encrypting the secret.
+   *
+   * An omitted secret leaves the stored one alone, which is what lets an administrator correct
+   * a typo in the issuer without pasting a credential they may no longer have -- the provider
+   * shows it once.
+   *
+   * Any change clears the recorded verdict. A test result describes the connection it was run
+   * against, and leaving a green tick beside an edited issuer would state something nobody
+   * checked.
+   */
+  async setOidcConnection(input: OidcConnectionInput): Promise<void> {
+    const current = await this.getOidc();
+
+    let envelope = current.clientSecretEnvelope;
+    if (input.clientSecret !== undefined && input.clientSecret !== "") {
+      const key = this.deps.config.SECRETS_KEY;
+      if (!key) {
+        throw new BadRequestError(
+          "SECRETS_KEY is not set on this deployment, so a client secret cannot be stored. " +
+            "Add it to the environment and restart, then save again.",
+        );
+      }
+      envelope = sealSecret(input.clientSecret, key);
+    }
+
+    await this.writeOidc({
+      issuerUrl: input.issuerUrl,
+      clientId: input.clientId,
+      clientSecretEnvelope: envelope,
+      enabled: input.enabled,
+      securityGroupName: input.securityGroupName ?? null,
+      secretExpiresOn: input.secretExpiresOn ?? null,
+      lastTest: null,
+    });
+  }
+
+  /** Records what the test found, so the screen knows which configuration it describes. */
+  async setOidcLastTest(diagnosis: OidcDiagnosis): Promise<void> {
+    const current = await this.getOidc();
+    await this.writeOidc({ ...current, lastTest: diagnosis });
+  }
+
+  /**
+   * The connection, decrypted, or null when it cannot be used.
+   *
+   * The only path besides the Xray credential that decrypts a stored secret. Null rather than
+   * throwing for a missing or unreadable one: an unusable credential is an operational state
+   * the sign-in route reports as unavailable, not an exception escaping into a redirect the
+   * person is already halfway through.
+   */
+  async oidcClientConfig(): Promise<OidcClientConfig | null> {
+    const stored = await this.getOidc();
+    if (stored.issuerUrl === "" || stored.clientId === "" || stored.clientSecretEnvelope === null) {
+      return null;
+    }
+
+    const key = this.deps.config.SECRETS_KEY;
+    if (!key) return null;
+
+    try {
+      return {
+        issuerUrl: stored.issuerUrl,
+        clientId: stored.clientId,
+        clientSecret: openSecret(stored.clientSecretEnvelope, key),
+      };
+    } catch {
+      // A rotated SECRETS_KEY, or a value edited by hand. Reported by the screen as a
+      // connection that needs its secret entered again.
+      return null;
+    }
+  }
+
+  /**
+   * Whether the sign-in button should be offered.
+   *
+   * Requires both the switch and a usable connection. Offering a button that cannot complete
+   * sends somebody to the provider and back to an error, and the error arrives after they have
+   * authenticated -- which reads as the platform losing their login.
+   */
+  async oidcEnabled(): Promise<boolean> {
+    const stored = await this.getOidc();
+    return stored.enabled && (await this.oidcClientConfig()) !== null;
   }
 
   async setVulnProvider(provider: VulnProvider): Promise<void> {

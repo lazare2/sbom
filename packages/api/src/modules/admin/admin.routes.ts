@@ -17,8 +17,12 @@ import {
   mergeApplicationRequestSchema,
   resetUserPasswordRequestSchema,
   setGroupMembersRequestSchema,
+  oidcConnectionInputSchema,
   previewUserApplicationAccessSchema,
   setUserApplicationAccessSchema,
+  testOidcConnectionSchema,
+  OIDC_CALLBACK_PATH,
+  type OidcDiagnosis,
   setUserEnvironmentsRequestSchema,
   updateGroupRequestSchema,
   updateMaliciousSettingsSchema,
@@ -32,6 +36,7 @@ import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
 import { vulnAdminRoutes } from "../vulnerabilities/vuln-admin.routes.js";
 import type { Actor } from "./audit.service.js";
+import { OidcClient } from "../../services/auth/oidc-client.js";
 
 /** The acting admin, denormalised onto every audit row this request writes. */
 function actorOf(request: FastifyRequest): Actor {
@@ -84,6 +89,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     ingestTokens,
     sbomBackfill,
     settings,
+    config,
   } = fastify.ctx;
 
   fastify.addHook("preHandler", fastify.requireAdmin);
@@ -656,4 +662,125 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     });
     return reply.send({ removed });
   });
+
+  // -------------------------------------------------------------------------
+  // Single sign-on
+  // -------------------------------------------------------------------------
+
+  /*
+    One spelling of the redirect URI, built from the deployment's public URL.
+
+    The provider compares this string exactly and reports a mismatch in the browser, where
+    this platform never sees it -- so a second spelling somewhere would produce a failure that
+    is invisible from here and takes a directory administrator to diagnose.
+  */
+  const oidcRedirectUri = (): string =>
+    `${config.PUBLIC_URL.replace(/\/+$/, "")}${OIDC_CALLBACK_PATH}`;
+
+  fastify.get("/auth/oidc", async (_request, reply) => {
+    return reply.send(await settings.getOidcSettings());
+  });
+
+  fastify.put("/auth/oidc", async (request, reply) => {
+    const body = parseOrThrow(oidcConnectionInputSchema, request.body);
+    const before = await settings.getOidcSettings();
+    await settings.setOidcConnection(body);
+    const after = await settings.getOidcSettings();
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "auth.oidc_update",
+      targetType: "setting",
+      targetId: "auth.oidc",
+      /*
+        Whether a credential was replaced, never the credential -- not even a masked or
+        truncated form of it. The issuer and client id are identifiers rather than secrets and
+        are recorded in full, because "the connection changed" answers nothing six months
+        later.
+      */
+      metadata: {
+        issuerUrl: {
+          from: before.connection?.issuerUrl ?? null,
+          to: after.connection?.issuerUrl ?? null,
+        },
+        clientId: {
+          from: before.connection?.clientId ?? null,
+          to: after.connection?.clientId ?? null,
+        },
+        enabled: {
+          from: before.connection?.enabled ?? false,
+          to: after.connection?.enabled ?? false,
+        },
+        secretReplaced: body.clientSecret !== undefined && body.clientSecret !== "",
+      },
+    });
+
+    return reply.send(after);
+  });
+
+  fastify.post("/auth/oidc/test", async (request, reply) => {
+    const body = parseOrThrow(testOidcConnectionSchema, request.body ?? {});
+    const redirectUri = oidcRedirectUri();
+
+    /*
+      A candidate may arrive without its secret: the provider shows that value once, so an
+      administrator correcting a typo in the issuer has nothing to paste. Falling back to the
+      stored secret is what lets the corrected URL be tested before it is saved.
+    */
+    const stored = await settings.oidcClientConfig();
+    const candidate = body.connection;
+    const clientConfig = candidate
+      ? ((): typeof stored => {
+          const secret = candidate.clientSecret ?? stored?.clientSecret ?? null;
+          if (secret === null) return null;
+          return {
+            issuerUrl: candidate.issuerUrl,
+            clientId: candidate.clientId,
+            clientSecret: secret,
+          };
+        })()
+      : stored;
+
+    let diagnosis: OidcDiagnosis;
+    if (clientConfig === null) {
+      const noKey = !config.SECRETS_KEY;
+      diagnosis = {
+        ok: false,
+        code: noKey ? "secrets_key_missing" : "not_configured",
+        summary: noKey
+          ? "This deployment has no SECRETS_KEY, so a client secret cannot be stored or read."
+          : "No connection is configured yet.",
+        hint: noKey
+          ? "Add SECRETS_KEY to the environment and restart, then save the connection again."
+          : "Enter the issuer URL, client id and client secret, then test.",
+        detail: null,
+        issuer: null,
+        authorizationEndpoint: null,
+        tokenEndpoint: null,
+        jwksKeyCount: null,
+        credentialsAccepted: null,
+        redirectUri,
+        checkedAt: new Date().toISOString(),
+      };
+    } else {
+      diagnosis = await new OidcClient(clientConfig).diagnose(redirectUri);
+    }
+
+    /*
+      Only a test of the stored connection is recorded. A verdict about an unsaved candidate
+      would sit on the screen describing a configuration that was never kept.
+    */
+    if (!candidate) await settings.setOidcLastTest(diagnosis);
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "auth.oidc_test",
+      targetType: "setting",
+      targetId: "auth.oidc",
+      metadata: { ok: diagnosis.ok, code: diagnosis.code, saved: !candidate },
+    });
+
+    return reply.send(diagnosis);
+  });
 }
+
