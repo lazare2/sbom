@@ -36,6 +36,9 @@ import type {
   VulnProvider,
   VulnProviderSettings,
   VulnScanStatus,
+  OidcConnectionInput,
+  OidcDiagnosis,
+  OidcSettings,
   XrayConnectionInput,
   XrayDiagnosis,
   XraySettings,
@@ -348,6 +351,40 @@ export function useTestXrayConnection() {
       api.post<XrayDiagnosis>("/admin/vuln/provider/xray/test", connection ? { connection } : {}),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+  });
+}
+
+/**
+ * Saves the sign-on connection.
+ *
+ * The response is the full settings object, so it is written straight into the cache rather
+ * than invalidated -- exact, and it saves a round trip on a screen somebody is mid-setup on.
+ */
+export function useSetOidcConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: OidcConnectionInput) => api.put<OidcSettings>("/admin/auth/oidc", body),
+    onSuccess: (result) => {
+      qc.setQueryData(queryKeys.oidcSettings(), result);
+    },
+  });
+}
+
+/**
+ * Tests the connection.
+ *
+ * Resolves rather than rejects when the connection fails: the diagnosis *is* the answer, and
+ * turning it into an ApiError would discard the hint and the redirect URI that make it worth
+ * having. Invalidates afterwards because a test of the stored connection records its verdict.
+ */
+export function useTestOidcConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connection?: OidcConnectionInput) =>
+      api.post<OidcDiagnosis>("/admin/auth/oidc/test", connection ? { connection } : {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.oidcSettings() });
     },
   });
 }

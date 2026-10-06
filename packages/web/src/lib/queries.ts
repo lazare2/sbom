@@ -38,6 +38,7 @@ import type {
   SuppressionSummary,
   TopComponentEntry,
   UserApplicationAccess,
+  OidcSettings,
   ApplicationAccessPreview,
   PreviewUserApplicationAccess,
   UserSummary,
@@ -109,6 +110,7 @@ export const queryKeys = {
   environments: ["environments"] as const,
   userEnvironments: (id: string) => ["admin", "user-environments", id] as const,
   userApplicationAccess: (id: string) => ["admin", "user-application-access", id] as const,
+  oidcSettings: () => ["admin", "oidc-settings"] as const,
   userApplicationAccessPreview: (id: string, candidate: unknown) =>
     ["admin", "user-application-access-preview", id, candidate] as const,
   environmentComparison: ["admin", "environment-comparison"] as const,
@@ -560,6 +562,14 @@ export function useUserEnvironments(id: string | null) {
     queryKey: queryKeys.userEnvironments(id ?? ""),
     queryFn: () => api.get<{ environmentIds: string[] }>(`/admin/users/${id}/environments`),
     enabled: id !== null,
+  });
+}
+
+/** The single sign-on connection, never its secret. Admin only. */
+export function useOidcSettings() {
+  return useQuery({
+    queryKey: queryKeys.oidcSettings(),
+    queryFn: () => api.get<OidcSettings>("/admin/auth/oidc"),
   });
 }
 

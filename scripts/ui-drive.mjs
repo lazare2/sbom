@@ -2570,6 +2570,78 @@ if ((await page.locator("tbody tr").count()) === 0) {
   await shot("advisory-packages-expanded");
 }
 
+// --- 24. the authentication tab -------------------------------------------
+//
+// The gate that matters for a new page: the endpoints can return correct JSON to a component
+// that crashes on it, and nothing else here would notice. Deliberately exercises the failure
+// path as well, because the diagnosis renderer is the part with branches in it.
+log("\n24. single sign-on configuration");
+
+await page.goto(`${BASE}/admin/authentication`, { waitUntil: "networkidle" });
+await page.waitForTimeout(900);
+await expectText("Single sign-on", "the authentication tab");
+
+// The redirect URI has to be readable before anything is configured -- it is the string an
+// administrator has to hand their directory team, and needing to run a test to learn it would
+// make that a chicken-and-egg.
+await expectText("/api/v1/auth/oidc/callback", "the redirect URI to register");
+
+{
+  const enable = page.getByRole("checkbox", { name: /Offer the organisation sign-in button/ });
+  if (await enable.isEnabled()) {
+    problems.push("the sign-on switch was offered with no connection configured");
+  } else {
+    log("  OK   the switch is inert until there is something to switch on");
+  }
+}
+
+/*
+  A deliberately unresolvable issuer, so the diagnosis renders without this gate depending on
+  reaching Microsoft. `.invalid` is reserved by RFC 2606 and never resolves, so it fails fast
+  and identically on every machine.
+
+  Nothing is saved: testing unsaved values takes the candidate path, which does not record a
+  verdict, so this leaves no state behind for the next run or for the smoke test.
+*/
+const DRIVE_SECRET = "ui-drive-oidc-secret";
+await page.getByLabel("Issuer URL").fill("https://oidc.invalid/v2.0");
+await page.getByLabel("Application (client) ID").fill("ui-drive-client");
+await page.getByLabel("Client secret").fill(DRIVE_SECRET);
+await page.waitForTimeout(200);
+await page.getByRole("button", { name: "Test connection" }).click();
+await page.waitForTimeout(2500);
+await page.waitForLoadState("networkidle");
+
+{
+  const body = await page.locator("body").innerText();
+  if (!/Failed/.test(body)) {
+    problems.push("an unreachable issuer did not render as a failure");
+  } else if (!/issuer_unreachable/.test(body)) {
+    problems.push("the failure rendered without the code that names it");
+  } else {
+    log("  OK   an unreachable issuer is diagnosed on the page, with its code");
+  }
+  // The secret was typed into this form and sent to the server. It must not come back, and
+  // must not be echoed into the diagnosis -- which carries text this platform did not author.
+  if (new RegExp(DRIVE_SECRET).test(body)) {
+    problems.push("the authentication page displayed the submitted client secret");
+  }
+}
+
+await shot("admin-authentication");
+
+// Reloaded so nothing typed above leaks into a later step. Nothing was saved.
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForTimeout(500);
+{
+  const after = await page.locator("body").innerText();
+  if (/oidc\.invalid/.test(after)) {
+    problems.push("testing an unsaved connection stored it anyway");
+  } else {
+    log("  OK   testing unsaved values stored nothing");
+  }
+}
+
 await context.close();
 const darkContext = await browser.newContext({
   viewport: { width: 1500, height: 950 },
