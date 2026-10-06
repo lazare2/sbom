@@ -2,6 +2,10 @@ import { sql, type SQL } from "drizzle-orm";
 import {
   UNRESTRICTED_APPLICATIONS,
   type ApplicationAccess,
+  type ApplicationAccessEmptyGroup,
+  type ApplicationAccessEnvironmentGap,
+  type ApplicationAccessPreview,
+  type PreviewUserApplicationAccess,
   type SetUserApplicationAccess,
   type UserApplicationAccess,
 } from "@sbom/shared";
@@ -108,38 +112,155 @@ export class ApplicationAccessService {
     );
     const restricted = rowsOf(flag)[0]?.restricted ?? false;
 
+    /*
+      The environment grants ride along on the same round trip, because the figure below is an
+      intersection of both axes and reading them separately would double the cost of opening
+      the screen. This is a row read, not an access decision -- which estate a request may
+      reach is still decided in one place, by `EnvironmentService.permits`.
+    */
     const result = await this.deps.db.execute<Row<{ kind: string; id: string }>>(sql`
       SELECT 'group' AS kind, group_id AS id FROM user_group WHERE user_id = ${userId}::uuid
       UNION ALL
       SELECT 'application' AS kind, application_id AS id
         FROM user_application WHERE user_id = ${userId}::uuid
+      UNION ALL
+      SELECT 'environment' AS kind, environment_id AS id
+        FROM user_environment WHERE user_id = ${userId}::uuid
     `);
     const rows = rowsOf(result);
     const groupIds = rows.filter((r) => r.kind === "group").map((r) => r.id);
     const applicationIds = rows.filter((r) => r.kind === "application").map((r) => r.id);
+    const environmentIds = rows.filter((r) => r.kind === "environment").map((r) => r.id);
 
     return {
       restricted,
       groupIds,
       applicationIds,
       visibleApplicationCount: restricted
-        ? await this.countVisible({ unrestricted: false, groupIds, applicationIds })
+        ? await this.countVisible({ unrestricted: false, groupIds, applicationIds }, environmentIds)
         : null,
     };
   }
 
   /**
-   * How many applications a restricted grant set actually reaches.
+   * How many applications a grant set actually reaches.
    *
    * Counted rather than added up from the two lists, because a group's members overlap with
    * each other and with directly granted applications. "Three groups and two applications"
    * does not tell an administrator whether they have granted four services or forty.
+   *
+   * Intersected with the environment grants rather than filtered by the application axis
+   * alone. The two axes intersect everywhere a request is served, so applying one here
+   * counted applications the account cannot open: an account granted a group whose members
+   * all live in an estate it was never given read "reaches 12" while seeing none, and a
+   * figure that is wrong in the reassuring direction is worse than no figure.
    */
-  private async countVisible(access: ApplicationAccess): Promise<number> {
+  private async countVisible(
+    access: ApplicationAccess,
+    environmentIds: readonly string[],
+  ): Promise<number> {
     const result = await this.deps.db.execute<Row<{ n: number | string }>>(
-      sql`SELECT count(*)::int AS n FROM application a WHERE ${visibleApplications(access, "a")}`,
+      sql`SELECT count(*)::int AS n
+            FROM application a
+           WHERE a.environment_id = ANY(${sql.param([...environmentIds])}::uuid[])
+             AND ${visibleApplications(access, "a")}`,
     );
     return Number(rowsOf(result)[0]?.n ?? 0);
+  }
+
+  /**
+   * Scores a candidate grant set without storing it.
+   *
+   * Takes the environment grants as an argument rather than reading them, so the screen can
+   * score ticks the administrator has not saved on either axis. The caller supplies the
+   * stored set when only the application axis is being edited.
+   *
+   * Nothing here writes. The route is a POST only because the candidate does not fit in a
+   * query string, and it records no audit row for the same reason.
+   */
+  async preview(
+    input: Pick<PreviewUserApplicationAccess, "restricted" | "groupIds" | "applicationIds">,
+    environmentIds: readonly string[],
+  ): Promise<ApplicationAccessPreview> {
+    const access: ApplicationAccess = input.restricted
+      ? {
+          unrestricted: false,
+          groupIds: [...new Set(input.groupIds)],
+          applicationIds: [...new Set(input.applicationIds)],
+        }
+      : UNRESTRICTED_APPLICATIONS;
+
+    const [reachableApplicationCount, blockedByEnvironment, emptyGroups] = await Promise.all([
+      this.countVisible(access, environmentIds),
+      /*
+        Both lists are empty for an unrestricted account on purpose. It names no applications
+        and no groups, so there is nothing for an estate to hold back and no group whose
+        emptiness matters -- reporting either would be a warning about a grant nobody made.
+      */
+      input.restricted
+        ? this.environmentGaps(access, environmentIds)
+        : Promise.resolve<ApplicationAccessEnvironmentGap[]>([]),
+      input.restricted
+        ? this.emptyGroups(input.groupIds)
+        : Promise.resolve<ApplicationAccessEmptyGroup[]>([]),
+    ]);
+
+    return { reachableApplicationCount, blockedByEnvironment, emptyGroups };
+  }
+
+  /**
+   * Applications the grants name but the environment axis hides, grouped by estate.
+   *
+   * This is what turns an unexplained zero into an instruction. "Reaches 0 of 12" reads as a
+   * broken save; "0, because all 12 are in production and this account has no access to
+   * production" names both the cause and the fix.
+   *
+   * An empty environment list correctly blocks everything, because `= ANY` over an empty
+   * array is false and its negation is true -- which is the right answer for an account that
+   * has been granted no estates at all.
+   */
+  private async environmentGaps(
+    access: ApplicationAccess,
+    environmentIds: readonly string[],
+  ): Promise<ApplicationAccessEnvironmentGap[]> {
+    const result = await this.deps.db.execute<
+      Row<{ environment_id: string; environment_name: string; application_count: number | string }>
+    >(
+      sql`SELECT e.id AS environment_id, e.name AS environment_name,
+                 count(*)::int AS application_count
+            FROM application a
+            JOIN environment e ON e.id = a.environment_id
+           WHERE ${visibleApplications(access, "a")}
+             AND NOT (a.environment_id = ANY(${sql.param([...environmentIds])}::uuid[]))
+           GROUP BY e.id, e.name
+           ORDER BY count(*) DESC, e.name ASC`,
+    );
+    return rowsOf(result).map((row) => ({
+      environmentId: row.environment_id,
+      environmentName: row.environment_name,
+      applicationCount: Number(row.application_count),
+    }));
+  }
+
+  /**
+   * Granted groups that contain nothing.
+   *
+   * Worth its own warning because the grant looks identical to a working one on the screen
+   * and in the audit trail: a row exists, a name is ticked, and the reach is zero. Without
+   * this an administrator investigates permissions when the fix is group membership.
+   */
+  private async emptyGroups(groupIds: readonly string[]): Promise<ApplicationAccessEmptyGroup[]> {
+    if (groupIds.length === 0) return [];
+    const result = await this.deps.db.execute<Row<{ group_id: string; name: string }>>(
+      sql`SELECT g.id AS group_id, g.name
+            FROM application_group g
+           WHERE g.id = ANY(${sql.param([...groupIds])}::uuid[])
+             AND NOT EXISTS (
+               SELECT 1 FROM application_group_member m WHERE m.group_id = g.id
+             )
+           ORDER BY g.name ASC`,
+    );
+    return rowsOf(result).map((row) => ({ groupId: row.group_id, name: row.name }));
   }
 
   /**

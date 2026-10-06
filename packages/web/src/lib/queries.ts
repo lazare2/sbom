@@ -38,6 +38,8 @@ import type {
   SuppressionSummary,
   TopComponentEntry,
   UserApplicationAccess,
+  ApplicationAccessPreview,
+  PreviewUserApplicationAccess,
   UserSummary,
   VulnBreakdown,
   VulnDbUpdateAttempt,
@@ -107,6 +109,8 @@ export const queryKeys = {
   environments: ["environments"] as const,
   userEnvironments: (id: string) => ["admin", "user-environments", id] as const,
   userApplicationAccess: (id: string) => ["admin", "user-application-access", id] as const,
+  userApplicationAccessPreview: (id: string, candidate: unknown) =>
+    ["admin", "user-application-access-preview", id, candidate] as const,
   environmentComparison: ["admin", "environment-comparison"] as const,
   auditLog: (params: Record<string, unknown>) => ["admin", "audit-log", params] as const,
   apiErrors: (params: Record<string, unknown>) => ["admin", "errors", params] as const,
@@ -565,6 +569,34 @@ export function useUserApplicationAccess(id: string | null) {
     queryKey: queryKeys.userApplicationAccess(id ?? ""),
     queryFn: () => api.get<UserApplicationAccess>(`/admin/users/${id}/application-access`),
     enabled: id !== null,
+  });
+}
+
+/**
+ * What a candidate grant set would reach, scored while it is still being edited.
+ *
+ * Keyed on the candidate rather than on the account, so every tick asks the server again and
+ * the figure on screen always describes the boxes as they stand. The saved figure cannot do
+ * this: it only moves after the write, which makes a correct grant and a failed one look
+ * identical until the modal is reopened.
+ *
+ * The previous answer is held while the next is in flight. Blanking it on each tick makes the
+ * number flicker, and a number that flickers is one an administrator stops reading.
+ */
+export function useApplicationAccessPreview(
+  id: string | null,
+  candidate: PreviewUserApplicationAccess,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.userApplicationAccessPreview(id ?? "", candidate),
+    queryFn: () =>
+      api.post<ApplicationAccessPreview>(
+        `/admin/users/${id}/application-access/preview`,
+        candidate,
+      ),
+    enabled: id !== null && enabled,
+    placeholderData: (previous) => previous,
   });
 }
 

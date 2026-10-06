@@ -986,7 +986,29 @@ log("18a. granting an account access to particular groups");
         log("  OK   the restriction and its grant were stored, not just displayed");
       }
 
-      await expectText("Currently reaches", "the visible-application count");
+      await expectText("Will reach", "the live reach figure");
+
+      /*
+        The figure has to track the boxes rather than the last save. Unticking the one granted
+        application must move it with no save in between -- that is the whole point of scoring
+        a candidate, and a figure read back from the stored grant would satisfy the text
+        assertion above while telling an administrator nothing until they reopened the modal.
+      */
+      try {
+        const reachLine = reopened.getByText(/Will reach/).first();
+        const reachBefore = (await reachLine.innerText()).trim();
+        await reopened.getByRole("checkbox", { name: TEST_APP }).click();
+        await page.waitForTimeout(1200);
+        await page.waitForLoadState("networkidle");
+        const reachAfter = (await reopened.getByText(/Will reach/).first().innerText()).trim();
+        if (reachBefore === reachAfter) {
+          problems.push("the reach figure did not move when a grant was unticked");
+        } else {
+          log(`  OK   the reach figure tracks the boxes ("${reachBefore}" -> "${reachAfter}")`);
+        }
+      } catch (err) {
+        problems.push(`could not read the live reach figure: ${err.message}`);
+      }
       await shot("admin-user-access");
 
       // Put it back, so the account this run created is left as it was found and the later

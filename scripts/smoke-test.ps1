@@ -3955,6 +3955,121 @@ try {
         return $null -ne $rows[0].metadata.visible
     }
 
+    Assert-That "a group grant reaches nothing once the estate holding it is revoked" {
+        # The two axes compose by intersection everywhere a request is served, so the figure
+        # the admin screen shows has to intersect them too. It did not: it applied the
+        # application axis alone and reported one visible application to an account holding no
+        # estate at all -- wrong in the reassuring direction, which is the worst way for an
+        # access figure to be wrong, because nobody goes looking.
+        $g = New-JsonFile -Name "acc-grant-intersect.json" -Data @{
+            restricted = $true; groupIds = @($script:accGroupAId); applicationIds = @()
+        }
+        $set = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:accUserId)/application-access",
+            "-H", $jsonCt, "--data-binary", "@$g", "-b", $readJar)
+        if ($set.Status -ne 200) { Show-Body $set 200; return $false }
+        if ([int]$set.Json.visibleApplicationCount -ne 1) {
+            Write-Host "        expected 1 visible before revoking the estate, got $($set.Json.visibleApplicationCount)" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $before = Invoke-Api @("$adminUrl/users/$($script:accUserId)/environments", "-b", $readJar)
+        if ($before.Status -ne 200) { Show-Body $before 200; return $false }
+        $script:accEnvIds = @($before.Json.environmentIds)
+        if ($script:accEnvIds.Count -lt 1) {
+            # Asserted rather than assumed: with no estate to revoke this test would pass
+            # while exercising nothing, which reads as coverage and is worse than no test.
+            Write-Host "        account holds no estates, so nothing could be revoked" -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $e = New-JsonFile -Name "acc-env-none.json" -Data @{ environmentIds = @() }
+        $r = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:accUserId)/environments",
+            "-H", $jsonCt, "--data-binary", "@$e", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+
+        $a = Invoke-Api @("$adminUrl/users/$($script:accUserId)/application-access", "-b", $readJar)
+        if ($a.Status -ne 200) { Show-Body $a 200; return $false }
+        if ([int]$a.Json.visibleApplicationCount -ne 0) {
+            Write-Host "        reports $($a.Json.visibleApplicationCount) visible with no estate granted, expected 0" -ForegroundColor DarkYellow
+            return $false
+        }
+        return $true
+    }
+
+    Assert-That "the preview names the estate that is hiding a granted application" {
+        # A zero on its own reads as a broken save. Naming the estate turns it into an
+        # instruction, and is what lets the screen offer to widen the estate rather than
+        # expand the group into direct grants -- which would stop following the group.
+        $p = New-JsonFile -Name "acc-preview-gap.json" -Data @{
+            restricted = $true
+            groupIds = @($script:accGroupAId)
+            applicationIds = @()
+            environmentIds = @()
+        }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/users/$($script:accUserId)/application-access/preview",
+            "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        if ([int]$r.Json.reachableApplicationCount -ne 0) {
+            Write-Host "        preview reports $($r.Json.reachableApplicationCount) reachable, expected 0" -ForegroundColor DarkYellow
+            return $false
+        }
+        $gaps = @($r.Json.blockedByEnvironment)
+        if ($gaps.Count -lt 1) {
+            Write-Host "        preview named no blocked estate; expected the one holding group A" -ForegroundColor DarkYellow
+            return $false
+        }
+        return ([int]$gaps[0].applicationCount -ge 1) -and
+               (-not [string]::IsNullOrWhiteSpace($gaps[0].environmentName))
+    }
+
+    Assert-That "the preview warns that an empty group grants nothing" {
+        # A grant naming an empty group looks identical to a working one on the screen and in
+        # the audit trail: a row exists, a name is ticked, the reach is zero. Saying so is what
+        # stops the next person investigating permissions when the fix is group membership.
+        $g = New-JsonFile -Name "acc-empty-group.json" -Data @{
+            name = "smoke-acc-group-empty-$accSuffix"
+        }
+        $c = Invoke-Api @("-X", "POST", "$adminUrl/groups", "-H", $jsonCt, "--data-binary", "@$g", "-b", $readJar)
+        if ($c.Status -ne 201) { Show-Body $c 201; return $false }
+        $emptyId = $c.Json.group.id
+
+        $p = New-JsonFile -Name "acc-preview-empty.json" -Data @{
+            restricted = $true
+            groupIds = @($emptyId)
+            applicationIds = @()
+            environmentIds = @($script:accEnvIds)
+        }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/users/$($script:accUserId)/application-access/preview",
+            "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+
+        # Removed here rather than in the section cleanup, so a failed assertion above still
+        # leaves no group behind.
+        $d = Invoke-Api @("-X", "DELETE", "$adminUrl/groups/$emptyId", "-b", $readJar)
+        if ($d.Status -ne 204 -and $d.Status -ne 200) {
+            Write-Host "        could not delete the empty group $emptyId ($($d.Status))" -ForegroundColor DarkYellow
+        }
+
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        $empties = @($r.Json.emptyGroups)
+        return ([int]$r.Json.reachableApplicationCount -eq 0) -and ($empties.Count -eq 1) -and
+               ($empties[0].groupId -eq $emptyId)
+    }
+
+    Assert-That "restores the estate grant, and the figure comes back with it" {
+        # Leaves the account as the section found it. A run that ended with every estate
+        # revoked would make the next run's first assertion fail for a reason that has nothing
+        # to do with the code under test.
+        $e = New-JsonFile -Name "acc-env-restore.json" -Data @{
+            environmentIds = @($script:accEnvIds)
+        }
+        $r = Invoke-Api @("-X", "PUT", "$adminUrl/users/$($script:accUserId)/environments",
+            "-H", $jsonCt, "--data-binary", "@$e", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+
+        $a = Invoke-Api @("$adminUrl/users/$($script:accUserId)/application-access", "-b", $readJar)
+        return ($a.Status -eq 200) -and ([int]$a.Json.visibleApplicationCount -eq 1)
+    }
+
     Assert-That "removes the account this section created" {
         if (-not $script:accUserId) { return $true }
         $r = Invoke-Api @("-X", "DELETE", "$adminUrl/users/$($script:accUserId)", "-b", $readJar)

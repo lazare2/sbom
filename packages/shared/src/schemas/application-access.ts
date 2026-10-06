@@ -87,3 +87,61 @@ export interface UserApplicationAccess {
    */
   visibleApplicationCount: number | null;
 }
+
+/**
+ * A candidate grant set, scored before anybody saves it.
+ *
+ * The figure in `UserApplicationAccess` answers "what does this account reach now". This
+ * answers "what would it reach if I pressed save", which is a different question and the one
+ * an administrator is actually asking while ticking boxes. Without it the screen can only
+ * recalculate after the write, so a correct grant is indistinguishable from a failed one until
+ * the modal is reopened — and the reasonable conclusion from that is that the save did not
+ * work.
+ */
+export const previewUserApplicationAccessSchema = z.object({
+  restricted: z.boolean(),
+  groupIds: z.array(uuidSchema).max(USER_GROUP_GRANT_LIMIT).default([]),
+  applicationIds: z.array(uuidSchema).max(USER_APPLICATION_GRANT_LIMIT).default([]),
+  /**
+   * The environment grants to score against, or null to use whatever is already stored.
+   *
+   * Null rather than an empty array, because the two mean opposite things. One modal edits
+   * both axes and leaves this untouched until somebody moves a tick, and scoring an untouched
+   * axis as "no environments granted" would report every account as reaching nothing.
+   */
+  environmentIds: z.array(uuidSchema).nullable().default(null),
+});
+export type PreviewUserApplicationAccess = z.infer<typeof previewUserApplicationAccessSchema>;
+
+/** One estate a candidate grant names applications in but cannot reach. */
+export interface ApplicationAccessEnvironmentGap {
+  environmentId: string;
+  environmentName: string;
+  /** How many granted applications sit in this estate, and are therefore invisible. */
+  applicationCount: number;
+}
+
+/** A granted group that contains nothing, and so grants nothing. */
+export interface ApplicationAccessEmptyGroup {
+  groupId: string;
+  name: string;
+}
+
+/**
+ * What a candidate grant set would actually reach.
+ *
+ * `reachableApplicationCount` intersects both axes, which is the only honest reading: an
+ * application is visible when its estate is granted AND a group or direct grant names it.
+ * Applying the second axis alone counts applications the account cannot open, and presents
+ * them as a reassuring number rather than as a problem.
+ *
+ * The two lists exist so that the number is explicable. "Reaches 0 of 12" is a bug report;
+ * "0, because all 12 are in production and this account has no access to production" is an
+ * instruction.
+ */
+export interface ApplicationAccessPreview {
+  reachableApplicationCount: number;
+  /** Named applications held back by the environment axis, grouped by estate. */
+  blockedByEnvironment: ApplicationAccessEnvironmentGap[];
+  emptyGroups: ApplicationAccessEmptyGroup[];
+}

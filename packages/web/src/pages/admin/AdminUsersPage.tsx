@@ -13,6 +13,7 @@ import {
   useUpdateUser,
 } from "../../lib/mutations.ts";
 import {
+  useApplicationAccessPreview,
   useEnvironments,
   useGrantableScope,
   useUserApplicationAccess,
@@ -719,8 +720,38 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
   const saving = saveEnvironments.isPending || saveAccess.isPending;
   const dirty = envIds !== null || restricted !== null || groupIds !== null || appIds !== null;
 
+  /*
+    Scored against the boxes as they stand rather than against the last save. Both axes are
+    sent, including the environment ticks, because the answer is their intersection and
+    scoring the application axis alone reports applications the account cannot open.
+  */
+  const preview = useApplicationAccessPreview(
+    target?.id ?? null,
+    {
+      restricted: currentRestricted,
+      groupIds: currentGroups,
+      applicationIds: currentApps,
+      environmentIds: currentEnvs,
+    },
+    !loading,
+  );
+
+  const blocked = preview.data?.blockedByEnvironment ?? [];
+  const blockedTotal = blocked.reduce((sum, gap) => sum + gap.applicationCount, 0);
+
   function toggle(list: string[], id: string, on: boolean): string[] {
     return on ? [...list, id] : list.filter((entry) => entry !== id);
+  }
+
+  /*
+    Widens the estate rather than expanding the group into direct application grants. A direct
+    grant follows nothing -- an application added to the group next month would not appear, and
+    nobody could later tell which of the account's direct grants were deliberate and which were
+    expanded here -- so granting the environment is the change that leaves the group doing the
+    job it was granted for.
+  */
+  function grantBlockedEnvironments() {
+    setEnvIds([...new Set([...currentEnvs, ...blocked.map((gap) => gap.environmentId)])]);
   }
 
   function close() {
@@ -924,18 +955,56 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
             {/*
               The count, not the two list lengths. Groups overlap with each other and with
               directly granted applications, so "two groups and one application" does not tell
-              an administrator whether they have granted three services or thirty — and a
-              number they have to reconcile themselves is how somebody concludes a save failed.
+              an administrator whether they have granted three services or thirty.
+
+              Scored live, and across both axes. The stored figure only moved after the write,
+              which made a grant that was working and a grant that had failed look identical
+              until the modal was reopened; and it ignored the environment axis, so it could
+              report twelve applications to an account that could open none of them.
             */}
-            {currentRestricted && access.data ? (
-              <p className="border-t border-border-base pt-3 text-[11px] text-text-muted">
-                Currently reaches{" "}
-                <strong className="text-text-base">
-                  {access.data.visibleApplicationCount ?? 0}
-                </strong>{" "}
-                {access.data.visibleApplicationCount === 1 ? "application" : "applications"}.
-                Saving recalculates this.
-              </p>
+            {preview.data ? (
+              <div className="space-y-2 border-t border-border-base pt-3 text-[11px] text-text-muted">
+                <p>
+                  Will reach{" "}
+                  <strong className="text-text-base">
+                    {preview.data.reachableApplicationCount}
+                  </strong>{" "}
+                  {preview.data.reachableApplicationCount === 1 ? "application" : "applications"}.
+                </p>
+
+                {/*
+                  An empty group is worth its own line because the grant looks identical to a
+                  working one: a box is ticked, a row is written, and the reach is zero. Without
+                  saying so, the next thing anybody investigates is permissions, when the fix is
+                  group membership.
+                */}
+                {preview.data.emptyGroups.length > 0 ? (
+                  <p className="text-danger">
+                    {preview.data.emptyGroups.map((group) => group.name).join(", ")}{" "}
+                    {preview.data.emptyGroups.length === 1 ? "contains" : "contain"} no
+                    applications, so granting{" "}
+                    {preview.data.emptyGroups.length === 1 ? "it" : "them"} reaches nothing. Add
+                    applications to the group, or grant them directly.
+                  </p>
+                ) : null}
+
+                {blocked.length > 0 ? (
+                  <div className="space-y-1.5 text-danger">
+                    <p>
+                      {blockedTotal}{" "}
+                      {blockedTotal === 1 ? "granted application sits" : "granted applications sit"}{" "}
+                      in {blocked.map((gap) => gap.environmentName).join(", ")}, which this
+                      account cannot reach. The two restrictions compose by intersection, so
+                      those stay invisible however they are granted.
+                    </p>
+                    <Button size="sm" onClick={grantBlockedEnvironments}>
+                      {blocked.length === 1
+                        ? "Also grant that environment"
+                        : "Also grant those environments"}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </>
         )}

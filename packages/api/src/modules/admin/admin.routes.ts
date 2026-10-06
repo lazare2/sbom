@@ -17,6 +17,7 @@ import {
   mergeApplicationRequestSchema,
   resetUserPasswordRequestSchema,
   setGroupMembersRequestSchema,
+  previewUserApplicationAccessSchema,
   setUserApplicationAccessSchema,
   setUserEnvironmentsRequestSchema,
   updateGroupRequestSchema,
@@ -245,6 +246,31 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     return reply.send(after);
+  });
+
+  /**
+   * What a candidate grant set would reach, scored before anybody saves it.
+   *
+   * A POST that writes nothing and records no audit row: the candidate is two lists and does
+   * not fit in a query string, but scoring it is a read. The screen calls this as boxes are
+   * ticked, so a grant that reaches nothing says so while it can still be corrected. Before
+   * this existed the stored figure only moved after the write, which made a correct grant
+   * indistinguishable from a failed one until the modal was reopened.
+   */
+  fastify.post("/users/:id/application-access/preview", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(previewUserApplicationAccessSchema, request.body);
+    await adminUsers.getById(id);
+
+    /*
+      Null means the environment axis is not being edited, so the stored grants are what the
+      candidate is scored against. An empty array is a real candidate -- an administrator who
+      has just unticked every estate -- and the two must not collapse into each other, or
+      every unsaved edit would be scored as reaching nothing.
+    */
+    const environmentIds = body.environmentIds ?? (await environments.environmentsForUser(id));
+
+    return reply.send(await applicationAccess.preview(body, environmentIds));
   });
 
   // -------------------------------------------------------------------------
