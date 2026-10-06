@@ -111,6 +111,7 @@ export const queryKeys = {
   userEnvironments: (id: string) => ["admin", "user-environments", id] as const,
   userApplicationAccess: (id: string) => ["admin", "user-application-access", id] as const,
   oidcSettings: () => ["admin", "oidc-settings"] as const,
+  oidcEnabled: () => ["auth", "oidc-enabled"] as const,
   userApplicationAccessPreview: (id: string, candidate: unknown) =>
     ["admin", "user-application-access-preview", id, candidate] as const,
   environmentComparison: ["admin", "environment-comparison"] as const,
@@ -562,6 +563,20 @@ export function useUserEnvironments(id: string | null) {
     queryKey: queryKeys.userEnvironments(id ?? ""),
     queryFn: () => api.get<{ environmentIds: string[] }>(`/admin/users/${id}/environments`),
     enabled: id !== null,
+  });
+}
+
+/**
+ * Whether the organisation sign-in button should be offered. Readable without a session.
+ *
+ * A boolean and nothing else, which is why it is safe to call from the sign-in page before
+ * anybody is authenticated.
+ */
+export function useOidcEnabled() {
+  return useQuery({
+    queryKey: queryKeys.oidcEnabled(),
+    queryFn: () => api.get<{ enabled: boolean }>("/auth/oidc/enabled"),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

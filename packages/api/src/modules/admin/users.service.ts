@@ -143,8 +143,18 @@ export class AdminUsersService {
    * to a read-only role from silently handing somebody the whole deployment.
    */
   async create(input: CreateUserRequest, actor: Actor): Promise<UserCredentialResponse> {
-    const password = input.password ?? generatePassword();
-    const passwordHash = await hashPassword(password);
+    /*
+      A directory account is created with no password and no hash.
+
+      Not an empty one, and not a generated one nobody is told: the credential lives at the
+      provider, and a password here would be a second way into the account that no policy
+      covers and nobody would ever rotate. `mustChangePassword` is forced off for the same
+      reason -- there is nothing to change, and the flag would lock the account out of every
+      route while offering a form that cannot help.
+    */
+    const directory = input.authProvider !== "local";
+    const password = directory ? null : (input.password ?? generatePassword());
+    const passwordHash = password === null ? null : await hashPassword(password);
 
     let created;
     try {
@@ -153,8 +163,9 @@ export class AdminUsersService {
         .values({
           email: input.email,
           role: input.role,
+          authProvider: input.authProvider,
           passwordHash,
-          mustChangePassword: input.mustChangePassword,
+          mustChangePassword: directory ? false : input.mustChangePassword,
         })
         .returning();
     } catch (err) {
@@ -190,7 +201,15 @@ export class AdminUsersService {
       metadata: { environmentIds: granted, count: granted.length, atCreation: true },
     });
 
-    return { user: toUserSummary(rowToQueryRow(created, 0)), temporaryPassword: password };
+    /*
+      No password comes back for a directory account, because none was made. The screen reads
+      this to decide whether to show a credential to hand over, and a blank string there would
+      render as an empty box somebody would try to copy.
+    */
+    return {
+      user: toUserSummary(rowToQueryRow(created, 0)),
+      temporaryPassword: password ?? undefined,
+    };
   }
 
   async update(id: string, input: UpdateUserRequest, actor: Actor): Promise<UserSummary> {

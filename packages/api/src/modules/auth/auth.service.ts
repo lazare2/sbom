@@ -7,6 +7,7 @@ import { ForbiddenError, UnauthorizedError } from "../../lib/errors.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { AuthProviderRegistry, type AuthContext, type AuthCredentials } from "./provider.js";
 import type { IssuedSession, SessionService } from "./session.service.js";
+import type { VerifiedIdentity } from "../../services/auth/id-token.js";
 
 export interface LoginOutcome {
   user: UserRow;
@@ -35,6 +36,17 @@ export function toSessionUser(row: UserRow): SessionUser {
  * not mailboxes, so a reset link has nowhere to go — recovery is an admin
  * issuing a new password (see AdminUsersService.resetPassword).
  */
+/**
+ * Why a directory sign-in did not produce a session.
+ *
+ * Enumerated rather than thrown, because every one of these ends in a redirect back to the
+ * sign-in page and the reason has to survive the round trip as something short and safe to put
+ * in a URL.
+ */
+export type DirectorySignIn =
+  | { ok: true; user: UserRow; session: IssuedSession }
+  | { ok: false; reason: "no_account" | "inactive" | "identity_conflict" };
+
 export class AuthService {
   constructor(
     private readonly deps: {
@@ -102,6 +114,84 @@ export class AuthService {
 
     // No provider claimed the identity. Same message as a wrong password.
     throw new UnauthorizedError("Invalid email or password");
+  }
+
+  /**
+   * Starts a session for an identity the directory has already authenticated.
+   *
+   * No account is ever created here. An identity the provider vouches for is a person who
+   * works at the organisation; it is not a person who should see this platform's data, and
+   * the difference is the whole access model. Provisioning on first sign-in would hand every
+   * employee an account the moment they found the URL -- and since a new account defaults to
+   * unrestricted application access, several of them would see the entire estate.
+   *
+   * Matching runs subject first, email second:
+   *
+   *   - `auth_subject` is the directory's immutable identifier and the authority once it has
+   *     been recorded. An address that changes upstream cannot orphan an account matched this
+   *     way.
+   *   - The email is used once, for the first sign-in to an account an administrator created
+   *     by address and nobody has used yet. The subject is bound at that moment, and from then
+   *     on the address is irrelevant.
+   *
+   * An email that matches an account already bound to a *different* subject is refused rather
+   * than taken over. That is the shape of a reassigned mailbox -- somebody has left, their
+   * address was given to a new joiner -- and silently admitting the new holder to the old
+   * account is the worst available outcome.
+   */
+  async signInWithDirectory(
+    identity: VerifiedIdentity,
+    ctx: AuthContext,
+  ): Promise<DirectorySignIn> {
+    const { db, sessions } = this.deps;
+
+    const [bySubject] = await db
+      .select()
+      .from(user)
+      .where(sql`${user.authProvider} = 'oidc' AND ${user.authSubject} = ${identity.subject}`)
+      .limit(1);
+
+    let account = bySubject ?? null;
+
+    if (!account && identity.email) {
+      const [byEmail] = await db
+        .select()
+        .from(user)
+        .where(sql`${user.authProvider} = 'oidc' AND lower(${user.email}) = ${identity.email}`)
+        .limit(1);
+
+      if (byEmail) {
+        if (byEmail.authSubject !== null) return { ok: false, reason: "identity_conflict" };
+
+        /*
+          Bound only while it is still unbound. Two sign-ins racing on a first login would
+          otherwise both write, and the partial unique index would abort one of them with a
+          constraint error rather than a refusal anybody can read. The guard makes the loser a
+          no-op, and it re-reads to find out which it was.
+        */
+        const bound = await db
+          .update(user)
+          .set({ authSubject: identity.subject, updatedAt: new Date() })
+          .where(sql`${user.id} = ${byEmail.id} AND ${user.authSubject} IS NULL`)
+          .returning();
+
+        account = bound[0] ?? null;
+        if (!account) {
+          const [after] = await db.select().from(user).where(eq(user.id, byEmail.id)).limit(1);
+          if (!after || after.authSubject !== identity.subject) {
+            return { ok: false, reason: "identity_conflict" };
+          }
+          account = after;
+        }
+      }
+    }
+
+    if (!account) return { ok: false, reason: "no_account" };
+    if (!account.isActive) return { ok: false, reason: "inactive" };
+
+    const session = await sessions.create(account.id, ctx);
+    await db.update(user).set({ lastLoginAt: new Date() }).where(eq(user.id, account.id));
+    return { ok: true, user: account, session };
   }
 
   async logout(token: string): Promise<void> {

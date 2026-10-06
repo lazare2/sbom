@@ -3,12 +3,48 @@ import { Navigate, useSearchParams } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { ApiError } from "../lib/api.ts";
 import { Button, LoadingBlock, TextInput } from "../components/ui.tsx";
+import { useOidcEnabled } from "../lib/queries.ts";
+
+/**
+ * What each refusal means, in words the person reading them can act on.
+ *
+ * Keyed on the short codes the callback redirects with. Anything unrecognised renders nothing
+ * rather than the raw code: the query string is attacker-controllable, and echoing it would
+ * put chosen text on the sign-in page.
+ */
+const SSO_FAILURES: Record<string, string> = {
+  disabled: "Single sign-on is not switched on for this deployment.",
+  provider_unreachable:
+    "This server could not reach your organisation's sign-in service. An administrator can see why on the Authentication page.",
+  provider_refused: "Your organisation's sign-in service refused the request.",
+  expired: "That sign-in attempt timed out. Try again.",
+  bad_state: "That sign-in could not be matched to this browser. Try again.",
+  no_code: "Your organisation's sign-in service did not complete the sign-in.",
+  exchange_failed:
+    "Your organisation's sign-in service would not complete the exchange. An administrator can see why on the Authentication page.",
+  token_rejected: "The response from your organisation's sign-in service could not be trusted.",
+  no_account:
+    "You were signed in successfully, but this platform has no account for you. Ask an administrator to create one.",
+  inactive: "This account has been deactivated. Contact an administrator.",
+  identity_conflict:
+    "An account exists for your address but is already linked to a different identity. Contact an administrator.",
+};
 
 export function LoginPage() {
   const { user, isLoading, login, loginError, isLoggingIn } = useAuth();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const sso = useOidcEnabled();
+
+  /*
+    A refusal from the sign-on round trip, which can only come back as a code in the URL --
+    the browser left this site, authenticated elsewhere, and returned. Every code is mapped to
+    a sentence here rather than being shown raw, and the detail behind it stays in the server's
+    error log: a person who cannot sign in needs to know who to ask, not what the provider
+    said about the redirect URI.
+  */
+  const ssoFailure = SSO_FAILURES[searchParams.get("sso") ?? ""] ?? null;
 
   // Only same-origin paths are honoured, so `?from=https://evil.example` cannot
   // turn the login page into an open redirect.
@@ -67,6 +103,15 @@ export function LoginPage() {
         >
           <h2 className="mb-4 text-sm font-semibold text-text-base">Sign in</h2>
 
+          {ssoFailure ? (
+            <div
+              role="alert"
+              className="mb-4 rounded-md border border-danger bg-danger-subtle px-3 py-2 text-xs text-danger"
+            >
+              {ssoFailure}
+            </div>
+          ) : null}
+
           {errorMessage ? (
             <div
               role="alert"
@@ -121,6 +166,22 @@ export function LoginPage() {
           </div>
 
         </form>
+
+        {/*
+          A link, not a fetch. The provider has to be reached by navigating the browser to it,
+          and an XHR here would be blocked by the provider and look like the button doing
+          nothing.
+        */}
+        {sso.data?.enabled ? (
+          <div className="mt-4 border-t border-border-base pt-4">
+            <a
+              href="/api/v1/auth/oidc/start"
+              className="flex w-full items-center justify-center rounded-md border border-border-base px-3 py-1.5 text-sm font-medium text-text-base transition-colors hover:bg-neutral-subtle"
+            >
+              Sign in with your organisation account
+            </a>
+          </div>
+        ) : null}
 
         <p className="mt-4 text-center text-xs text-text-faint">
           Accounts are created by an administrator, and so are password resets — there is no

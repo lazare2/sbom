@@ -18,6 +18,7 @@ import {
   useGrantableScope,
   useUserApplicationAccess,
   useUserEnvironments,
+  useOidcEnabled,
   useUsers,
 } from "../../lib/queries.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../../lib/useUrlState.ts";
@@ -371,6 +372,8 @@ function CreateUserModal({
   const [role, setRole] = useState<"admin" | "user">("user");
   const [password, setPassword] = useState("");
   const [useOwnPassword, setUseOwnPassword] = useState(false);
+  const [directory, setDirectory] = useState(false);
+  const sso = useOidcEnabled();
   const environments = useEnvironments();
   const allEnvironments = environments.data?.environments ?? [];
   /*
@@ -387,6 +390,7 @@ function CreateUserModal({
     setRole("user");
     setPassword("");
     setUseOwnPassword(false);
+    setDirectory(false);
     setEnvironmentIds(null);
     createUser.reset();
   }
@@ -397,11 +401,18 @@ function CreateUserModal({
       const result = await createUser.mutateAsync({
         email,
         role,
-        mustChangePassword: true,
-        ...(useOwnPassword && password ? { password } : {}),
+        authProvider: directory ? "oidc" : "local",
+        // Meaningless for a directory account, which gets no password to change. The server
+        // forces it off regardless; sending false keeps the request honest about intent.
+        mustChangePassword: !directory,
+        ...(!directory && useOwnPassword && password ? { password } : {}),
         ...(environmentIds === null ? {} : { environmentIds }),
       });
-      onIssued({ email: result.user.email, password: result.temporaryPassword });
+      // A directory account is created with no password, so there is no credential to
+      // hand over and nothing for the modal to show.
+      if (result.temporaryPassword !== undefined) {
+        onIssued({ email: result.user.email, password: result.temporaryPassword });
+      }
     } catch {
       // Rendered from the mutation's error state.
     }
@@ -440,7 +451,11 @@ function CreateUserModal({
               variant="primary"
               type="submit"
               form="create-user-form"
-              disabled={!email || createUser.isPending || (useOwnPassword && password.length < 12)}
+              disabled={
+                !email ||
+                createUser.isPending ||
+                (!directory && useOwnPassword && password.length < 12)
+              }
             >
               {createUser.isPending ? "Creating…" : "Create account"}
             </Button>
@@ -521,17 +536,42 @@ function CreateUserModal({
             </FormRow>
           ) : null}
 
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-text-muted select-none">
-            <input
-              type="checkbox"
-              checked={useOwnPassword}
-              onChange={(e) => setUseOwnPassword(e.target.checked)}
-              className="size-3.5 accent-[var(--accent)]"
-            />
-            Set the password myself instead of generating one
-          </label>
+          {/*
+            Offered only where single sign-on is actually configured. A choice that cannot
+            work is worse than an absent one: it produces an account nobody can sign in to,
+            and nothing on this screen would say why.
+          */}
+          {sso.data?.enabled ? (
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-text-muted select-none">
+              <input
+                type="checkbox"
+                checked={directory}
+                onChange={(e) => setDirectory(e.target.checked)}
+                className="size-3.5 accent-[var(--accent)]"
+              />
+              Signs in with their organisation account
+            </label>
+          ) : null}
 
-          {useOwnPassword ? (
+          {directory ? (
+            <p className="text-xs text-text-faint">
+              No password is created. They sign in through the organisation provider, and the
+              account is matched to their identity the first time they do. Grant projects as
+              usual afterwards.
+            </p>
+          ) : (
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-text-muted select-none">
+              <input
+                type="checkbox"
+                checked={useOwnPassword}
+                onChange={(e) => setUseOwnPassword(e.target.checked)}
+                className="size-3.5 accent-[var(--accent)]"
+              />
+              Set the password myself instead of generating one
+            </label>
+          )}
+
+          {!directory && useOwnPassword ? (
             <FormRow
               label="Initial password"
               htmlFor="new-user-password"
@@ -569,7 +609,11 @@ function ResetPasswordModal({
     if (!target) return;
     try {
       const result = await resetPassword.mutateAsync({ id: target.id });
-      onIssued({ email: result.user.email, password: result.temporaryPassword });
+      // A directory account is created with no password, so there is no credential to
+      // hand over and nothing for the modal to show.
+      if (result.temporaryPassword !== undefined) {
+        onIssued({ email: result.user.email, password: result.temporaryPassword });
+      }
     } catch {
       // Rendered from the mutation's error state.
     }

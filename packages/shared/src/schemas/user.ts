@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { uuidSchema } from "./common.js";
-import { userRoleSchema, type AuthProviderName } from "../enums.js";
+import { authProviderNameSchema, userRoleSchema, type AuthProviderName } from "../enums.js";
 import { emailSchema, passwordSchema } from "./auth.js";
 import { paginationQuerySchema } from "./common.js";
 import { defineSortTable } from "./sort.js";
@@ -25,7 +25,15 @@ export const createUserRequestSchema = z.object({
   environmentIds: z.array(uuidSchema).max(100).optional(),
   email: emailSchema,
   role: userRoleSchema.default("user"),
-  /** Omit to have the server generate one and return it once. */
+  /**
+   * Which backend owns this account's credentials.
+   *
+   * `oidc` creates an account with no password at all: the directory holds the credential and
+   * this platform never sees one, so generating a password here would produce a second way in
+   * that nobody asked for and nobody would ever rotate.
+   */
+  authProvider: authProviderNameSchema.default("local"),
+  /** Omit to have the server generate one and return it once. Ignored for a directory account. */
   password: passwordSchema.optional(),
   /**
    * Escape hatch for creating a long-lived service account whose password is
@@ -114,5 +122,12 @@ export interface UserSummary {
  */
 export interface UserCredentialResponse {
   user: UserSummary;
-  temporaryPassword: string;
+  /**
+   * Absent for a directory account, which is created with no password at all.
+   *
+   * Optional rather than an empty string, so a screen cannot render a blank credential box
+   * that somebody tries to copy and hand over. The caller has to decide what to show when
+   * there is nothing to show.
+   */
+  temporaryPassword?: string;
 }
