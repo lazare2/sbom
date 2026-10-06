@@ -235,12 +235,21 @@ const envSchema = z
         message: "must not use the example value in production",
       });
     }
+    /*
+      This variable configures password auth only, and single sign-on is deliberately not
+      reachable through it. A directory connection is stored as a settings row and switched on
+      in the admin panel, so that turning it on does not require an environment change and a
+      restart -- and so there is one answer to "is SSO enabled" rather than two that can
+      disagree.
+    */
     const unsupported = env.AUTH_PROVIDERS.filter((p) => p !== "local");
     if (unsupported.length > 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["AUTH_PROVIDERS"],
-        message: `only "local" is implemented in this phase; got: ${unsupported.join(", ")}`,
+        message:
+          `only "local" belongs here; got: ${unsupported.join(", ")}. ` +
+          "Single sign-on is configured under Admin -> Authentication, not in the environment.",
       });
     }
   });

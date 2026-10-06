@@ -1,6 +1,7 @@
 import type { EnvironmentService } from "../environments/environment.service.js";
 import { eq, sql, type SQL } from "drizzle-orm";
 import type {
+  AuthProviderName,
   CreateUserRequest,
   ListUsersQuery,
   Paginated,
@@ -342,7 +343,12 @@ interface UserQueryRow {
   id: string;
   email: string;
   role: "admin" | "user";
-  auth_provider: "local" | "ldap";
+  /*
+    The shared union, not a copy of it. Spelling the providers out here meant adding one
+    broke this file rather than widening with it, which is how a directory-backed account
+    became a type error in a query row that only ever passes the value through.
+  */
+  auth_provider: AuthProviderName;
   is_active: boolean;
   must_change_password: boolean;
   application_access_restricted: boolean;

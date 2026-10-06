@@ -36,11 +36,16 @@ export const scanSourceSchema = z.enum(scanSources);
 export type ScanSource = z.infer<typeof scanSourceSchema>;
 
 /**
- * Which auth backend owns a given user's credentials. Only `local` is
- * implemented in this phase; the column exists so an LDAP-backed user can be
- * added later without a migration or a rewrite of the login path.
+ * Which auth backend owns a given user's credentials.
+ *
+ * `oidc` covers any OpenID Connect provider — Entra ID, Keycloak, Okta, Google — because the
+ * implementation reads the issuer's discovery document rather than hardcoding one vendor's
+ * endpoints. Naming it after a vendor would have made the second deployment a code change.
+ *
+ * `ldap` is declared and not implemented. It stays because a user row may already name it and
+ * the login path has to be able to say so, rather than crash on an unknown value.
  */
-export const authProviderNames = ["local", "ldap"] as const;
+export const authProviderNames = ["local", "ldap", "oidc"] as const;
 export const authProviderNameSchema = z.enum(authProviderNames);
 export type AuthProviderName = z.infer<typeof authProviderNameSchema>;
 

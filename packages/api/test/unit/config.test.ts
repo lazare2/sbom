@@ -89,9 +89,14 @@ describe("loadConfig", () => {
     );
   });
 
-  it("rejects an auth provider that is not implemented yet", () => {
-    expect(() => loadConfig({ ...base, AUTH_PROVIDERS: "local,ldap" })).toThrowError(
-      /only "local" is implemented/,
+  it("refuses a directory provider here, and says where it is configured instead", () => {
+    // Single sign-on is a settings row switched on in the admin panel, so that enabling it
+    // does not need an environment change and a restart. Accepting it here as well would
+    // give "is SSO enabled" two answers that can disagree, and the environment would win
+    // silently. The message has to name the real place or the next person edits this value
+    // again and waits for a restart that changes nothing.
+    expect(() => loadConfig({ ...base, AUTH_PROVIDERS: "local,oidc" })).toThrowError(
+      /Admin -> Authentication/,
     );
   });
 

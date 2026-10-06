@@ -134,6 +134,13 @@
       "when": 1789034822856,
       "tag": "0018_api_error_log",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791277450763,
+      "tag": "0019_auth_subject",
+      "breakpoints": true
     }
   ]
 }

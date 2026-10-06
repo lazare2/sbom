@@ -75,6 +75,24 @@ export const user = pgTable(
     passwordHash: text("password_hash"),
     role: text("role").$type<UserRole>().notNull().default("user"),
     authProvider: text("auth_provider").$type<AuthProviderName>().notNull().default("local"),
+    /**
+     * The identity at the directory this account is matched to, once one has signed in.
+     *
+     * Recorded on the first successful sign-in and matched on from then on, rather than
+     * matching on the email address every time. An email is an attribute a directory renames;
+     * the subject claim is not. Matching on email forever means a rename upstream silently
+     * orphans the account and the next sign-in creates a second one — or, if the old address
+     * was reassigned to somebody else, signs that person into this account.
+     *
+     * Null for a local account, and null for a directory account an administrator has created
+     * but nobody has signed into yet. That second state is the normal one under
+     * pre-provisioning, so null here is not an error and must not be treated as one.
+     *
+     * Uniqueness is enforced by a partial unique index in the migration, not here: two rows
+     * claiming one directory identity would make a sign-in ambiguous, and that guarantee
+     * belongs in the database rather than in whichever code path happens to write next.
+     */
+    authSubject: text("auth_subject"),
     isActive: boolean("is_active").notNull().default(true),
     /**
      * Set whenever an admin issues a password, because at that moment a
