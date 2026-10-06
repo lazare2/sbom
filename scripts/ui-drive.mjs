@@ -1222,13 +1222,23 @@ if (!page.url().includes("/admin/configuration")) {
 
 const staleField = page.getByLabel("Days without a scan");
 const original = await staleField.inputValue();
-await staleField.fill("7");
+/*
+  A value chosen to differ from the one already stored, rather than a fixed 7.
+
+  Filling the field with what is already in it leaves the form clean, so Save never enables
+  and the click below waits out its full timeout. That is not hypothetical: a run killed
+  between the save and the restore at the end of this section leaves the stored threshold at
+  the test value, and every later run then fails here -- on a step that has nothing to do with
+  whatever was actually changed.
+*/
+const target = original === "7" ? "9" : "7";
+await staleField.fill(target);
 await page.getByRole("button", { name: "Save threshold" }).click();
 await page.waitForTimeout(900);
 await page.reload({ waitUntil: "networkidle" });
 const saved = await page.getByLabel("Days without a scan").inputValue();
-if (saved !== "7") {
-  problems.push(`stale threshold did not persist: expected 7, found ${saved}`);
+if (saved !== target) {
+  problems.push(`stale threshold did not persist: expected ${target}, found ${saved}`);
 } else {
   log("  OK   stale threshold saved and survived a reload");
 }
