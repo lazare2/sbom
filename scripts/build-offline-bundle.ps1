@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Builds a self-contained bundle that runs the SBOM Platform on a machine with
     no internet connection.

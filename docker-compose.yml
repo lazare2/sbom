@@ -58,6 +58,14 @@ services:
       API_PORT: "3000"
       API_HOST: 0.0.0.0
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+      # Encrypts the secrets held in the settings table: the JFrog Xray API token and the
+      # single sign-on client secret. Optional, because a deployment that connects neither
+      # needs no key and both admin screens say so rather than failing at save -- but without
+      # it, single sign-on cannot be configured at all, since storing the client secret is the
+      # first step. deploy/docker-compose.yml has always passed this; this file did not, so a
+      # build-from-source deployment could not set up sign-on and the only symptom was a save
+      # that refused with "no secrets key".
+      SECRETS_KEY: ${SECRETS_KEY:-}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       INGEST_TOKENS: ${INGEST_TOKENS:-}
       BLOB_STORE_DRIVER: ${BLOB_STORE_DRIVER:-fs}
