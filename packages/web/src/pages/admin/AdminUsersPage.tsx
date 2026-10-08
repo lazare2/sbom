@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { UserSummary } from "@sbom/shared";
+import type { AccessRequest, UserSummary } from "@sbom/shared";
 import { sortDirections, userSort } from "@sbom/shared";
 import { useServerSort } from "../../lib/useSort.ts";
 import { useAuth } from "../../auth/AuthProvider.tsx";
@@ -8,11 +8,14 @@ import {
   useCreateUser,
   useDeleteUser,
   useResetUserPassword,
+  useSetSignInMethod,
+  useSettleAccessRequest,
   useSetUserApplicationAccess,
   useSetUserEnvironments,
   useUpdateUser,
 } from "../../lib/mutations.ts";
 import {
+  useAccessRequests,
   useApplicationAccessPreview,
   useEnvironments,
   useGrantableScope,
@@ -70,12 +73,31 @@ export function AdminUsersPage() {
   const { state, setState } = useUrlState(spec);
 
   const [createOpen, setCreateOpen] = useState(false);
+  /*
+    The access request this create was started from, if any.
+
+    Held so the request can be resolved with the id of the account that answered it, which is
+    what makes "who did we let in off the back of this" answerable later. Null for an ordinary
+    create from the New account button.
+  */
+  const [createFrom, setCreateFrom] = useState<AccessRequest | null>(null);
   const [resetTarget, setResetTarget] = useState<UserSummary | null>(null);
   const [accessTarget, setAccessTarget] = useState<UserSummary | null>(null);
+  const [methodTarget, setMethodTarget] = useState<UserSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserSummary | null>(null);
   /** Shown once, after a create or reset. Cleared when the modal closes. */
   const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
   const [actionError, setActionError] = useState<unknown>(null);
+  /*
+    Confirmation for a create that produced no credential to display.
+
+    A directory account has no password, so the modal has nothing to show and closes -- which,
+    on a paginated table where the new row may be several pages away, would otherwise leave an
+    administrator with no evidence anything happened at all. Dismissed by hand rather than on a
+    timer: it is the only acknowledgement of the action, and acknowledgements that vanish on
+    their own get missed by exactly the people who looked away to check something.
+  */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const query = {
     search: state.search || undefined,
@@ -90,6 +112,7 @@ export function AdminUsersPage() {
 
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
+  const settle = useSettleAccessRequest();
 
   async function changeRole(u: UserSummary, role: "admin" | "user") {
     setActionError(null);
@@ -109,14 +132,55 @@ export function AdminUsersPage() {
     }
   }
 
+  /**
+   * What happens once an account exists, however it was created.
+   *
+   * Two jobs, and both are about not losing the thread. A directory account yields no
+   * credential, so without the notice the modal would close on silence. And a create started
+   * from the queue has to close the request it answered -- the queue does drain itself when
+   * that person next signs in, but leaving the row open until then means an administrator who
+   * looks before that sees work they have already done.
+   */
+  function onCreated(created: { id: string; email: string; hadPassword: boolean }) {
+    if (!created.hadPassword) {
+      setNotice(
+        `Created ${created.email}. They sign in with their organisation account, so there is no password to hand over.`,
+      );
+    }
+    if (createFrom) {
+      // Fire and forget, deliberately. The account is the thing that mattered and it exists;
+      // a failure to tidy the queue must not be reported as a failure to create the user.
+      settle.mutate({ id: createFrom.id, action: "resolve", userId: created.id });
+      setCreateFrom(null);
+    }
+  }
+
   return (
     <>
+      <AccessRequestsCard
+        onCreateAccount={(request) => {
+          setNotice(null);
+          setCreateFrom(request);
+          setCreateOpen(true);
+        }}
+      />
+
       <Card>
         <CardHeader
           title="Accounts"
           subtitle="Sign-in identifiers are usernames, not mailboxes — the platform never sends email. Passwords are issued here and handed over directly."
           actions={
-            <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                // Cleared, or a create started from the queue and cancelled would silently
+                // resolve the next request made from this button.
+                setCreateFrom(null);
+                setNotice(null);
+                setCreateOpen(true);
+              }}
+            >
               New account
             </Button>
           }
@@ -142,6 +206,24 @@ export function AdminUsersPage() {
             ]}
           />
         </div>
+
+        {notice ? (
+          <div className="px-4 pt-3">
+            <div
+              role="status"
+              className="flex items-start justify-between gap-3 rounded-md border border-ok bg-ok-subtle px-3 py-2 text-xs text-ok"
+            >
+              <span>{notice}</span>
+              <button
+                type="button"
+                onClick={() => setNotice(null)}
+                className="shrink-0 font-medium underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {actionError ? (
           <div className="px-4 pt-3">
@@ -203,6 +285,23 @@ export function AdminUsersPage() {
                               <Badge tone="info">you</Badge>
                             </>
                           ) : null}
+                          {/*
+                            How this account signs in, on the row rather than hidden in a
+                            dialog. "Why can this colleague not use single sign-on" was a
+                            real question with no answer on any screen -- the account had
+                            been created before the box existed, and nothing said so.
+                          */}
+                          {" "}
+                          <Badge
+                            tone={u.authProvider === "local" ? "neutral" : "info"}
+                            title={
+                              u.authProvider === "local"
+                                ? "Signs in with a password issued here."
+                                : "Signs in through the organisation directory. No password is held."
+                            }
+                          >
+                            {u.authProvider === "local" ? "password" : "SSO"}
+                          </Badge>
                           {u.mustChangePassword ? (
                             <>
                               {" "}
@@ -241,15 +340,30 @@ export function AdminUsersPage() {
                         <Td title={u.createdAt}>{formatDate(u.createdAt)}</Td>
                         <Td align="right">
                           <div className="flex flex-wrap justify-end gap-1.5">
+                            {/* Hidden rather than disabled for a directory account: there is
+                                no password to reset and the API refuses it, so offering the
+                                button at all would be an action that can only fail. */}
+                            {u.authProvider === "local" ? (
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  setIssued(null);
+                                  setActionError(null);
+                                  setResetTarget(u);
+                                }}
+                              >
+                                Reset password
+                              </Button>
+                            ) : null}
                             <Button
                               size="sm"
                               onClick={() => {
                                 setIssued(null);
                                 setActionError(null);
-                                setResetTarget(u);
+                                setMethodTarget(u);
                               }}
                             >
-                              Reset password
+                              Sign-in method
                             </Button>
                             {/* Self-service role and status changes are refused by
                                 the API; hiding the buttons avoids offering an
@@ -305,14 +419,41 @@ export function AdminUsersPage() {
 
       <UserAccessModal target={accessTarget} onClose={() => setAccessTarget(null)} />
 
+      {/*
+        Keyed on where the create came from, so the form's initial state is seeded by its
+        initialiser rather than patched by an effect after the fact. An effect would have to
+        decide whether to overwrite what somebody had already typed, and both answers to that
+        are wrong in one case or the other.
+      */}
       <CreateUserModal
+        key={createFrom?.id ?? "blank"}
         open={createOpen}
         onClose={() => {
           setCreateOpen(false);
+          setCreateFrom(null);
+          setIssued(null);
+        }}
+        prefill={createFrom}
+        onCreated={onCreated}
+        issued={issued}
+        onIssued={setIssued}
+      />
+
+      <SignInMethodModal
+        target={methodTarget}
+        onClose={() => {
+          setMethodTarget(null);
           setIssued(null);
         }}
         issued={issued}
         onIssued={setIssued}
+        onConverted={(email, method) =>
+          setNotice(
+            method === "directory"
+              ? `${email} now signs in with their organisation account. Their password no longer works and their sessions have been ended.`
+              : `${email} now signs in with a password. Hand over the one shown in the dialog.`,
+          )
+        }
       />
 
       <ResetPasswordModal
@@ -359,20 +500,32 @@ export function AdminUsersPage() {
 function CreateUserModal({
   open,
   onClose,
+  prefill,
+  onCreated,
   issued,
   onIssued,
 }: {
   open: boolean;
   onClose: () => void;
+  /**
+   * The access request this create answers, when it was started from the queue.
+   *
+   * Seeds the identifier and ticks the directory box, because the alternative is reading an
+   * address off the screen and typing it back in — and a typo there creates an account that
+   * the person it was meant for can never sign in to, with nothing on either screen to show
+   * why. The provider already told us the exact string; this uses it.
+   */
+  prefill: AccessRequest | null;
+  onCreated: (created: { id: string; email: string; hadPassword: boolean }) => void;
   issued: { email: string; password: string } | null;
   onIssued: (v: { email: string; password: string }) => void;
 }) {
   const createUser = useCreateUser();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(prefill?.email ?? "");
   const [role, setRole] = useState<"admin" | "user">("user");
   const [password, setPassword] = useState("");
   const [useOwnPassword, setUseOwnPassword] = useState(false);
-  const [directory, setDirectory] = useState(false);
+  const [directory, setDirectory] = useState(prefill !== null);
   const sso = useOidcEnabled();
   const environments = useEnvironments();
   const allEnvironments = environments.data?.environments ?? [];
@@ -386,11 +539,13 @@ function CreateUserModal({
   const chosenEnvironments = environmentIds ?? allEnvironments.map((e) => e.id);
 
   function reset() {
-    setEmail("");
+    // Back to where this instance started, which is the prefilled state when it was opened
+    // from a request -- not blank. Clearing to blank would discard the address on a cancel.
+    setEmail(prefill?.email ?? "");
     setRole("user");
     setPassword("");
     setUseOwnPassword(false);
-    setDirectory(false);
+    setDirectory(prefill !== null);
     setEnvironmentIds(null);
     createUser.reset();
   }
@@ -408,10 +563,24 @@ function CreateUserModal({
         ...(!directory && useOwnPassword && password ? { password } : {}),
         ...(environmentIds === null ? {} : { environmentIds }),
       });
-      // A directory account is created with no password, so there is no credential to
-      // hand over and nothing for the modal to show.
+      /*
+        Two outcomes, and the modal used to handle only one.
+
+        A local account yields a password that is shown once and never again, so the modal
+        stays open on it -- auto-dismissing a credential somebody has to copy would lose it for
+        good. A directory account yields nothing, and the old code simply did not call
+        `onIssued`, which left the modal sitting on the filled-in form with no error and no
+        acknowledgement. The account had been created; nothing said so.
+
+        So the no-credential path closes, and the page it closes onto says what happened.
+      */
       if (result.temporaryPassword !== undefined) {
         onIssued({ email: result.user.email, password: result.temporaryPassword });
+        onCreated({ id: result.user.id, email: result.user.email, hadPassword: true });
+      } else {
+        onCreated({ id: result.user.id, email: result.user.email, hadPassword: false });
+        reset();
+        onClose();
       }
     } catch {
       // Rendered from the mutation's error state.
@@ -587,6 +756,153 @@ function CreateUserModal({
             </FormRow>
           ) : null}
         </form>
+      )}
+    </Modal>
+  );
+}
+
+function SignInMethodModal({
+  target,
+  onClose,
+  issued,
+  onIssued,
+  onConverted,
+}: {
+  target: UserSummary | null;
+  onClose: () => void;
+  issued: { email: string; password: string } | null;
+  onIssued: (v: { email: string; password: string }) => void;
+  onConverted: (email: string, method: "local" | "directory") => void;
+}) {
+  const convert = useSetSignInMethod();
+  const sso = useOidcEnabled();
+
+  const toDirectory = target?.authProvider === "local";
+  const method = toDirectory ? "directory" : "local";
+
+  /*
+    Converting to the directory needs one to exist. The server refuses it too -- an account
+    with no password and no provider cannot sign in at all -- but a disabled button that says
+    why is better than a request that comes back as an error.
+  */
+  const blocked = toDirectory && sso.data?.enabled !== true;
+
+  async function run() {
+    if (!target) return;
+    try {
+      const result = await convert.mutateAsync({ id: target.id, method });
+      if (result.temporaryPassword !== undefined) {
+        onIssued({ email: result.user.email, password: result.temporaryPassword });
+      } else {
+        // Nothing to hand over, so the dialog has no second step to show. Same reasoning as
+        // creating a directory account: it closes, and the page says what happened.
+        onConverted(result.user.email, method);
+        convert.reset();
+        onClose();
+        return;
+      }
+      onConverted(result.user.email, method);
+    } catch {
+      // Rendered from the mutation's error state.
+    }
+  }
+
+  return (
+    <Modal
+      open={target !== null}
+      onClose={() => {
+        convert.reset();
+        onClose();
+      }}
+      title={issued ? "Password issued" : "Change sign-in method"}
+      footer={
+        issued ? (
+          <Button
+            variant="primary"
+            onClick={() => {
+              convert.reset();
+              onClose();
+            }}
+          >
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button
+              onClick={() => {
+                convert.reset();
+                onClose();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void run()}
+              disabled={convert.isPending || blocked}
+            >
+              {convert.isPending
+                ? "Changing…"
+                : toDirectory
+                  ? "Switch to organisation account"
+                  : "Switch to a password"}
+            </Button>
+          </>
+        )
+      }
+    >
+      {issued ? (
+        <div className="space-y-3">
+          <SecretReveal
+            label={`Password for ${issued.email}`}
+            value={issued.password}
+            note="Shown once and never again — it is stored only as a hash. Hand it over directly; the user must change it at first sign-in."
+          />
+        </div>
+      ) : (
+        <div className="space-y-3 text-sm text-text-muted">
+          <FormError error={convert.error} />
+
+          <p>
+            <strong className="text-text-base">{target?.email}</strong> currently signs in{" "}
+            {toDirectory ? "with a password issued here." : "through the organisation directory."}
+          </p>
+
+          {toDirectory ? (
+            <>
+              <p>
+                Switching to the organisation account{" "}
+                <strong className="text-text-base">discards their password</strong>. They sign in
+                through the provider from then on, and the account is matched to their directory
+                identity the first time they do — by the address above, so it has to be the one
+                the directory knows them by.
+              </p>
+              <p>
+                Their groups, projects and environments are untouched. Every session they have
+                open now is ended, because the credential they were admitted on no longer applies.
+              </p>
+              {blocked ? (
+                <p className="text-danger">
+                  Single sign-on is not switched on, so this account would have no way to sign in.
+                  Configure it on the Authentication page first.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <p>
+                Switching back to a password{" "}
+                <strong className="text-text-base">issues a new one</strong>, shown once on the
+                next screen, which they must change at first sign-in. The link to their directory
+                identity is cleared.
+              </p>
+              <p>
+                Their grants are untouched, and their open sessions are ended. This is the way back
+                in if the directory itself is the thing that has broken.
+              </p>
+            </>
+          )}
+        </div>
       )}
     </Modal>
   );
@@ -1054,5 +1370,176 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
         )}
       </div>
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * People the directory authenticated who have no account here.
+ *
+ * Pre-provisioning is the security posture and stays that way: an identity the directory
+ * vouches for is still refused until somebody creates an account. What this fixes is the other
+ * half of that -- the refusal used to leave no trace, so whether an administrator ever heard
+ * about it depended on the refused person speaking up. Modelled on applications awaiting
+ * confirmation, for the same reason: an event the platform cannot act on by itself should
+ * become a row somebody drains, not a dead end.
+ *
+ * Only single sign-on feeds this. A failed password login would mean writing a string typed in
+ * by somebody who proved nothing, which would turn this into an unauthenticated write endpoint
+ * -- and deduplication cannot bound that, because the string would be theirs to vary. Every row
+ * here came out of a token the provider signed.
+ *
+ * Lives on this page rather than behind a tab of its own because the resolution is "create an
+ * account", which is here. The badge on the admin nav is what makes it findable without one.
+ */
+function AccessRequestsCard({
+  onCreateAccount,
+}: {
+  onCreateAccount: (request: AccessRequest) => void;
+}) {
+  const requests = useAccessRequests("pending");
+  const settle = useSettleAccessRequest();
+  const [error, setError] = useState<unknown>(null);
+
+  const data = requests.data;
+  const pending = data?.requests ?? [];
+
+  // Nothing at all while the first load is in flight. A placeholder above the Accounts table
+  // would push it down the page on every visit to say nothing.
+  if (requests.isLoading) return null;
+  if (requests.error) {
+    return (
+      <Card>
+        <CardHeader title="Access requests" />
+        <div className="p-4 pt-0">
+          <ErrorBanner error={requests.error} onRetry={() => void requests.refetch()} />
+        </div>
+      </Card>
+    );
+  }
+
+  /*
+    Only dismissal happens from here. Resolution is a side effect of creating the account,
+    because a button that marked a request resolved without producing anything would be a
+    button for lying to the next administrator who reads the queue.
+  */
+  function dismiss(request: AccessRequest) {
+    setError(null);
+    settle.mutate(
+      { id: request.id, action: "dismiss" },
+      { onError: (err) => setError(err) },
+    );
+  }
+
+  return (
+    <Card className="mb-4">
+      <CardHeader
+        title={
+          pending.length > 0 ? `Access requests (${pending.length})` : "Access requests"
+        }
+        subtitle="Recorded when somebody signs in through your organisation's directory and this platform has no account for them."
+      />
+
+      {error ? (
+        <div className="px-4 pt-3">
+          <FormError error={error} />
+        </div>
+      ) : null}
+
+      {pending.length === 0 ? (
+        <div className="px-4 pb-4 text-xs">
+          {/*
+            Two readings of an empty queue, and they must not look alike.
+
+            With sign-on enabled, empty means nobody has been turned away -- a real clean
+            state. With it switched off, nothing can ever arrive here, and the same empty list
+            would read as reassurance when in fact nothing is being watched.
+          */}
+          {data?.signOnEnabled ? (
+            <p className="text-text-faint">Nobody is waiting for an account.</p>
+          ) : (
+            <p className="text-warn">
+              Single sign-on is switched off, so refused sign-ins are not recorded here. This
+              list being empty does not mean nobody has tried.
+            </p>
+          )}
+        </div>
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <Tr>
+                <Th>Person</Th>
+                <Th align="right">Attempts</Th>
+                <Th>First tried</Th>
+                <Th>Last tried</Th>
+                <Th />
+              </Tr>
+            </thead>
+            <tbody>
+              {pending.map((request) => (
+                <Tr key={request.id}>
+                  <Td>
+                    <div className="font-medium text-text-base">
+                      {/*
+                        Either may be absent: `email` arrives only where that claim was
+                        consented to, and some directories send no name. Falling back through
+                        both and then saying so plainly beats rendering an empty cell that
+                        reads as a bug.
+                      */}
+                      {request.displayName ?? request.email ?? "Unidentified directory account"}
+                    </div>
+                    {request.displayName && request.email ? (
+                      <div className="text-xs text-text-muted">{request.email}</div>
+                    ) : null}
+                    {request.email === null ? (
+                      <div className="text-xs text-warn">
+                        The provider sent no address — ask them for it before creating an account.
+                      </div>
+                    ) : null}
+                  </Td>
+                  <Td align="right">
+                    {/* Toned once it stops being a single attempt: somebody who has tried
+                        repeatedly has been locked out long enough to keep trying. */}
+                    <Badge tone={request.attempts > 1 ? "warn" : "neutral"}>
+                      {request.attempts}
+                    </Badge>
+                  </Td>
+                  <Td title={formatDate(request.firstSeenAt)}>
+                    {formatRelative(request.firstSeenAt)}
+                  </Td>
+                  <Td title={formatDate(request.lastSeenAt)}>
+                    {formatRelative(request.lastSeenAt)}
+                  </Td>
+                  <Td align="right">
+                    <div className="flex justify-end gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        /* Without an address there is nothing to match the account against,
+                           so creating one here would produce something they still could not
+                           sign in to. */
+                        disabled={request.email === null || settle.isPending}
+                        onClick={() => onCreateAccount(request)}
+                      >
+                        Create account
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={settle.isPending}
+                        onClick={() => dismiss(request)}
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
   );
 }

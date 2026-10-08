@@ -54,6 +54,31 @@ export const updateUserRequestSchema = z
   });
 export type UpdateUserRequest = z.infer<typeof updateUserRequestSchema>;
 
+/**
+ * Changing how an existing account signs in.
+ *
+ * Added because the alternative was an UPDATE statement. An account created with a password
+ * before single sign-on was configured could only be converted by editing `auth_provider` in
+ * the database by hand -- which is how the person who set the directory up ends up unable to
+ * use it, and how "I ticked the box this time" becomes the documented procedure.
+ *
+ * A separate request from `updateUserRequestSchema` on purpose. Converting away from the
+ * directory has to issue a password, so this returns a credential where that returns a
+ * summary, and folding them together would mean a route that sometimes hands back a secret
+ * depending on which fields were set.
+ */
+export const setSignInMethodSchema = z.object({
+  /**
+   * `directory` rather than `oidc`.
+   *
+   * The wire value names what an administrator is choosing, not which protocol implements it.
+   * `auth_provider` keeps the protocol name, so adding LDAP later changes the mapping in one
+   * service rather than every caller and every screen.
+   */
+  method: z.enum(["local", "directory"]),
+});
+export type SetSignInMethod = z.infer<typeof setSignInMethodSchema>;
+
 /** Admin-initiated password reset. Omit `password` to have one generated. */
 export const resetUserPasswordRequestSchema = z.object({
   password: passwordSchema.optional(),

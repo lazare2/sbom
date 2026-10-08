@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { getConfig, type Config } from "./config.js";
 import { getDb, type Database } from "./db/client.js";
+import { AccessRequestService } from "./modules/auth/access-request.service.js";
 import { AuthService } from "./modules/auth/auth.service.js";
 import { AuthProviderRegistry } from "./modules/auth/provider.js";
 import { LocalPasswordProvider } from "./modules/auth/providers/local.js";
@@ -65,6 +66,7 @@ export interface AppContext {
   providers: AuthProviderRegistry;
   sessions: SessionService;
   auth: AuthService;
+  accessRequests: AccessRequestService;
   ingestTokens: IngestTokenService;
   ingestion: IngestionService;
   /** Recovers component locations from SBOMs ingested before the platform recorded them. */
@@ -171,7 +173,16 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
 
   const sessions = new SessionService(db, config.SESSION_TTL_HOURS);
 
-  const auth = new AuthService({ db, config, providers, sessions, logger });
+  /*
+    Constructed before `auth`, which depends on it.
+
+    Needs the pool and somewhere to log -- no settings, no audit service. Resolving whether
+    sign-on is enabled stays with the route, which already holds `settings`, and keeping it out
+    of here is what avoids a cycle: `settings` is built further down, after the read side.
+  */
+  const accessRequests = new AccessRequestService({ db, logger });
+
+  const auth = new AuthService({ db, config, providers, sessions, accessRequests, logger });
 
   const ingestTokens = new IngestTokenService({ db, config });
   const ingestion = new IngestionService({ db, blobStore, logger });
@@ -333,6 +344,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     providers,
     sessions,
     auth,
+    accessRequests,
     ingestTokens,
     ingestion,
     sbomBackfill,

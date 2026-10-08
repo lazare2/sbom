@@ -11,14 +11,17 @@ import {
   createUserRequestSchema,
   idParamSchema,
   listApiErrorsQuerySchema,
+  listAccessRequestsQuerySchema,
   listAuditLogQuerySchema,
   listMaliciousHistoryQuerySchema,
   listUsersQuerySchema,
   mergeApplicationRequestSchema,
   resetUserPasswordRequestSchema,
   setGroupMembersRequestSchema,
+  setSignInMethodSchema,
   oidcConnectionInputSchema,
   previewUserApplicationAccessSchema,
+  resolveAccessRequestSchema,
   setUserApplicationAccessSchema,
   testOidcConnectionSchema,
   OIDC_CALLBACK_PATH,
@@ -75,6 +78,7 @@ const aliasBodySchema = z.object({
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   const {
     adminUsers,
+    accessRequests,
     environments,
     applicationAccess,
     adminApplications,
@@ -128,6 +132,32 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const body = parseOrThrow(resetUserPasswordRequestSchema, request.body ?? {});
     return reply.send(await adminUsers.resetPassword(id, body, actorOf(request)));
+  });
+
+  /**
+   * Convert an account between a local password and the directory.
+   *
+   * The one check that lives here rather than in the service: converting *to* the directory
+   * while no sign-on connection is switched on would produce an account with no password and
+   * no provider to authenticate it -- locked out, with nothing on any screen to say why. The
+   * service deliberately does not read settings, so the guard sits at the edge that already
+   * holds them.
+   *
+   * Converting the other way is always allowed. If the directory has just broken, that is
+   * exactly the moment somebody needs a password issued.
+   */
+  fastify.post("/users/:id/sign-in-method", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setSignInMethodSchema, request.body ?? {});
+
+    if (body.method === "directory" && !(await settings.oidcEnabled())) {
+      throw new ConflictError(
+        "Single sign-on is not switched on, so an account converted to it could not sign in. " +
+          "Configure and enable it on the Authentication page first.",
+      );
+    }
+
+    return reply.send(await adminUsers.setSignInMethod(id, body, actorOf(request)));
   });
 
   fastify.delete("/users/:id", async (request, reply) => {
@@ -782,5 +812,98 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
     return reply.send(diagnosis);
   });
-}
+  // -------------------------------------------------------------------------
+  // Access requests
+  // -------------------------------------------------------------------------
 
+  /**
+   * People the directory authenticated who have no account here.
+   *
+   * Reached through `requireAdmin` like everything else in this file, which matters more than
+   * usual: the rows carry colleagues' names and addresses, and the queue would otherwise be a
+   * staff directory readable by every account on the platform.
+   */
+  fastify.get("/access-requests", async (request, reply) => {
+    const query = parseOrThrow(listAccessRequestsQuerySchema, request.query, "Query");
+    const [requests, pendingCount, signOnEnabled] = await Promise.all([
+      accessRequests.list(query),
+      accessRequests.pendingCount(),
+      settings.oidcEnabled(),
+    ]);
+
+    /*
+      `signOnEnabled` travels with the list because an empty queue has two readings that must
+      not look alike: nobody has been refused, or nothing is watching. Only single sign-on
+      feeds this, so with sign-on switched off the queue can never fill and an empty list is
+      not the reassurance it appears to be.
+    */
+    return reply.send({ requests, pendingCount, signOnEnabled });
+  });
+
+  /**
+   * Mark a request dealt with, optionally naming the account that was created for it.
+   *
+   * Separate from creating the user. The two are one gesture on the screen, but an
+   * administrator may equally have created the account last week by hand, and a resolution
+   * that could only happen as a side effect of this screen's own create button would leave
+   * those rows stuck on the queue forever.
+   */
+  fastify.post("/access-requests/:id/resolve", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(resolveAccessRequestSchema, request.body ?? {});
+
+    const settled = await accessRequests.settle({
+      id,
+      status: "resolved",
+      actor: actorOf(request),
+      ...(body.userId ? { createdUserId: body.userId } : {}),
+    });
+    // Not a silent success. Two administrators working one queue is ordinary, and "I pressed
+    // it and nothing happened" has to be distinguishable from "somebody got there first".
+    if (!settled) throw new NotFoundError("No pending access request with that id");
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "access_request.resolve",
+      targetType: "access_request",
+      targetId: id,
+      /*
+        The request id and the account it produced, never the address. The address already
+        lives in the access_request row, which is the record that legitimately holds it;
+        copying it in here would make the audit log a second, never-pruned copy of personal
+        data nobody asked for.
+      */
+      metadata: { from: "pending", to: "resolved", createdUserId: body.userId ?? null },
+    });
+
+    return reply.status(204).send();
+  });
+
+  /**
+   * Set a request aside without creating anything.
+   *
+   * Kept distinct from deleting it. A later attempt by the same person opens a fresh request
+   * rather than reviving this decision, so "I decided no, and they asked again" stays
+   * visible -- which is the information an administrator actually wants on a second approach.
+   */
+  fastify.post("/access-requests/:id/dismiss", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+
+    const settled = await accessRequests.settle({
+      id,
+      status: "dismissed",
+      actor: actorOf(request),
+    });
+    if (!settled) throw new NotFoundError("No pending access request with that id");
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "access_request.dismiss",
+      targetType: "access_request",
+      targetId: id,
+      metadata: { from: "pending", to: "dismissed" },
+    });
+
+    return reply.status(204).send();
+  });
+}

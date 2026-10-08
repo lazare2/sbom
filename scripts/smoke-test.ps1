@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     End-to-end smoke test against a locally running API.
 
@@ -2801,6 +2801,108 @@ try {
         $p = New-JsonFile -Name "nonadmin-write.json" -Data @{ name = "should-not-be-created" }
         $w = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/admin/applications", "-H", $jsonCt, "--data-binary", "@$p", "-b", $userJar)
         return $w.Status -eq 403
+    }
+
+    Assert-That "the access-request queue reports whether anything is watching it" {
+        # An empty queue has two readings that must not look alike: nobody has been refused,
+        # or single sign-on is off and nothing can ever arrive. The flag is what separates
+        # them, so its absence is a failure even when the list is correct.
+        $r = Invoke-Api @("$adminUrl/access-requests", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        if ($null -eq $r.Json.requests) { return $false }
+        if ($r.Json.pendingCount -isnot [int]) { return $false }
+        return $r.Json.signOnEnabled -is [bool]
+    }
+
+    Assert-That "settling a request that is not pending is a 404, not a silent success" {
+        # Two administrators working one queue is ordinary. "Somebody got there first" has to
+        # be distinguishable from "the button did nothing", or the second one presses it again.
+        #
+        # The message is asserted, not just the status. A route that does not exist also
+        # answers 404, so a bare status check here would pass just as happily against a
+        # version where these endpoints were never registered at all -- coverage that reads
+        # like a guarantee and is worth nothing.
+        $p = New-JsonFile -Name "settle-missing.json" -Data @{}
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/access-requests/00000000-0000-4000-8000-000000000000/resolve", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($r.Status -ne 404) { Show-Body $r 404; return $false }
+        if ($r.Json.error.message -notmatch "access request") { Show-Body $r 404; return $false }
+        $d = Invoke-Api @("-X", "POST", "$adminUrl/access-requests/00000000-0000-4000-8000-000000000000/dismiss", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        return $d.Status -eq 404 -and $d.Json.error.message -match "access request"
+    }
+
+    Assert-That "the access-request queue is admin-only" {
+        # The rows carry colleagues' names and addresses. Readable by every account, this
+        # would be a staff directory rather than a triage queue.
+        $r = Invoke-Api @("$adminUrl/access-requests", "-b", $userJar)
+        if ($r.Status -ne 403) { Show-Body $r 403; return $false }
+        $p = New-JsonFile -Name "settle-nonadmin.json" -Data @{}
+        $w = Invoke-Api @("-X", "POST", "$adminUrl/access-requests/00000000-0000-4000-8000-000000000000/dismiss", "-H", $jsonCt, "--data-binary", "@$p", "-b", $userJar)
+        return $w.Status -eq 403
+    }
+
+    Assert-That "converting an account between a password and the directory" {
+        <#
+          The round trip, in the one direction that needs no sign-on connection.
+
+          A directory account is created first -- which is also the assertion that creating
+          one yields no credential -- and then converted back to a password, which must yield
+          one. That direction is deliberately never gated on the provider being reachable:
+          if the directory is the thing that has broken, issuing a password is the way back in.
+        #>
+        $dirEmail = "smoke-user-dir-$suffix@sbom.local"
+        $p = New-JsonFile -Name "diruser.json" -Data @{ email = $dirEmail; role = "user"; authProvider = "oidc" }
+        $c = Invoke-Api @("-X", "POST", "$adminUrl/users", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($c.Status -ne 201 -and $c.Status -ne 200) { Show-Body $c 201; return $false }
+        $script:dirUserId = $c.Json.user.id
+        # No password exists for a directory account, so none may be handed back. An empty
+        # string here would render as a credential box somebody tries to copy.
+        if ($null -ne $c.Json.temporaryPassword) { return $false }
+        if ($c.Json.user.authProvider -ne "oidc") { return $false }
+
+        $b = New-JsonFile -Name "tolocal.json" -Data @{ method = "local" }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/users/$($script:dirUserId)/sign-in-method", "-H", $jsonCt, "--data-binary", "@$b", "-b", $readJar)
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        if (-not $r.Json.temporaryPassword) { return $false }
+        if ($r.Json.user.authProvider -ne "local") { return $false }
+        # Forced change, because the credential was issued by somebody else and is now in
+        # their hands.
+        return $r.Json.user.mustChangePassword -eq $true
+    }
+
+    Assert-That "asking for the sign-in method an account already has is refused" {
+        # A no-op success would write an audit row claiming a conversion that never happened,
+        # and the trail is only worth reading if every row describes a real change.
+        $b = New-JsonFile -Name "tolocal2.json" -Data @{ method = "local" }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/users/$($script:dirUserId)/sign-in-method", "-H", $jsonCt, "--data-binary", "@$b", "-b", $readJar)
+        return $r.Status -eq 409
+    }
+
+    Assert-That "converting to the directory is refused while sign-on is off" {
+        <#
+          The account would end up with no password and no provider to authenticate it --
+          locked out, with nothing on any screen to say why.
+
+          The message is asserted, not just the status, because 409 is also what the previous
+          check returns: without this, a build where the two guards were confused would pass
+          both.
+        #>
+        $b = New-JsonFile -Name "todir.json" -Data @{ method = "directory" }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/users/$($script:dirUserId)/sign-in-method", "-H", $jsonCt, "--data-binary", "@$b", "-b", $readJar)
+        if ($r.Status -ne 409) { Show-Body $r 409; return $false }
+        return $r.Json.error.message -match "not switched on"
+    }
+
+    Assert-That "changing a sign-in method is admin-only" {
+        $b = New-JsonFile -Name "todir-nonadmin.json" -Data @{ method = "local" }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/users/$($script:dirUserId)/sign-in-method", "-H", $jsonCt, "--data-binary", "@$b", "-b", $userJar)
+        return $r.Status -eq 403
+    }
+
+    Assert-That "removes the directory account it created" {
+        # Named with the smoke-user prefix the final sweep checks, so a failure here surfaces
+        # there too rather than quietly leaving an account behind.
+        $r = Invoke-Api @("-X", "DELETE", "$adminUrl/users/$($script:dirUserId)", "-b", $readJar)
+        return $r.Status -eq 204
     }
 
     Assert-That "an admin password reset signs the user out immediately" {

@@ -1722,6 +1722,83 @@ export const maliciousAlertSent = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Access requests
+// ---------------------------------------------------------------------------
+
+/**
+ * Somebody the directory authenticated who has no account here.
+ *
+ * Pre-provisioning is deliberate -- an identity the directory vouches for is still refused
+ * until an administrator has created an account -- but the refusal used to be silent. The
+ * person was told to ask an administrator and nothing recorded that they had tried. This is the
+ * queue that makes the refusal visible, and it mirrors applications awaiting confirmation: an
+ * event the platform cannot act on by itself becomes a row somebody drains.
+ *
+ * Every row here comes from a verified id token. `subject` and the two optional fields are
+ * claims a provider signed, checked against its own signing keys, audience and nonce before
+ * anything reached this table. Nothing an unauthenticated caller supplies is ever written here,
+ * which is what keeps it from being an open write endpoint -- see the schema in `shared` for why
+ * failed password logins deliberately record nothing.
+ */
+export const accessRequest = pgTable(
+  "access_request",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Which kind of directory authenticated them, matching `user.auth_provider`. */
+    provider: text("provider").$type<AuthProviderName>().notNull(),
+    /**
+     * The directory identity, from the same claim an account is matched on.
+     *
+     * This and not the email is the identity, for the reason set out on `user.auth_subject`:
+     * an address is an attribute a directory renames, and the subject is not. It is also what
+     * makes deduplication correct -- somebody whose address changed between two attempts is
+     * still one person asking once.
+     */
+    subject: text("subject").notNull(),
+    /** Lowercased on write. Nullable: a token need not carry an address at all. */
+    email: text("email"),
+    displayName: text("display_name"),
+    reason: text("reason").notNull(),
+    status: text("status").notNull().default("pending"),
+    /**
+     * Attempts folded into this row rather than a row each.
+     *
+     * Refused once, somebody tries again -- immediately, then after lunch, then the next
+     * morning. A row per attempt would turn a queue of people into a log of events, and the
+     * queue only works if its size is the number of colleagues waiting.
+     */
+    attempts: integer("attempts").notNull().default(1),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /**
+     * The administrator who dealt with it, kept for the audit question "who let this person
+     * in". Null while pending, and null when a successful sign-in resolved it with nobody
+     * present. `set null` on delete, because a departed administrator must not take the
+     * record of the decision with them.
+     */
+    resolvedByUserId: uuid("resolved_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    /** The account created for them, where one was. Same `set null` reasoning. */
+    createdUserId: uuid("created_user_id").references(() => user.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    index("access_request_status_idx").on(t.status, t.lastSeenAt),
+    /*
+      One pending row per identity, enforced in the database via a partial unique index in the
+      migration rather than here -- drizzle-kit cannot infer a partial index from the schema.
+
+      The partiality is the point, not an optimisation. Unique across all rows would make a
+      dismissal permanent: the same person trying again months later would collide with the
+      dismissed row and vanish, which is the opposite of what a queue is for. Scoped to
+      pending, a repeat attempt folds into the open row while a fresh attempt after a
+      dismissal opens a new one, and resolved rows accumulate as history.
+    */
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Inferred row types
 // ---------------------------------------------------------------------------
 
@@ -1756,3 +1833,4 @@ export type NewMaliciousPackageRow = typeof maliciousPackage.$inferInsert;
 export type ComponentMaliciousRow = typeof componentMalicious.$inferSelect;
 export type MaliciousAcknowledgementRow = typeof maliciousAcknowledgement.$inferSelect;
 export type MaliciousFeedUpdateRow = typeof maliciousFeedUpdate.$inferSelect;
+export type AccessRequestRow = typeof accessRequest.$inferSelect;

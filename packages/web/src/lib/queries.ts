@@ -1,5 +1,7 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
+  AccessRequestList,
+  AccessRequestStatus,
   AdvisoryImpact,
   AdvisorySummary,
   AnalyticsReport,
@@ -112,6 +114,7 @@ export const queryKeys = {
   userApplicationAccess: (id: string) => ["admin", "user-application-access", id] as const,
   oidcSettings: () => ["admin", "oidc-settings"] as const,
   oidcEnabled: () => ["auth", "oidc-enabled"] as const,
+  accessRequests: (status: string) => ["admin", "access-requests", status] as const,
   userApplicationAccessPreview: (id: string, candidate: unknown) =>
     ["admin", "user-application-access-preview", id, candidate] as const,
   environmentComparison: ["admin", "environment-comparison"] as const,
@@ -585,6 +588,22 @@ export function useOidcSettings() {
   return useQuery({
     queryKey: queryKeys.oidcSettings(),
     queryFn: () => api.get<OidcSettings>("/admin/auth/oidc"),
+  });
+}
+
+/**
+ * People the directory authenticated who have no account here. Admin only.
+ *
+ * Polled on an interval, unlike most of this file. The rows arrive because somebody tried to
+ * sign in while an administrator happened to have this screen open, and a queue that only
+ * updates on a reload is a queue whose badge is wrong for as long as the tab stays put.
+ */
+export function useAccessRequests(status: AccessRequestStatus = "pending") {
+  return useQuery({
+    queryKey: queryKeys.accessRequests(status),
+    queryFn: () =>
+      api.get<AccessRequestList>(`/admin/access-requests?status=${encodeURIComponent(status)}`),
+    refetchInterval: 60_000,
   });
 }
 

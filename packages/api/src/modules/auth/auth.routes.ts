@@ -146,7 +146,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.send({ enabled: await settings.oidcEnabled() });
   });
 
-  fastify.get("/oidc/start", { config: { rateLimit: AUTH_RATE_LIMIT } }, async (_request, reply) => {
+  fastify.get("/oidc/start", { config: { rateLimit: AUTH_RATE_LIMIT } }, async (request, reply) => {
     if (!(await settings.oidcEnabled())) return signInFailure(reply, "disabled");
     const clientConfig = await settings.oidcClientConfig();
     if (!clientConfig) return signInFailure(reply, "disabled");
@@ -154,9 +154,23 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     let metadata;
     try {
       metadata = await new OidcClient(clientConfig).discover();
-    } catch {
-      // The provider is unreachable from this server. Detail is deliberately not put in the
-      // URL; the Authentication tab's test button exists to produce a readable account of it.
+    } catch (error) {
+      /*
+        Logged here, and the detail is still kept out of the URL -- the person signing in
+        needs to know who to ask, not what the provider said about a redirect URI.
+
+        But it has to be written down somewhere, and for a long time it was not. This refusal
+        was the one failure on the whole sign-on path that left no trace at all: the browser
+        showed "this server could not reach your organisation's sign-in service" and an
+        administrator opening the error log found nothing, because nothing had been recorded.
+        Diagnosing it meant reproducing it by hand from inside the container. The Authentication
+        tab's test button produces a fuller account on demand; this is the line that says it
+        happened to somebody, and when.
+      */
+      request.log.warn(
+        { err: error, issuer: clientConfig.issuerUrl },
+        "could not reach the sign-on provider to start a sign-in",
+      );
       return signInFailure(reply, "provider_unreachable");
     }
 
@@ -276,7 +290,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         return signInFailure(reply, "exchange_failed");
       }
       idToken = payload.id_token;
-    } catch {
+    } catch (error) {
+      // Same gap as in /oidc/start, and the more confusing half of it: discovery can succeed
+      // from this server while the token endpoint is unreachable, which looks to the person
+      // signing in like a provider that half works.
+      request.log.warn(
+        { err: error, issuer: clientConfig.issuerUrl },
+        "could not reach the sign-on provider to exchange the authorization code",
+      );
       return signInFailure(reply, "provider_unreachable");
     }
 
@@ -316,7 +337,21 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       userAgent: request.headers["user-agent"],
     });
 
-    if (!outcome.ok) return signInFailure(reply, outcome.reason);
+    if (!outcome.ok) {
+      /*
+        Two codes for one refusal, because they make different promises.
+
+        A refused identity is normally queued for an administrator, and the sign-in page says
+        so -- which is worth saying, since it turns "ask an administrator" into "somebody
+        already knows". But the write can fail, and then that sentence would be false and the
+        person would wait for a notification nobody received. So the stronger wording is used
+        only when there is actually a request on the queue.
+      */
+      if (outcome.reason === "no_account") {
+        return signInFailure(reply, outcome.requested ? "no_account_requested" : "no_account");
+      }
+      return signInFailure(reply, outcome.reason);
+    }
 
     setSessionCookie(reply, outcome.session.token, outcome.session.expiresAt);
     return reply.redirect("/", 302);

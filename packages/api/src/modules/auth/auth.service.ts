@@ -8,6 +8,7 @@ import { hashPassword, verifyPassword } from "./password.js";
 import { AuthProviderRegistry, type AuthContext, type AuthCredentials } from "./provider.js";
 import type { IssuedSession, SessionService } from "./session.service.js";
 import type { VerifiedIdentity } from "../../services/auth/id-token.js";
+import type { AccessRequestService } from "./access-request.service.js";
 
 export interface LoginOutcome {
   user: UserRow;
@@ -45,7 +46,16 @@ export function toSessionUser(row: UserRow): SessionUser {
  */
 export type DirectorySignIn =
   | { ok: true; user: UserRow; session: IssuedSession }
-  | { ok: false; reason: "no_account" | "inactive" | "identity_conflict" };
+  /**
+   * Nobody has created an account for this identity.
+   *
+   * `requested` says whether the refusal made it onto the access-request queue, and the
+   * sign-in page needs it to choose between two sentences. One of them tells the person
+   * administrators have been notified, and that must not appear when the write failed --
+   * somebody told to wait for a notification nobody received waits forever.
+   */
+  | { ok: false; reason: "no_account"; requested: boolean }
+  | { ok: false; reason: "inactive" | "identity_conflict" };
 
 export class AuthService {
   constructor(
@@ -54,6 +64,15 @@ export class AuthService {
       config: Config;
       providers: AuthProviderRegistry;
       sessions: SessionService;
+      /**
+       * The queue of directory identities nobody has provisioned.
+       *
+       * Injected rather than handled by the route, because the two things that touch it are
+       * both decided here: which refusal warrants a request, and the successful sign-in that
+       * closes one. Splitting those across a route and a service is how the second half gets
+       * forgotten and the queue fills with entries that are already dealt with.
+       */
+      accessRequests: AccessRequestService;
       logger: { warn(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void };
     },
   ) {}
@@ -143,7 +162,7 @@ export class AuthService {
     identity: VerifiedIdentity,
     ctx: AuthContext,
   ): Promise<DirectorySignIn> {
-    const { db, sessions } = this.deps;
+    const { db, sessions, accessRequests } = this.deps;
 
     const [bySubject] = await db
       .select()
@@ -186,11 +205,45 @@ export class AuthService {
       }
     }
 
-    if (!account) return { ok: false, reason: "no_account" };
+    if (!account) {
+      /*
+        The directory vouched for this person and this platform has nobody by that identity.
+
+        Queued rather than only refused. Everything up to here verified a token the provider
+        signed, so this is a colleague of theirs, not a stranger -- and the old behaviour left
+        no trace at all, so whether an administrator ever heard about it depended on the
+        refused person speaking up.
+
+        Only this refusal is queued. A deactivated account was switched off by an administrator
+        on purpose, and a conflicting identity needs unlinking rather than creating, so listing
+        either under a button marked "create account" would invite precisely the wrong action.
+      */
+      const requested = await accessRequests.record(identity, {
+        provider: "oidc",
+        reason: "no_account",
+      });
+      return { ok: false, reason: "no_account", requested };
+    }
     if (!account.isActive) return { ok: false, reason: "inactive" };
 
     const session = await sessions.create(account.id, ctx);
     await db.update(user).set({ lastLoginAt: new Date() }).where(eq(user.id, account.id));
+
+    /*
+      Whoever got in no longer needs to be on the queue.
+
+      This is what makes the queue drain itself. An administrator who creates the account from
+      the queue screen resolves the row directly, but one who creates it from the Users page or
+      reactivates a disabled account does not -- and a queue that empties only when somebody
+      presses the right button accumulates entries that are already dealt with, which is how a
+      triage screen stops being read.
+    */
+    await accessRequests.resolveOnSignIn({
+      provider: "oidc",
+      subject: identity.subject,
+      userId: account.id,
+    });
+
     return { ok: true, user: account, session };
   }
 

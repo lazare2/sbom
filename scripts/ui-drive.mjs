@@ -185,6 +185,17 @@ async function expectHidden(selectorText, label) {
 }
 
 async function login(target, email, password) {
+  /*
+    The password form sits behind a tab whenever single sign-on is configured, and only then.
+
+    Both states are real and which one a developer gets depends on whether their database has
+    a sign-on connection saved -- so this clicks the tab if it is there and ignores it if it is
+    not. Without this, every check after step 2 fails on a machine where sign-on is enabled,
+    all of them reporting a missing Email field rather than the tab that moved it.
+  */
+  const localTab = target.getByRole("tab", { name: "Local account" });
+  if (await localTab.count()) await localTab.click();
+
   await target.getByLabel("Email").fill(email);
   await target.getByLabel("Password", { exact: true }).fill(password);
   await target.getByRole("button", { name: "Sign in" }).click();
@@ -1398,9 +1409,22 @@ await page.getByRole("button", { name: /^25 —/ }).click();
 await page.waitForTimeout(300);
 
 await page.getByRole("button", { name: "Test connection" }).click();
-// A DNS failure plus the mailer's own timeout budget; generous so a slow resolver does not
-// read as a missing diagnosis.
-await page.waitForTimeout(10000);
+/*
+  Waits for the diagnosis to appear rather than for a fixed budget.
+
+  This was `waitForTimeout(10000)` -- a DNS failure plus the mailer's own timeout, generous
+  on an idle machine. It is not generous enough on a busy one, and when it ran out early the
+  gate reported "an unreachable relay produced no diagnosis on screen", which reads as the
+  defect this check exists to catch rather than as the check being impatient.
+
+  The catch is deliberate: if no diagnosis ever arrives, this falls through to the assertions
+  below so the real problem is still reported, instead of failing here as a timeout.
+*/
+await page
+  .getByText(/could not be resolved|Internal server error/i)
+  .first()
+  .waitFor({ timeout: 45000 })
+  .catch(() => {});
 
 const afterTest = await page.locator("body").innerText();
 if (/Internal server error/i.test(afterTest)) {
@@ -2609,7 +2633,20 @@ await page.getByLabel("Application (client) ID").fill("ui-drive-client");
 await page.getByLabel("Client secret").fill(DRIVE_SECRET);
 await page.waitForTimeout(200);
 await page.getByRole("button", { name: "Test connection" }).click();
-await page.waitForTimeout(2500);
+/*
+  Waits for the verdict, not for a fixed interval.
+
+  This was `waitForTimeout(2500)`, which is long enough on an idle machine and not on a busy
+  one -- it reported "an unreachable issuer did not render as a failure" on a run where the
+  server had answered correctly in 67ms and the page rendered it a moment after the check
+  looked. A gate that fails when the machine is loaded teaches people to re-run it rather
+  than read it, which is worse than no gate.
+*/
+await page
+  .locator("span")
+  .filter({ hasText: /^(Failed|Working|Reachable)$/ })
+  .first()
+  .waitFor({ timeout: 20000 });
 await page.waitForLoadState("networkidle");
 
 {

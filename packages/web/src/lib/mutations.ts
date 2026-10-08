@@ -361,6 +361,39 @@ export function useTestXrayConnection() {
  * The response is the full settings object, so it is written straight into the cache rather
  * than invalidated -- exact, and it saves a round trip on a screen somebody is mid-setup on.
  */
+/**
+ * Takes a request off the queue.
+ *
+ * Both actions share one hook because they differ only in the path and in nothing a caller
+ * cares about: each settles one row and each invalidates the same queue. `userId` records the
+ * account that was created, which is what makes "who did we let in off the back of this" an
+ * answerable question later.
+ */
+export function useSettleAccessRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      action,
+      userId,
+    }: {
+      id: string;
+      action: "resolve" | "dismiss";
+      userId?: string;
+    }) =>
+      api.post<void>(
+        `/admin/access-requests/${id}/${action}`,
+        action === "resolve" && userId ? { userId } : {},
+      ),
+    onSuccess: () => {
+      // Every status, not just pending: a resolved row leaves the pending list and joins
+      // another, and a stale "resolved" tab is the one place an administrator would look to
+      // confirm they had not imagined pressing the button.
+      void qc.invalidateQueries({ queryKey: ["admin", "access-requests"] });
+    },
+  });
+}
+
 export function useSetOidcConnection() {
   const qc = useQueryClient();
   return useMutation({
@@ -396,6 +429,26 @@ export function useResetUserPassword() {
       api.post<UserCredentialResponse>(`/admin/users/${vars.id}/reset-password`, {
         ...(vars.password ? { password: vars.password } : {}),
         mustChangePassword: true,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+  });
+}
+
+/**
+ * Converts an account between a local password and the directory.
+ *
+ * Returns a credential only in one direction. Coming back from the directory the account
+ * would otherwise have no way in at all, so a password is issued and has to be shown; going
+ * the other way there is nothing to show, because the credential now lives at the provider.
+ */
+export function useSetSignInMethod() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; method: "local" | "directory" }) =>
+      api.post<UserCredentialResponse>(`/admin/users/${vars.id}/sign-in-method`, {
+        method: vars.method,
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["admin"] });

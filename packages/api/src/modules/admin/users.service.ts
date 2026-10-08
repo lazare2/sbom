@@ -6,6 +6,7 @@ import type {
   ListUsersQuery,
   Paginated,
   ResetUserPasswordRequest,
+  SetSignInMethod,
   UpdateUserRequest,
   UserCredentialResponse,
   UserSummary,
@@ -245,6 +246,132 @@ export class AdminUsersService {
     });
 
     return this.getById(id);
+  }
+
+  /**
+   * Change how an existing account signs in.
+   *
+   * Both directions are destructive to a credential, which is why neither is folded into
+   * `update`: converting to the directory discards the password hash, and converting away
+   * from it has to issue a new password because the account would otherwise have no way in
+   * at all.
+   *
+   * Sessions are revoked either way. The basis on which this person was authenticated has
+   * just changed, and the common reason to convert an account to the directory is that its
+   * local password should no longer work -- leaving live sessions open would defeat exactly
+   * that.
+   */
+  async setSignInMethod(
+    id: string,
+    input: SetSignInMethod,
+    actor: Actor,
+  ): Promise<UserCredentialResponse> {
+    const existing = await this.requireUser(id);
+    const directory = input.method === "directory";
+    const target: AuthProviderName = directory ? "oidc" : "local";
+
+    if (existing.authProvider === target) {
+      throw new ConflictError(
+        directory
+          ? `"${existing.email}" already signs in through the directory.`
+          : `"${existing.email}" already signs in with a local password.`,
+      );
+    }
+
+    if (directory) await this.assertNotLastLocalAdmin(existing);
+
+    /*
+      A generated password, not a null one, when coming back from the directory.
+
+      An account with no hash and `auth_provider = 'local'` cannot be signed into by any
+      route: the local provider has nothing to compare against, and there is no self-service
+      recovery to fall back on. The only honest conversion is one that produces a credential
+      to hand over, which is why this returns the same shape as a password reset.
+    */
+    const password = directory ? null : generatePassword();
+
+    const [updated] = await this.deps.db
+      .update(user)
+      .set({
+        authProvider: target,
+        passwordHash: password === null ? null : await hashPassword(password),
+        /*
+          Cleared in both directions.
+
+          Going to the directory it is already null, and setting it again costs nothing.
+          Coming back from it, this is the part that is easy to miss: the row would otherwise
+          keep asserting a directory identity that no longer applies to it, and the next
+          account legitimately created for that person would be matched against a stale claim.
+        */
+        authSubject: null,
+        // Nothing to change for a directory account, and the flag would refuse every
+        // authenticated route while offering a form that cannot clear it.
+        mustChangePassword: !directory,
+        updatedAt: new Date(),
+      })
+      .where(eq(user.id, id))
+      .returning();
+    if (!updated) throw new NotFoundError("User");
+
+    await this.deps.sessions.revokeAllForUser(id);
+
+    await this.deps.audit.record({
+      actor,
+      action: "user.sign_in_method_set",
+      targetType: "user",
+      targetId: id,
+      // The transition, never the credential that came out of it -- not even its length.
+      metadata: {
+        email: updated.email,
+        from: existing.authProvider,
+        to: updated.authProvider,
+        passwordIssued: password !== null,
+      },
+    });
+
+    return {
+      user: toUserSummary(rowToQueryRow(updated, 0)),
+      temporaryPassword: password ?? undefined,
+    };
+  }
+
+  /**
+   * Refuses to leave the platform with no administrator holding a local password.
+   *
+   * The scenario this exists for happened during this platform's own rollout: the directory
+   * became unreachable from the server, and every sign-in through it failed for reasons that
+   * took three rounds of diagnosis to find. If every administrator had been directory-backed
+   * by then, there would have been no way into the admin screens to read the diagnosis — the
+   * one screen that could explain the outage would have been behind the outage.
+   *
+   * So one active administrator must always keep a password. It is the break-glass account,
+   * and this is the check that stops it being converted away by accident.
+   */
+  private async assertNotLastLocalAdmin(target: {
+    id: string;
+    role: string;
+    isActive: boolean;
+    email: string;
+    authProvider: AuthProviderName;
+  }): Promise<void> {
+    if (target.role !== "admin" || !target.isActive || target.authProvider !== "local") return;
+
+    const rows = await this.deps.db.execute<Row<{ count: number | string }>>(sql`
+      SELECT count(*)::int AS count FROM "user"
+       WHERE role = 'admin'
+         AND is_active = true
+         AND auth_provider = 'local'
+         AND id <> ${target.id}::uuid
+    `);
+
+    if (Number(rowsOf(rows)[0]?.count ?? 0) === 0) {
+      throw new BadRequestError(
+        `"${target.email}" is the only active administrator who can sign in with a password. ` +
+          "Keep one, or an outage at the directory locks everybody out of the admin screens — " +
+          "including the page that would explain the outage. Give another administrator a local " +
+          "password first.",
+      );
+    }
   }
 
   /**

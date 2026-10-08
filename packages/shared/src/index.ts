@@ -20,5 +20,6 @@ export * from "./schemas/export.js";
 export * from "./schemas/vex.js";
 export * from "./schemas/application-access.js";
 export * from "./schemas/oidc.js";
+export * from "./schemas/access-request.js";
 export * from "./schemas/environment.js";
 export * from "./schemas/vuln-provider.js";
