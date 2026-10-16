@@ -66,6 +66,10 @@ services:
       # build-from-source deployment could not set up sign-on and the only symptom was a save
       # that refused with "no secrets key".
       SECRETS_KEY: ${SECRETS_KEY:-}
+      # Reported as the version of the OpenAPI document served at /api/v1/openapi.json.
+      # Cosmetic, but a spec that calls every release "dev" is a spec nobody can cite in a
+      # ticket. Set by start.ps1 / start.sh from the bundle's image tag.
+      APP_VERSION: ${APP_VERSION:-}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       INGEST_TOKENS: ${INGEST_TOKENS:-}
       BLOB_STORE_DRIVER: ${BLOB_STORE_DRIVER:-fs}

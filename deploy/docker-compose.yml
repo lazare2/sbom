@@ -61,6 +61,10 @@ services:
       # needs no key, and both admin screens say so rather than failing at save. Generated
       # by start.ps1 / start.sh, including on an upgrade of a deployment that predates it.
       SECRETS_KEY: ${SECRETS_KEY:-}
+      # Reported as the version of the OpenAPI document served at /api/v1/openapi.json.
+      # Cosmetic, but a spec that calls every release "dev" is a spec nobody can cite in a
+      # ticket. Set by start.ps1 / start.sh from the bundle's image tag.
+      APP_VERSION: ${APP_VERSION:-}
       INGEST_TOKENS: ${INGEST_TOKENS:-}
       BLOB_STORE_DRIVER: fs
       BLOB_STORE_FS_ROOT: /data/sboms

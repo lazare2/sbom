@@ -173,7 +173,7 @@ fi
 if [ -f images.env ]; then
   while IFS='=' read -r key value; do
     case "$key" in
-      SBOM_IMAGE_*) export "$key=$value" ;;
+      SBOM_IMAGE_*|APP_VERSION) export "$key=$value" ;;
     esac
   done < images.env
 fi

@@ -207,6 +207,10 @@ Write-Note "start.cmd (for machines where script files are blocked)"
 @"
 SBOM_IMAGE_API=$apiImage
 SBOM_IMAGE_WEB=$webImage
+# Reported as the version of the OpenAPI document. Carried here rather than in .env
+# because .env is written once and then left alone, so an upgraded deployment would go
+# on reporting whichever version it was first installed at.
+APP_VERSION=$Version
 "@ | Out-File -FilePath (Join-Path $bundleDir "images.env") -Encoding ascii
 
 # Read by the start scripts to decide whether `docker load` is needed at all,
