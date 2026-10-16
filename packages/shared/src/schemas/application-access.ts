@@ -121,6 +121,36 @@ export interface ApplicationAccessEnvironmentGap {
   applicationCount: number;
 }
 
+/**
+ * One application a candidate grant set actually reaches.
+ *
+ * Carries *why* it is reachable, not just that it is. "payments-api" on its own leaves an
+ * administrator unable to answer the question they opened this screen to answer -- whether a
+ * grant can be removed -- because removing a direct grant on an application the account also
+ * reaches through a group changes nothing, and removing it from the group takes it away from
+ * everyone else too.
+ */
+export interface ReachableApplication {
+  id: string;
+  name: string;
+  /** Which estate it lives in, because the same name can exist once per environment. */
+  environmentName: string;
+  /** Named directly by the application grants. */
+  direct: boolean;
+  /** Granted groups that contain it. Empty for a direct-only grant. */
+  viaGroups: string[];
+}
+
+/**
+ * How many reachable applications are listed before the list is truncated.
+ *
+ * An unrestricted account reaches every application in every estate it was granted, which on
+ * a real deployment is thousands. The count stays authoritative and the list is capped, so
+ * the screen can say "showing 500 of 1,687" rather than either lying or rendering a page that
+ * takes a second to paint.
+ */
+export const REACHABLE_APPLICATION_LIST_CAP = 500;
+
 /** A granted group that contains nothing, and so grants nothing. */
 export interface ApplicationAccessEmptyGroup {
   groupId: string;
@@ -141,6 +171,14 @@ export interface ApplicationAccessEmptyGroup {
  */
 export interface ApplicationAccessPreview {
   reachableApplicationCount: number;
+  /**
+   * The applications themselves, up to `REACHABLE_APPLICATION_LIST_CAP`.
+   *
+   * Ordered by name. `reachableApplicationCount` remains the total and may exceed this
+   * list's length -- the two disagreeing is the truncation, not an inconsistency, and the
+   * screen reports it as such.
+   */
+  reachable: ReachableApplication[];
   /** Named applications held back by the environment axis, grouped by estate. */
   blockedByEnvironment: ApplicationAccessEnvironmentGap[];
   emptyGroups: ApplicationAccessEmptyGroup[];

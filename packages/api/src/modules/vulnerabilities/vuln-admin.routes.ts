@@ -28,7 +28,13 @@ import type { XrayCredentials } from "../../services/scanner/xray-client.js";
 /** The acting admin, denormalised onto every audit row this request writes. */
 function actorOf(request: FastifyRequest): Actor {
   const user = getUser(request);
-  return { id: user.id, email: user.email };
+  // The token, when one authenticated this request rather than a browser session. See the
+  // note on `Actor.viaToken`.
+  return {
+    id: user.id,
+    email: user.email,
+    ...(request.apiToken ? { viaToken: request.apiToken.name } : {}),
+  };
 }
 
 /**

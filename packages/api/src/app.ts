@@ -22,6 +22,8 @@ import { exportRoutes } from "./modules/exports/export.routes.js";
 import { dashboardRoutes } from "./modules/dashboard/dashboard.routes.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
 import { ingestionRoutes } from "./modules/ingestion/ingestion.routes.js";
+import { RouteCollector } from "./modules/openapi/route-collector.js";
+import { openapiRoutes } from "./modules/openapi/openapi.routes.js";
 import { manualUploadRoutes } from "./modules/ingestion/manual-upload.routes.js";
 import {
   vulnerabilityRoutes,
@@ -71,6 +73,21 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     // file, this is the JSON-body ceiling for the rest of the API.
     bodyLimit: 1024 * 1024,
   });
+
+  /*
+    Collects the route table as it is built, so the OpenAPI document is generated from what
+    the server actually registered rather than from a list somebody maintains alongside it.
+
+    Registered before anything else so it sees every route, including the ones added inside
+    nested scopes.
+  */
+  const routeCollector = new RouteCollector();
+  app.addHook("onRoute", (route) => {
+    routeCollector.add({ method: route.method, url: route.url });
+  });
+  // Decorated so the OpenAPI routes can read the table they are describing, and so a test can
+  // assert that every route in it is documented.
+  app.decorate("routeTable", routeCollector);
 
   // --- security & parsing ---------------------------------------------------
   await app.register(helmet, {
@@ -129,6 +146,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   await app.register(
     async (api) => {
+      /*
+        The OpenAPI document and the reference page. Registered first and deliberately public:
+        the document describes the API's shape, not its contents, and keeping it behind a
+        session would make it unreadable to exactly the tooling that consumes it.
+      */
+      await api.register(openapiRoutes, { prefix: "" });
+
       await api.register(authRoutes, { prefix: "/auth" });
 
       // Read APIs. Each of these applies `requireAuth` to its own scope, so a

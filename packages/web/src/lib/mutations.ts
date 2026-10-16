@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type {
+  ApiTokenCreated,
+  CreateApiToken,
   ApplicationDetail,
   ApplicationGroupDetail,
   CreateGroupRequest,
@@ -369,6 +371,50 @@ export function useTestXrayConnection() {
  * account that was created, which is what makes "who did we let in off the back of this" an
  * answerable question later.
  */
+/**
+ * Mints a personal API token.
+ *
+ * The secret comes back exactly once and is never written into the query cache — it is
+ * returned to the caller, which shows it and then forgets it. Caching it would leave a
+ * credential in memory for as long as the tab stayed open, and in any devtools snapshot of it.
+ */
+export function useCreateApiToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateApiToken) => api.post<ApiTokenCreated>("/auth/api-tokens", body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["auth", "api-tokens"] });
+      void qc.invalidateQueries({ queryKey: ["auth", "api-access"] });
+      void qc.invalidateQueries({ queryKey: ["admin", "api-tokens"] });
+    },
+  });
+}
+
+/** Revokes one of the caller's own tokens. */
+export function useRevokeApiToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/auth/api-tokens/${id}`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["auth", "api-tokens"] });
+      void qc.invalidateQueries({ queryKey: ["auth", "api-access"] });
+      void qc.invalidateQueries({ queryKey: ["admin", "api-tokens"] });
+    },
+  });
+}
+
+/** Revokes anybody's token. Admin only. */
+export function useRevokeAnyApiToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/admin/api-tokens/${id}`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "api-tokens"] });
+      void qc.invalidateQueries({ queryKey: ["auth", "api-tokens"] });
+    },
+  });
+}
+
 export function useSettleAccessRequest() {
   const qc = useQueryClient();
   return useMutation({

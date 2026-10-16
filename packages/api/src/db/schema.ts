@@ -1798,6 +1798,81 @@ export const accessRequest = pgTable(
   ],
 );
 
+/**
+ * A personal API token: the API, as the person who minted it.
+ *
+ * The web app is a client of this same API, so nothing here grants reach the web UI does not
+ * already have. What it adds is a way to authenticate without a browser -- and therefore a
+ * credential that lives in shell history, CI logs and wiki pages rather than in an HttpOnly
+ * cookie that expires.
+ *
+ * ## Permissions are not stored here
+ *
+ * Deliberately. The token names a user and nothing else; every request it authenticates then
+ * runs through the same role, environment and group machinery a session does, resolved live.
+ * Freezing a permission set into the row would create credentials that outlive the access they
+ * describe -- narrowing somebody's estates, or deactivating them, has to take effect on their
+ * tokens at once, and the only way that is true by construction is to not copy the answer.
+ *
+ * ## Why `scope` is here, when permissions are not
+ *
+ * `read` and `write` are not a second permission system; they are a ceiling on what this
+ * particular string can do within whatever the account may already do. An administrator's
+ * token is total control of the platform if it leaks, and the overwhelmingly common reason to
+ * want one -- pulling inventory into a spreadsheet -- needs no write at all. Defaulting to
+ * `read` makes the dangerous capability something chosen per token rather than inherent.
+ */
+export const apiToken = pgTable(
+  "api_token",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /**
+     * Whose token this is, and whose permissions it borrows.
+     *
+     * `cascade`, unlike the audit trail's `set null`: a token is a live credential, not a
+     * record of something that happened, so deleting the account must delete the ability to
+     * authenticate as it rather than leave an orphan row that resolves to nobody.
+     */
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** What it is for, chosen by its owner. Unique per account, not globally. */
+    name: text("name").notNull(),
+    /** SHA-256 of the plaintext. A dump of this table cannot be replayed. */
+    tokenHash: text("token_hash").notNull(),
+    /** Last four characters of the plaintext, so a list of tokens can be told apart. */
+    tokenSuffix: text("token_suffix").notNull(),
+    /** `read` or `write`. See the note above on why this is not a permission. */
+    scope: text("scope").notNull().default("read"),
+    /**
+     * When it stops working. Null means never, which is a real choice and a liability.
+     *
+     * Enforced at authentication time rather than by a sweeper: a row that has lapsed must
+     * stop working at the instant it lapses, not whenever a job next runs.
+     */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /**
+     * Last time it authenticated anything.
+     *
+     * The only way to answer "is this token still in use" before revoking it, which is the
+     * question that otherwise stops anybody ever tidying up. Written on use, best-effort.
+     */
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("api_token_hash_uniq").on(t.tokenHash),
+    /*
+      Names are unique per account, not across the platform. Two engineers both calling their
+      token "laptop" is the expected case; making them negotiate over the word would be a
+      shared namespace nobody asked for.
+    */
+    uniqueIndex("api_token_user_name_uniq").on(t.userId, sql`lower(${t.name})`),
+    index("api_token_user_idx").on(t.userId),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Inferred row types
 // ---------------------------------------------------------------------------
@@ -1834,3 +1909,4 @@ export type ComponentMaliciousRow = typeof componentMalicious.$inferSelect;
 export type MaliciousAcknowledgementRow = typeof maliciousAcknowledgement.$inferSelect;
 export type MaliciousFeedUpdateRow = typeof maliciousFeedUpdate.$inferSelect;
 export type AccessRequestRow = typeof accessRequest.$inferSelect;
+export type ApiTokenRow = typeof apiToken.$inferSelect;

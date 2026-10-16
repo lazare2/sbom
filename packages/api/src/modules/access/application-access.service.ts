@@ -1,11 +1,13 @@
 import { sql, type SQL } from "drizzle-orm";
 import {
+  REACHABLE_APPLICATION_LIST_CAP,
   UNRESTRICTED_APPLICATIONS,
   type ApplicationAccess,
   type ApplicationAccessEmptyGroup,
   type ApplicationAccessEnvironmentGap,
   type ApplicationAccessPreview,
   type PreviewUserApplicationAccess,
+  type ReachableApplication,
   type SetUserApplicationAccess,
   type UserApplicationAccess,
 } from "@sbom/shared";
@@ -190,8 +192,10 @@ export class ApplicationAccessService {
         }
       : UNRESTRICTED_APPLICATIONS;
 
-    const [reachableApplicationCount, blockedByEnvironment, emptyGroups] = await Promise.all([
+    const [reachableApplicationCount, reachable, blockedByEnvironment, emptyGroups] =
+      await Promise.all([
       this.countVisible(access, environmentIds),
+      this.listVisible(access, environmentIds, input.groupIds, input.applicationIds),
       /*
         Both lists are empty for an unrestricted account on purpose. It names no applications
         and no groups, so there is nothing for an estate to hold back and no group whose
@@ -205,7 +209,75 @@ export class ApplicationAccessService {
         : Promise.resolve<ApplicationAccessEmptyGroup[]>([]),
     ]);
 
-    return { reachableApplicationCount, blockedByEnvironment, emptyGroups };
+    return { reachableApplicationCount, reachable, blockedByEnvironment, emptyGroups };
+  }
+
+  /**
+   * The applications a grant set reaches, named, with the reason each one is reachable.
+   *
+   * The companion to `countVisible`, and deliberately a separate query rather than a count
+   * derived from this list: the count is uncapped and authoritative, while this is capped so
+   * an unrestricted account on a large estate cannot make the screen unusable. Deriving one
+   * from the other would silently cap the count too.
+   *
+   * `direct` and `viaGroups` are computed from the candidate grants being previewed, not from
+   * whatever is stored for the account -- the whole point of a preview is to score boxes
+   * nobody has saved yet.
+   */
+  private async listVisible(
+    access: ApplicationAccess,
+    environmentIds: readonly string[],
+    groupIds: readonly string[],
+    applicationIds: readonly string[],
+  ): Promise<ReachableApplication[]> {
+    const result = await this.deps.db.execute<
+      Row<{
+        id: string;
+        name: string;
+        environment_name: string;
+        direct: boolean;
+        via_groups: string[] | null;
+      }>
+    >(sql`
+      SELECT a.id,
+             a.name,
+             e.name AS environment_name,
+             (a.id = ANY(${sql.param([...applicationIds])}::uuid[])) AS direct,
+             /*
+               FILTER rather than array_remove: the LEFT JOIN contributes one NULL row for an
+               application in none of the granted groups, and array_agg would otherwise
+               produce {NULL} -- which serialises as a group named null and renders as a chip
+               with no label.
+             */
+             COALESCE(
+               array_agg(DISTINCT g.name) FILTER (WHERE g.id IS NOT NULL),
+               '{}'
+             ) AS via_groups
+        FROM application a
+        JOIN environment e ON e.id = a.environment_id
+        /*
+          Joined only to the groups being previewed. Joining every group the application
+          belongs to would list groups the account was never granted, which reads as an
+          explanation of access it does not have.
+        */
+        LEFT JOIN application_group_member gm
+               ON gm.application_id = a.id
+              AND gm.group_id = ANY(${sql.param([...groupIds])}::uuid[])
+        LEFT JOIN application_group g ON g.id = gm.group_id
+       WHERE a.environment_id = ANY(${sql.param([...environmentIds])}::uuid[])
+         AND ${visibleApplications(access, "a")}
+       GROUP BY a.id, a.name, e.name
+       ORDER BY a.name ASC
+       LIMIT ${sql.raw(String(REACHABLE_APPLICATION_LIST_CAP))}
+    `);
+
+    return rowsOf(result).map((row) => ({
+      id: row.id,
+      name: row.name,
+      environmentName: row.environment_name,
+      direct: row.direct === true,
+      viaGroups: row.via_groups ?? [],
+    }));
   }
 
   /**

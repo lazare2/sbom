@@ -1,6 +1,9 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
   AccessRequestList,
+  ApiAccessInfo,
+  ApiTokenSummary,
+  ApiTokenWithOwner,
   AccessRequestStatus,
   AdvisoryImpact,
   AdvisorySummary,
@@ -115,6 +118,9 @@ export const queryKeys = {
   oidcSettings: () => ["admin", "oidc-settings"] as const,
   oidcEnabled: () => ["auth", "oidc-enabled"] as const,
   accessRequests: (status: string) => ["admin", "access-requests", status] as const,
+  apiAccess: ["auth", "api-access"] as const,
+  apiTokens: ["auth", "api-tokens"] as const,
+  allApiTokens: ["admin", "api-tokens"] as const,
   userApplicationAccessPreview: (id: string, candidate: unknown) =>
     ["admin", "user-application-access-preview", id, candidate] as const,
   environmentComparison: ["admin", "environment-comparison"] as const,
@@ -655,10 +661,19 @@ export function useApplicationAccessPreview(
  * Only the environments the account has actually been granted are fetched. Offering a group
  * from an estate the account cannot reach would let an administrator tick something that
  * grants nothing, since the two restrictions compose by intersection.
+ *
+ * ## Why the search term goes to the server
+ *
+ * The page size below is a cap, not a total. Filtering the fetched page in the browser
+ * therefore searches the first two hundred applications per estate rather than the estate --
+ * and the failure is silent and backwards: the application somebody is looking for is missing
+ * precisely when there are enough applications to need a search. Passing the term through
+ * means the server picks the two hundred, so a name that exists is always findable.
  */
 const GRANT_PAGE_SIZE = 200;
 
-export function useGrantableScope(environmentIds: string[]) {
+export function useGrantableScope(environmentIds: string[], applicationSearch = "") {
+  const search = applicationSearch.trim();
   const groups = useQueries({
     queries: environmentIds.map((environment) => ({
       queryKey: queryKeys.groups({ pageSize: 200, environment }),
@@ -672,12 +687,18 @@ export function useGrantableScope(environmentIds: string[]) {
 
   const applications = useQueries({
     queries: environmentIds.map((environment) => ({
-      queryKey: queryKeys.applications({ pageSize: GRANT_PAGE_SIZE, environment, forGrant: true }),
+      queryKey: queryKeys.applications({
+        pageSize: GRANT_PAGE_SIZE,
+        environment,
+        forGrant: true,
+        search,
+      }),
       queryFn: () =>
         api.get<Paginated<ApplicationSummary>>(
           `/applications${toQueryString({
             pageSize: GRANT_PAGE_SIZE,
             environment,
+            ...(search === "" ? {} : { search }),
             // Inactive and unconfirmed applications are grantable too: a service somebody
             // needs access to is often exactly the one that has just appeared and not yet
             // been confirmed.
@@ -685,6 +706,9 @@ export function useGrantableScope(environmentIds: string[]) {
           })}`,
         ),
       staleTime: 60 * 1000,
+      // Keeps the previous page on screen while a new search term is in flight, so typing
+      // does not flash an empty list between keystrokes.
+      placeholderData: (previous: Paginated<ApplicationSummary> | undefined) => previous,
     })),
   });
 
@@ -705,7 +729,39 @@ export function useGrantableScope(environmentIds: string[]) {
     error: all.find((q) => q.error)?.error ?? null,
     /** True only when the lists are known to be complete. */
     truncated: all.some((q) => (q.data?.total ?? 0) > GRANT_PAGE_SIZE),
+    /** Whether a search term is narrowing the application list, which the screen says. */
+    searching: search !== "",
   };
+}
+
+/**
+ * Where the API is, and how many live tokens the caller holds.
+ *
+ * The base URL comes from the server rather than from `window.location`, because it is the
+ * address a script on another machine has to use. Deriving it in the browser would hand
+ * somebody `localhost` whenever they happened to open the UI that way.
+ */
+export function useApiAccess() {
+  return useQuery({
+    queryKey: queryKeys.apiAccess,
+    queryFn: () => api.get<ApiAccessInfo>("/auth/api-access"),
+  });
+}
+
+/** The caller's own tokens. Never the secrets — the server stores only hashes. */
+export function useApiTokens() {
+  return useQuery({
+    queryKey: queryKeys.apiTokens,
+    queryFn: () => api.get<{ tokens: ApiTokenSummary[] }>("/auth/api-tokens"),
+  });
+}
+
+/** Every token on the platform, with its owner. Admin only. */
+export function useAllApiTokens() {
+  return useQuery({
+    queryKey: queryKeys.allApiTokens,
+    queryFn: () => api.get<{ tokens: ApiTokenWithOwner[] }>("/admin/api-tokens"),
+  });
 }
 
 /** Every estate's figures side by side. Admin only, and never summed — see the API. */

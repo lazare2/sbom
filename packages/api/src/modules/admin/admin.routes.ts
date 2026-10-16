@@ -44,7 +44,13 @@ import { OidcClient } from "../../services/auth/oidc-client.js";
 /** The acting admin, denormalised onto every audit row this request writes. */
 function actorOf(request: FastifyRequest): Actor {
   const user = getUser(request);
-  return { id: user.id, email: user.email };
+  // The token, when one authenticated this request rather than a browser session. See the
+  // note on `Actor.viaToken`.
+  return {
+    id: user.id,
+    email: user.email,
+    ...(request.apiToken ? { viaToken: request.apiToken.name } : {}),
+  };
 }
 
 /**
@@ -79,6 +85,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   const {
     adminUsers,
     accessRequests,
+    apiTokens,
     environments,
     applicationAccess,
     adminApplications,
@@ -902,6 +909,55 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       targetType: "access_request",
       targetId: id,
       metadata: { from: "pending", to: "dismissed" },
+    });
+
+    return reply.status(204).send();
+  });
+  // -------------------------------------------------------------------------
+  // API tokens, platform-wide
+  // -------------------------------------------------------------------------
+
+  /**
+   * Every personal API token that exists, with its owner.
+   *
+   * The oversight half of letting people mint their own. Self-service is deliberate -- a queue
+   * behind an administrator is how four engineers end up sharing one token -- but it only
+   * stays defensible if somebody can answer "how many write tokens exist and who holds them",
+   * which is the question that matters after one goes missing.
+   *
+   * Never returns a secret, and there is nothing to return: only the hash is stored.
+   */
+  fastify.get("/api-tokens", async (_request, reply) => {
+    return reply.send({ tokens: await apiTokens.listAll() });
+  });
+
+  /**
+   * Revoke anybody's token.
+   *
+   * Takes effect on the next request rather than at some expiry: the lookup that authenticates
+   * a token has the revocation in its predicate, so there is no window in which a revoked
+   * token still works.
+   */
+  fastify.delete("/api-tokens/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const revoked = await apiTokens.revokeAny(id);
+
+    await audit.record({
+      actor: actorOf(request),
+      action: "api_token.revoke",
+      targetType: "api_token",
+      targetId: id,
+      /*
+        Whose token, and what it could do -- never the token. `own: false` distinguishes an
+        administrator revoking somebody else's credential from a person tidying up their own,
+        which are different events that would otherwise share one action name.
+      */
+      metadata: {
+        own: false,
+        ownerEmail: revoked.userEmail,
+        name: revoked.name,
+        scope: revoked.scope,
+      },
     });
 
     return reply.status(204).send();

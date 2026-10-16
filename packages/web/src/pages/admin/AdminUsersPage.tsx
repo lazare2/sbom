@@ -24,6 +24,8 @@ import {
   useOidcEnabled,
   useUsers,
 } from "../../lib/queries.ts";
+import { useDebounced } from "../../lib/useDebounced.ts";
+import { ApplicationPicker, GroupPicker, ReachablePanel } from "./UserAccessPickers.tsx";
 import { readEnum, readNumber, readString, useUrlState } from "../../lib/useUrlState.ts";
 import {
   Badge,
@@ -254,8 +256,6 @@ export function AdminUsersPage() {
                     <Th onSort={() => sort.toggle("isActive")} sorted={sort.stateOf("isActive")}>
                       Status
                     </Th>
-                    {/* Not sortable: the grants are per user and not part of the list query. */}
-                    <Th>Access</Th>
                     <Th onSort={() => sort.toggle("lastLoginAt")} sorted={sort.stateOf("lastLoginAt")}>
                       Last sign-in
                     </Th>
@@ -269,6 +269,8 @@ export function AdminUsersPage() {
                     <Th onSort={() => sort.toggle("createdAt")} sorted={sort.stateOf("createdAt")}>
                       Created
                     </Th>
+                    {/* Not sortable: the grants are per user and not part of the list query. */}
+                    <Th>Access</Th>
                     <Th />
                   </tr>
                 </thead>
@@ -324,6 +326,11 @@ export function AdminUsersPage() {
                             <Badge tone="danger">Deactivated</Badge>
                           )}
                         </Td>
+                        <Td title={u.lastLoginAt ?? ""}>{formatRelative(u.lastLoginAt)}</Td>
+                        <Td align="right" className="nums">
+                          {u.activeSessions}
+                        </Td>
+                        <Td title={u.createdAt}>{formatDate(u.createdAt)}</Td>
                         <Td>
                           <AccessCell
                             user={u}
@@ -333,11 +340,6 @@ export function AdminUsersPage() {
                             }}
                           />
                         </Td>
-                        <Td title={u.lastLoginAt ?? ""}>{formatRelative(u.lastLoginAt)}</Td>
-                        <Td align="right" className="nums">
-                          {u.activeSessions}
-                        </Td>
-                        <Td title={u.createdAt}>{formatDate(u.createdAt)}</Td>
                         <Td align="right">
                           <div className="flex flex-wrap justify-end gap-1.5">
                             {/* Hidden rather than disabled for a directory account: there is
@@ -1009,19 +1011,24 @@ function ResetPasswordModal({
  * when the editor opens.
  */
 function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void }) {
-  if (user.role === "admin") {
-    return (
-      <span
-        className="text-xs text-text-muted"
-        title="Administrators reach every environment, group and application, including ones created later."
-      >
-        Everything
-      </span>
-    );
-  }
-
   return (
     <div className="flex items-center gap-1.5">
+      {/*
+        Administrators get the badge and the button, not the badge alone.
+
+        The badge is the honest summary -- the role reaches everything, whatever is stored --
+        but withholding the button made the one column that is a control look like a column of
+        text on half the rows, and left no way to see or pre-set the grants that would apply if
+        the account were ever demoted. The dialog says all of that in a sentence.
+      */}
+      {user.role === "admin" ? (
+        <Badge
+          tone="accent"
+          title="Administrators reach every environment, group and application, including ones created later."
+        >
+          Everything
+        </Badge>
+      ) : null}
       {/*
         Whether the account is narrowed is worth a badge; *what* it is narrowed to is not,
         because it cannot be rendered honestly here. The grants are not in the list payload
@@ -1029,13 +1036,18 @@ function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void })
         count of groups would be the misleading half of the answer anyway, since groups
         overlap and say nothing about how many applications they reach.
       */}
-      {user.applicationAccessRestricted ? (
+      {user.role !== "admin" && user.applicationAccessRestricted ? (
         <Badge tone="warn" title="This account sees only the groups and applications granted to it.">
           Restricted
         </Badge>
       ) : null}
-      <Button size="sm" variant="ghost" onClick={onEdit}>
-        {user.applicationAccessRestricted ? "Review…" : "Choose…"}
+      {/*
+        One label for both states, in the default boxed style rather than the borderless one.
+        "Review…" and "Choose…" described the state of the grants, which the badge beside it
+        already does; what the control needs to say is what pressing it does.
+      */}
+      <Button size="sm" onClick={onEdit}>
+        Edit Access
       </Button>
     </div>
   );
@@ -1066,13 +1078,25 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
   const [groupIds, setGroupIds] = useState<string[] | null>(null);
   const [appIds, setAppIds] = useState<string[] | null>(null);
 
+  /*
+    Two tabs rather than two stacked lists. Both axes used to be flex-wrapped side by side,
+    which is legible at five groups and unreadable at fifty -- and groups are the axis that
+    grows, since every squad gets one.
+  */
+  const [tab, setTab] = useState<"applications" | "groups">("applications");
+  const [appSearch, setAppSearch] = useState("");
+  const [groupSearch, setGroupSearch] = useState("");
+  // Debounced because the application term is sent to the server; the group list is small
+  // enough to filter in the browser and is not debounced.
+  const debouncedAppSearch = useDebounced(appSearch, 250);
+
   // Server state is the starting point; local state exists only once something is changed.
   const currentEnvs = envIds ?? grantedEnvironments.data?.environmentIds ?? [];
   const currentRestricted = restricted ?? access.data?.restricted ?? false;
   const currentGroups = groupIds ?? access.data?.groupIds ?? [];
   const currentApps = appIds ?? access.data?.applicationIds ?? [];
 
-  const grantable = useGrantableScope(currentEnvs);
+  const grantable = useGrantableScope(currentEnvs, debouncedAppSearch);
   const allEnvironments = environments.data?.environments ?? [];
   const isAdmin = target?.role === "admin";
 
@@ -1119,6 +1143,9 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
     setRestricted(null);
     setGroupIds(null);
     setAppIds(null);
+    setAppSearch("");
+    setGroupSearch("");
+    setTab("applications");
     saveEnvironments.reset();
     saveAccess.reset();
     onClose();
@@ -1204,101 +1231,89 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
               <h3 className="mb-1.5 text-xs font-medium text-text-muted">
                 Within those environments
               </h3>
-              <div className="flex flex-col gap-1.5">
-                <Checkbox
-                  checked={!currentRestricted}
-                  onChange={() => setRestricted(false)}
-                  label="Everything, including applications added later"
-                />
-                <Checkbox
-                  checked={currentRestricted}
-                  onChange={() => setRestricted(true)}
-                  label="Only the groups and applications selected below"
-                />
-              </div>
+              {/*
+                Two columns always, not only when the account is narrowed.
+              
+                The right-hand panel answers "what will this person see", and that question has an
+                answer for an unrestricted account too -- everything in the estates it was granted,
+                which is a number worth seeing before anybody assumes it is small. Rendering the
+                panel only in the restricted branch meant the one account type whose reach is widest
+                was the one that showed nothing.
+              */}
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Checkbox
+                      checked={!currentRestricted}
+                      onChange={() => setRestricted(false)}
+                      label="Everything, including applications added later"
+                    />
+                    <Checkbox
+                      checked={currentRestricted}
+                      onChange={() => setRestricted(true)}
+                      label="Only the groups and applications selected below"
+                    />
+                  </div>
 
-              {currentRestricted ? (
-                <div className="mt-3 space-y-3">
-                  {grantable.isLoading ? (
-                    <LoadingBlock label="Loading groups" />
-                  ) : grantable.error ? (
-                    /*
-                      Shown instead of the pickers, never alongside an empty one. An empty
-                      picker after a failed load says "there is nothing to grant", which is a
-                      claim about the estate rather than about the request -- and an
-                      administrator who believes it stops looking.
-                    */
-                    <ErrorBanner error={grantable.error} />
-                  ) : (
-                    <>
-                      <div>
-                        <p className="mb-1 text-[11px] font-medium text-text-muted">Groups</p>
-                        {grantable.groups.length === 0 ? (
-                          <p className="text-[11px] text-text-faint">
-                            No groups exist in the selected environments yet.
-                          </p>
-                        ) : (
-                          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                            {grantable.groups.map((group) => (
-                              <Checkbox
-                                key={group.id}
-                                checked={currentGroups.includes(group.id)}
-                                onChange={(on) => setGroupIds(toggle(currentGroups, group.id, on))}
-                                label={`${group.name} (${group.applicationCount})`}
-                              />
-                            ))}
-                          </div>
-                        )}
-                        {/*
-                          The reason to prefer a group, said where the choice is made. A group
-                          grant follows its membership; the list below does not.
-                        */}
-                        <p className="mt-1 text-[11px] text-text-faint">
-                          A group grant follows the group: applications added to it later become
-                          visible without anyone revisiting this screen.
-                        </p>
+                  {currentRestricted ? (
+                    <div className="space-y-2">
+                      <div
+                        role="tablist"
+                        aria-label="What to grant"
+                        className="flex gap-1 rounded-md bg-bg-subtle p-1"
+                      >
+                        {(
+                          [
+                            ["applications", `Individual applications (${currentApps.length})`],
+                            ["groups", `Groups (${currentGroups.length})`],
+                          ] as const
+                        ).map(([id, label]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            role="tab"
+                            aria-selected={tab === id}
+                            onClick={() => setTab(id)}
+                            className={`flex-1 rounded px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                              tab === id
+                                ? "bg-bg-raised text-text-base shadow-sm"
+                                : "text-text-muted hover:text-text-base"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
                       </div>
 
-                      <div>
-                        <p className="mb-1 text-[11px] font-medium text-text-muted">
-                          Individual applications
-                        </p>
-                        <div className="max-h-48 overflow-y-auto rounded-md border border-border-base p-2">
-                          {grantable.applications.length === 0 ? (
-                            <p className="text-[11px] text-text-faint">
-                              No applications in the selected environments.
-                            </p>
-                          ) : (
-                            <div className="flex flex-col gap-1">
-                              {grantable.applications.map((application) => (
-                                <Checkbox
-                                  key={application.id}
-                                  checked={currentApps.includes(application.id)}
-                                  onChange={(on) =>
-                                    setAppIds(toggle(currentApps, application.id, on))
-                                  }
-                                  label={application.name}
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <p className="mt-1 text-[11px] text-text-faint">
-                          For a service that is in no group — which is how every application
-                          starts, since CI registers it before anyone files it.
-                        </p>
-                        {/*
-                          Stated rather than silently trimmed. A list that stops at the cap
-                          without saying so lets an administrator conclude an application does
-                          not exist because they could not find it.
-                        */}
-                        {grantable.truncated ? (
-                          <p className="mt-1 text-[11px] text-warn">
-                            More applications exist than are listed here. Grant a group instead,
-                            or narrow the environments above.
-                          </p>
-                        ) : null}
-                      </div>
+                      {grantable.error ? (
+                        /*
+                          Shown instead of the pickers, never alongside an empty one. An empty
+                          picker after a failed load says "there is nothing to grant", which is
+                          a claim about the estate rather than about the request -- and an
+                          administrator who believes it stops looking.
+                        */
+                        <ErrorBanner error={grantable.error} />
+                      ) : tab === "applications" ? (
+                        <ApplicationPicker
+                          applications={grantable.applications}
+                          selected={currentApps}
+                          onToggle={(id, on) => setAppIds(toggle(currentApps, id, on))}
+                          search={appSearch}
+                          onSearch={setAppSearch}
+                          loading={grantable.isLoading}
+                          truncated={grantable.truncated}
+                          searching={grantable.searching}
+                        />
+                      ) : (
+                        <GroupPicker
+                          groups={grantable.groups}
+                          selected={currentGroups}
+                          onToggle={(id, on) => setGroupIds(toggle(currentGroups, id, on))}
+                          search={groupSearch}
+                          onSearch={setGroupSearch}
+                          loading={grantable.isLoading}
+                        />
+                      )}
 
                       {currentGroups.length === 0 && currentApps.length === 0 ? (
                         <div className="rounded-md border border-warn/40 bg-warn-subtle p-2.5 text-[11px] text-warn">
@@ -1306,10 +1321,21 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
                           That is a real state, but it is rarely the intended one.
                         </div>
                       ) : null}
-                    </>
-                  )}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+
+                {/* ---- right: what those choices actually reach ---- */}
+                <ReachablePanel
+                  preview={preview.data ?? null}
+                  loading={preview.isLoading}
+                  isAdmin={isAdmin}
+                  /* Without this a failed scoring request renders as "nothing yet",
+                     which is a claim about this account's access made on the strength
+                     of a request that never answered. */
+                  error={preview.error}
+                />
+              </div>
             </section>
 
             {/*

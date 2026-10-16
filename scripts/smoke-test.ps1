@@ -2905,6 +2905,121 @@ try {
         return $r.Status -eq 204
     }
 
+    Assert-That "a personal API token authenticates a read, as its owner" {
+        <#
+          The whole point of the feature: the same API the web app uses, reached without a
+          browser. Asserted against a real GET rather than against the mint response, because
+          minting a row proves nothing about whether the bearer path works.
+        #>
+        $p = New-JsonFile -Name "token-read.json" -Data @{ name = "smoke-read-$suffix"; scope = "read"; expiresInDays = 1 }
+        $r = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/auth/api-tokens", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($r.Status -ne 201) { Show-Body $r 201; return $false }
+        $script:readTokenId = $r.Json.token.id
+        $script:readTokenSecret = $r.Json.secret
+        # The prefix is what makes a leaked token identifiable on sight, and the suffix is the
+        # only part ever shown again.
+        if (-not $script:readTokenSecret.StartsWith("sbp_")) { return $false }
+        if ($r.Json.token.tokenSuffix -ne $script:readTokenSecret.Substring($script:readTokenSecret.Length - 4)) { return $false }
+
+        # No cookie jar: the bearer header is the only credential here.
+        $g = Invoke-Api @("$BaseUrl/api/v1/applications?pageSize=2", "-H", "Authorization: Bearer $($script:readTokenSecret)")
+        if ($g.Status -ne 200) { Show-Body $g 200; return $false }
+        return $null -ne $g.Json.items
+    }
+
+    Assert-That "a read-only token is refused every write, with a code that names why" {
+        <#
+          403 and not 401: the credential is valid, the scope is not. The code matters because
+          the fix is a different token rather than different access -- "forbidden" alone sends
+          somebody to an administrator who cannot help them.
+        #>
+        $p = New-JsonFile -Name "token-write-attempt.json" -Data @{ name = "should-not-exist-$suffix" }
+        $r = Invoke-Api @("-X", "POST", "$adminUrl/groups", "-H", $jsonCt, "--data-binary", "@$p", "-H", "Authorization: Bearer $($script:readTokenSecret)")
+        if ($r.Status -ne 403) { Show-Body $r 403; return $false }
+        return $r.Json.error.code -eq "token_read_only"
+    }
+
+    Assert-That "a write-scoped token may change things" {
+        $p = New-JsonFile -Name "token-write.json" -Data @{ name = "smoke-write-$suffix"; scope = "write"; expiresInDays = 1 }
+        $r = Invoke-Api @("-X", "POST", "$BaseUrl/api/v1/auth/api-tokens", "-H", $jsonCt, "--data-binary", "@$p", "-b", $readJar)
+        if ($r.Status -ne 201) { Show-Body $r 201; return $false }
+        $script:writeTokenId = $r.Json.token.id
+        $secret = $r.Json.secret
+
+        # A real write, through the token, with no session involved. The estate is resolved
+        # here rather than reused from a later block, which has not run yet at this point.
+        $envs = Invoke-Api @("$BaseUrl/api/v1/environments", "-H", "Authorization: Bearer $secret")
+        if ($envs.Status -ne 200 -or @($envs.Json.environments).Count -eq 0) { Show-Body $envs 200; return $false }
+        $envId = $envs.Json.environments[0].id
+        $gp = New-JsonFile -Name "token-made-group.json" -Data @{ name = "smoke-token-group-$suffix"; environmentId = $envId }
+        $g = Invoke-Api @("-X", "POST", "$adminUrl/groups", "-H", $jsonCt, "--data-binary", "@$gp", "-H", "Authorization: Bearer $secret")
+        if ($g.Status -ne 201) { Show-Body $g 201; return $false }
+        $script:tokenGroupId = $g.Json.group.id
+
+        # And it is attributable: the trail has to say which credential did it, or a write made
+        # with a leaked token is indistinguishable from one its owner made.
+        $a = Invoke-Api @("$adminUrl/audit-log?action=group.create&pageSize=5", "-b", $readJar)
+        $row = $a.Json.items | Where-Object { $_.metadata.viaApiToken -eq "smoke-write-$suffix" } | Select-Object -First 1
+        if ($null -eq $row) {
+            Write-Host "        the audit row does not name the token" -ForegroundColor DarkYellow
+            return $false
+        }
+        return $true
+    }
+
+    Assert-That "a revoked token stops working immediately" {
+        # Revocation is in the lookup's predicate rather than swept, so there is no window in
+        # which a revoked token still authenticates.
+        $d = Invoke-Api @("-X", "DELETE", "$BaseUrl/api/v1/auth/api-tokens/$($script:readTokenId)", "-b", $readJar)
+        if ($d.Status -ne 204) { Show-Body $d 204; return $false }
+        $g = Invoke-Api @("$BaseUrl/api/v1/applications?pageSize=1", "-H", "Authorization: Bearer $($script:readTokenSecret)")
+        return $g.Status -eq 401
+    }
+
+    Assert-That "an invented token is indistinguishable from a revoked one" {
+        # Deliberate: a caller must not be able to use the difference to learn which of its
+        # guesses was once real.
+        $g = Invoke-Api @("$BaseUrl/api/v1/applications?pageSize=1", "-H", "Authorization: Bearer sbp_not-a-real-token")
+        return $g.Status -eq 401
+    }
+
+    Assert-That "the OpenAPI document describes the API and needs no credential" {
+        <#
+          Public on purpose, and generated from the server's own route table -- so this also
+          asserts the document is not empty, which is the failure a hand-maintained spec
+          produces when nobody notices it stopped being generated.
+        #>
+        $r = Invoke-Api @("$BaseUrl/api/v1/openapi.json")
+        if ($r.Status -ne 200) { Show-Body $r 200; return $false }
+        if ($r.Json.openapi -ne "3.0.3") { return $false }
+        $paths = @($r.Json.paths.PSObject.Properties).Count
+        if ($paths -lt 100) {
+            Write-Host "        only $paths paths in the document" -ForegroundColor DarkYellow
+            return $false
+        }
+        # No colon-form parameters survive, or the document is invalid for every generator.
+        return -not (@($r.Json.paths.PSObject.Properties.Name) -match ":").Count
+    }
+
+    Assert-That "cleans up the tokens and group it created" {
+        $ok = $true
+        if ($script:tokenGroupId) {
+            # 200 with a body, not 204: group deletion returns the affected counts, unlike the
+            # token endpoints. Accepting either keeps this from asserting a convention the API
+            # does not actually follow.
+            $r = Invoke-Api @("-X", "DELETE", "$adminUrl/groups/$($script:tokenGroupId)", "-b", $readJar)
+            if ($r.Status -ne 200 -and $r.Status -ne 204) {
+                Write-Host "        group delete returned $($r.Status)" -ForegroundColor DarkYellow
+                $ok = $false
+            }
+        }
+        if ($script:writeTokenId) {
+            $r = Invoke-Api @("-X", "DELETE", "$BaseUrl/api/v1/auth/api-tokens/$($script:writeTokenId)", "-b", $readJar)
+            if ($r.Status -ne 204) { $ok = $false }
+        }
+        return $ok
+    }
+
     Assert-That "an admin password reset signs the user out immediately" {
         $r = Invoke-Api @("-X", "POST", "$adminUrl/users/$($script:createdUserId)/reset-password", "-H", $jsonCt, "-d", "{}", "-b", $readJar)
         if ($r.Status -ne 200) { Show-Body $r 200; return $false }

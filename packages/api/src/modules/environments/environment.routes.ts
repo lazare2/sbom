@@ -13,7 +13,13 @@ import { readAccess } from "./scope.js";
 
 function actorOf(request: FastifyRequest): Actor {
   const user = getUser(request);
-  return { id: user.id, email: user.email };
+  // The token, when one authenticated this request rather than a browser session. See the
+  // note on `Actor.viaToken`.
+  return {
+    id: user.id,
+    email: user.email,
+    ...(request.apiToken ? { viaToken: request.apiToken.name } : {}),
+  };
 }
 
 /**

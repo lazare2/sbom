@@ -36,6 +36,16 @@ function auditOrderBy(sortBy: ListAuditLogQuery["sortBy"], dir: SortDirection): 
 export interface Actor {
   id: string;
   email: string;
+  /**
+   * The personal API token that authenticated this write, when one did.
+   *
+   * Recorded because the alternative is a trail in which a write made with a leaked credential
+   * is indistinguishable from one its owner made at their desk. The account is the actor
+   * either way -- that is what the token means -- but "which credential" is the first question
+   * asked after a token goes missing, and it has to be answerable from the trail rather than
+   * from inference.
+   */
+  viaToken?: string;
 }
 
 /**
@@ -74,7 +84,16 @@ export class AuditService {
       action: entry.action,
       targetType: entry.targetType,
       targetId: entry.targetId ?? null,
-      metadata: entry.metadata ?? {},
+      /*
+        The token folded in here rather than given a column of its own. A column would be
+        better to filter on, but it would also mean a migration and a change to every reader;
+        the trail's own rules already put the discriminating facts in metadata, and this is
+        one.
+      */
+      metadata: {
+        ...(entry.metadata ?? {}),
+        ...(entry.actor?.viaToken === undefined ? {} : { viaApiToken: entry.actor.viaToken }),
+      },
     });
   }
 

@@ -1,6 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { changePasswordRequestSchema, loginRequestSchema, OIDC_CALLBACK_PATH } from "@sbom/shared";
+import {
+  API_TOKEN_MAX_DAYS,
+  changePasswordRequestSchema,
+  createApiTokenSchema,
+  idParamSchema,
+  loginRequestSchema,
+  OIDC_CALLBACK_PATH,
+  type ApiAccessInfo,
+} from "@sbom/shared";
 import { OidcClient } from "../../services/auth/oidc-client.js";
 import { IdTokenError, safeEquals, verifyIdToken } from "../../services/auth/id-token.js";
 import { parseOrThrow } from "../../lib/validate.js";
@@ -11,7 +19,7 @@ import { toSessionUser } from "./auth.service.js";
 const AUTH_RATE_LIMIT = { max: 10, timeWindow: "1 minute" } as const;
 
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
-  const { auth, config, sessions, settings } = fastify.ctx;
+  const { auth, config, sessions, settings, apiTokens, audit } = fastify.ctx;
 
   function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date): void {
     reply.setCookie(config.SESSION_COOKIE_NAME, token, {
@@ -356,5 +364,93 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     setSessionCookie(reply, outcome.session.token, outcome.session.expiresAt);
     return reply.redirect("/", 302);
   });
-}
+  // -------------------------------------------------------------------------
+  // Personal API tokens
+  // -------------------------------------------------------------------------
 
+  /**
+   * Where the API is and how to reach it.
+   *
+   * `baseUrl` comes from the deployment's PUBLIC_URL, not from the request: it is the address a
+   * script on another machine must use, which is not necessarily the one the reader arrived on.
+   * Handing somebody `localhost` because that is how they opened the UI is a wasted afternoon.
+   *
+   * Behind `requireAuth` rather than public. The address is hardly a secret, but the live token
+   * count is about the caller, and an endpoint that answers for nobody in particular would
+   * still have to decide whose count to report.
+   */
+  fastify.get("/api-access", { preHandler: fastify.requireAuth }, async (request, reply) => {
+    const user = getUser(request);
+    const info: ApiAccessInfo = {
+      baseUrl: `${config.PUBLIC_URL.replace(/\/+$/, "")}/api/v1`,
+      specPath: "/api/v1/openapi.json",
+      docsPath: "/api/v1/docs",
+      activeTokenCount: await apiTokens.activeCountForUser(user.id),
+      maxExpiryDays: API_TOKEN_MAX_DAYS,
+    };
+    return reply.send(info);
+  });
+
+  fastify.get("/api-tokens", { preHandler: fastify.requireAuth }, async (request, reply) => {
+    const user = getUser(request);
+    return reply.send({ tokens: await apiTokens.listForUser(user.id, user.isActive) });
+  });
+
+  /**
+   * Mint one for yourself.
+   *
+   * Self-service on purpose: the point of the feature is that a developer does not have to
+   * queue behind an administrator to read the API, and a queue is how people end up sharing one
+   * token between four of them. Oversight is the admin listing, not a gate here.
+   *
+   * A token can mint a token, and that is a deliberate acceptance rather than an oversight: it
+   * cannot exceed what its owner may already do, and the write scope it would need is itself
+   * something an administrator can see and revoke.
+   */
+  fastify.post(
+    "/api-tokens",
+    { preHandler: fastify.requireAuth, config: { rateLimit: AUTH_RATE_LIMIT } },
+    async (request, reply) => {
+      const user = getUser(request);
+      const body = parseOrThrow(createApiTokenSchema, request.body ?? {});
+      const created = await apiTokens.create(user.id, body);
+
+      /*
+        Audited even though it is a self-service action on one's own account, because it is the
+        creation of a credential. The metadata names the scope and the expiry but never the
+        secret, nor its length -- see the audit-log rules.
+      */
+      await audit.record({
+        actor: { id: user.id, email: user.email },
+        action: "api_token.create",
+        targetType: "api_token",
+        targetId: created.token.id,
+        metadata: {
+          name: created.token.name,
+          scope: created.token.scope,
+          expiresAt: created.token.expiresAt,
+        },
+      });
+
+      return reply.status(201).send(created);
+    },
+  );
+
+  fastify.delete("/api-tokens/:id", { preHandler: fastify.requireAuth }, async (request, reply) => {
+    const user = getUser(request);
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    // Scoped to the owner inside the service, so guessing another person's token id finds
+    // nothing rather than revoking it.
+    await apiTokens.revokeForUser(user.id, id);
+
+    await audit.record({
+      actor: { id: user.id, email: user.email },
+      action: "api_token.revoke",
+      targetType: "api_token",
+      targetId: id,
+      metadata: { own: true },
+    });
+
+    return reply.status(204).send();
+  });
+}

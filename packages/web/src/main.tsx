@@ -8,6 +8,7 @@ import { Layout } from "./components/Layout.tsx";
 import { EnvironmentProvider } from "./environments/EnvironmentProvider.tsx";
 import { EmptyState, Card } from "./components/ui.tsx";
 import { MaliciousPage } from "./pages/MaliciousPage.tsx";
+import { ApiAccessPage } from "./pages/ApiAccessPage.tsx";
 import { AnalyticsPage } from "./pages/AnalyticsPage.tsx";
 import { ApplicationDetailPage } from "./pages/ApplicationDetailPage.tsx";
 import { ApplicationsPage } from "./pages/ApplicationsPage.tsx";
@@ -136,6 +137,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/vulnerabilities/:vulnerabilityId" element={<AdvisoryDetailPage />} />
               <Route path="/malicious" element={<MaliciousPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/api-access" element={<ApiAccessPage />} />
 
               {/*
                 Nested under RequireAuth so an admin with a temporary password is

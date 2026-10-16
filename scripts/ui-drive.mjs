@@ -918,7 +918,7 @@ log("18a. granting an account access to particular groups");
   if ((await row.count()) === 0) {
     problems.push("the account created above is not in the users table");
   } else {
-    await row.getByRole("button", { name: /Choose…|Review…/ }).first().click();
+    await row.getByRole("button", { name: "Edit Access" }).first().click();
     await page.waitForTimeout(900);
 
     await expectText(`Access for ${TEST_USER}`, "the access modal");
@@ -940,15 +940,27 @@ log("18a. granting an account access to particular groups");
       log("  OK   a new account opens as unrestricted");
     }
 
-    // The group and application pickers exist only once a restriction is chosen: offering
-    // them while the account sees everything would be controls that change nothing.
-    if ((await dialog.getByText("Individual applications").count()) > 0) {
+    /*
+      The group and application pickers exist only once a restriction is chosen: offering them
+      while the account sees everything would be controls that change nothing. They now sit
+      behind a tab, so this looks for the tab rather than for a heading.
+
+      The "Will reach" panel beside them is NOT conditional -- an unrestricted account reaches
+      everything in its estates, which is a figure worth seeing -- so it is not asserted absent
+      here.
+    */
+    if ((await dialog.getByRole("tab", { name: /Individual applications/ }).count()) > 0) {
       problems.push("the grant pickers are shown while the account is unrestricted");
     }
 
     await onlySelected.click();
     await page.waitForTimeout(1200);
-    await expectText("Individual applications", "the per-application picker");
+    const appTab = dialog.getByRole("tab", { name: /Individual applications/ });
+    if ((await appTab.count()) === 0) {
+      problems.push("the grant tabs are not shown once a restriction is chosen");
+    } else {
+      log("  OK   the grant tabs appear once a restriction is chosen");
+    }
 
     // Grant exactly one application, save, reopen, and read it back from the server.
     const appBox = dialog.getByRole("checkbox", { name: TEST_APP });
@@ -982,7 +994,7 @@ log("18a. granting an account access to particular groups");
 
       // Reopened, so this reads what was stored rather than what was typed.
       await page.locator("tbody tr", { hasText: TEST_USER })
-        .getByRole("button", { name: /Review…|Choose…/ }).first().click();
+        .getByRole("button", { name: "Edit Access" }).first().click();
       await page.waitForTimeout(1200);
 
       const reopened = page.locator("dialog");
@@ -997,7 +1009,7 @@ log("18a. granting an account access to particular groups");
         log("  OK   the restriction and its grant were stored, not just displayed");
       }
 
-      await expectText("Will reach", "the live reach figure");
+      await expectText("Will reach", "the live reach panel");
 
       /*
         The figure has to track the boxes rather than the last save. Unticking the one granted
@@ -1006,12 +1018,17 @@ log("18a. granting an account access to particular groups");
         assertion above while telling an administrator nothing until they reopened the modal.
       */
       try {
-        const reachLine = reopened.getByText(/Will reach/).first();
+        /*
+          Reads the count beside the heading, not the heading. The figure moved out of a
+          sentence and into its own element when the panel gained a list, so matching on
+          "Will reach" alone would compare two identical headings and report no change.
+        */
+        const reachLine = reopened.getByText(/\d+ applications?$/).first();
         const reachBefore = (await reachLine.innerText()).trim();
         await reopened.getByRole("checkbox", { name: TEST_APP }).click();
         await page.waitForTimeout(1200);
         await page.waitForLoadState("networkidle");
-        const reachAfter = (await reopened.getByText(/Will reach/).first().innerText()).trim();
+        const reachAfter = (await reopened.getByText(/\d+ applications?$/).first().innerText()).trim();
         if (reachBefore === reachAfter) {
           problems.push("the reach figure did not move when a grant was unticked");
         } else {
@@ -2196,6 +2213,73 @@ await expectHidden(TEST_APP, "the deleted test application");
 await shot("admin-after-cleanup");
 
 // --- 24. dark mode ---------------------------------------------------------
+// --- 23e. API access and personal tokens ------------------------------------
+/*
+  The page a developer is sent to, and the one feature on it that can silently not work: a
+  token that mints but does not authenticate. Driven here rather than only in the smoke test
+  because the secret is shown exactly once, in the browser, and a page that mints a token
+  without displaying it is useless in a way no API assertion would catch.
+*/
+log("23e. API access page and a personal token");
+await page.goto(`${BASE}/api-access`, { waitUntil: "networkidle" });
+await expectText("Where the API is", "the API access card");
+await expectText("/api/v1", "the API base URL");
+
+{
+  const name = `ui-drive-${Date.now().toString(36)}`;
+  await page.locator("#token-name").fill(name);
+  await page.getByRole("button", { name: "Create token" }).click();
+  await page.waitForTimeout(1500);
+
+  // Shown once: if the reveal is missing the token is unrecoverable, which is worse than a
+  // failure because it looks like success.
+  const reveal = page.locator("code.select-all").first();
+  if ((await reveal.count()) === 0) {
+    problems.push("a minted token was not displayed, so it cannot be recovered");
+  } else {
+    const secret = (await reveal.innerText()).trim();
+    if (!secret.startsWith("sbp_")) {
+      problems.push(`the minted token does not carry the sbp_ prefix: ${secret.slice(0, 8)}`);
+    } else {
+      log("  OK   the token is shown once, with its prefix");
+    }
+
+    // And it actually authenticates. Fetched from inside the page so it travels through the
+    // same origin the app uses.
+    const status = await page.evaluate(async (token) => {
+      const r = await fetch("/api/v1/applications?pageSize=1", {
+        headers: { Authorization: `Bearer ${token}` },
+        // No cookie, so the bearer header is the only credential.
+        credentials: "omit",
+      });
+      return r.status;
+    }, secret);
+    if (status === 200) log("  OK   the token authenticates a read with no cookie");
+    else problems.push(`a freshly minted token did not authenticate: HTTP ${status}`);
+  }
+
+  await page.getByRole("button", { name: "Done" }).click();
+  await page.waitForTimeout(400);
+
+  // It appears in the list, defaulting to read-only -- the default is the safety property.
+  const row = page.locator("tbody tr", { hasText: name }).first();
+  if ((await row.count()) === 0) {
+    problems.push("the new token is not listed");
+  } else if (!/read only/.test(await row.innerText())) {
+    problems.push("a new token does not default to read-only");
+  } else {
+    log("  OK   it is listed and defaults to read-only");
+  }
+
+  // Revoke, so the run leaves nothing behind.
+  if (await row.count()) {
+    await row.getByRole("button", { name: "Revoke" }).click();
+    await page.waitForTimeout(1200);
+    log("  OK   revoked it again");
+  }
+}
+await shot("api-access");
+
 log("24. dark colour scheme");
 // --- 23b. sortable column headers -------------------------------------------
 /*

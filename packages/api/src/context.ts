@@ -1,7 +1,8 @@
 import type { FastifyBaseLogger } from "fastify";
 import { getConfig, type Config } from "./config.js";
 import { getDb, type Database } from "./db/client.js";
-import { AccessRequestService } from "./modules/auth/access-request.service.js";
+import { AccessRequestService } from "./modules/auth/access-request.service.js";
+import { ApiTokenService } from "./modules/auth/api-token.service.js";
 import { AuthService } from "./modules/auth/auth.service.js";
 import { AuthProviderRegistry } from "./modules/auth/provider.js";
 import { LocalPasswordProvider } from "./modules/auth/providers/local.js";
@@ -66,7 +67,8 @@ export interface AppContext {
   providers: AuthProviderRegistry;
   sessions: SessionService;
   auth: AuthService;
-  accessRequests: AccessRequestService;
+  accessRequests: AccessRequestService;
+  apiTokens: ApiTokenService;
   ingestTokens: IngestTokenService;
   ingestion: IngestionService;
   /** Recovers component locations from SBOMs ingested before the platform recorded them. */
@@ -181,6 +183,13 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     of here is what avoids a cycle: `settings` is built further down, after the read side.
   */
   const accessRequests = new AccessRequestService({ db, logger });
+
+  /*
+    Constructed before the auth plugin needs it, and taking only the pool and a logger. It
+    deliberately holds no permission state: a token names a user, and the account is re-read on
+    every request so that narrowing somebody's access takes effect on their tokens at once.
+  */
+  const apiTokens = new ApiTokenService({ db, logger });
 
   const auth = new AuthService({ db, config, providers, sessions, accessRequests, logger });
 
@@ -345,6 +354,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     sessions,
     auth,
     accessRequests,
+    apiTokens,
     ingestTokens,
     ingestion,
     sbomBackfill,

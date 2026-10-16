@@ -80,6 +80,28 @@ export function Layout() {
               go -- it changes what every other item in the navigation means.
             */}
             <EnvironmentSwitcher />
+            {/*
+              Beside the account too, and for the same reason: the API is not a page of the
+              estate, it is a property of the account looking at it. Deliberately visible to
+              every signed-in user rather than gated to administrators -- developers reading
+              the inventory from a script is the case this exists for, and a credential they
+              have to queue for is one four of them will end up sharing.
+            */}
+            {user ? (
+              <NavLink
+                to="/api-access"
+                className={({ isActive }) =>
+                  `rounded-md px-2.5 py-1.5 text-xs transition-colors ${
+                    isActive
+                      ? "bg-accent-subtle font-medium text-accent"
+                      : "text-text-muted hover:bg-bg-subtle hover:text-text-base"
+                  }`
+                }
+                title="The API address, and your personal tokens"
+              >
+                API
+              </NavLink>
+            ) : null}
             {user ? (
               <>
                 <span className="hidden items-center gap-2 sm:flex">
