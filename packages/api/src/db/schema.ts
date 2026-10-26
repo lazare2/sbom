@@ -121,6 +121,15 @@ export const user = pgTable(
     applicationAccessRestricted: boolean("application_access_restricted")
       .notNull()
       .default(false),
+    /**
+     * The person's name, for the people reading the user list rather than for signing in.
+     *
+     * Nullable because a local account is created by identifier alone and a directory token
+     * need not carry a name. Filled from the directory's claims on a directory sign-in only while
+     * empty, so a correction an administrator typed is never overwritten by the next login.
+     */
+    firstName: text("first_name"),
+    lastName: text("last_name"),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -309,6 +318,102 @@ export const userApplication = pgTable(
   (t) => [
     primaryKey({ name: "user_application_pkey", columns: [t.userId, t.applicationId] }),
     index("user_application_application_idx").on(t.applicationId),
+  ],
+);
+
+/**
+ * A team of people, granted applications together.
+ *
+ * The unit an administrator actually thinks in. Granting access account by account means
+ * revisiting every member whenever the team's services change, and revisiting every service
+ * whenever somebody joins or leaves; a squad holds both lists once. Adding a person to it grants
+ * everything it reaches, and removing them takes it away, with nobody re-ticking applications.
+ *
+ * Not the same thing as an `application_group`, and not folded into it. A group is a set of
+ * *applications* and lives in one environment; a squad is a set of *people* and spans every
+ * environment its grants reach. The two meet in `squad_group`: a squad granted a group follows
+ * that group's membership as it changes.
+ *
+ * Platform-wide rather than per environment, like accounts. A squad owning services in test and
+ * in production is one team, and splitting it per estate would make "who is on this team" a
+ * question with several answers.
+ *
+ * `email` is the team's own address, kept for reporting to the squad about its applications.
+ * Nothing is sent to it yet; it is held here so the address lives beside the membership it
+ * describes rather than in a spreadsheet that drifts from it.
+ */
+export const squad = pgTable(
+  "squad",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    email: text("email"),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Case-insensitive, for the reason group names are: "Payments" and "payments" would split
+    // one team's membership in two while looking like one squad in every list.
+    uniqueIndex("squad_name_lower_uniq").on(sql`lower(${t.name})`),
+  ],
+);
+
+/** Who is on a squad. Cascades both ways: neither side can be left pointing at nothing. */
+export const squadMember = pgTable(
+  "squad_member",
+  {
+    squadId: uuid("squad_id")
+      .notNull()
+      .references(() => squad.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "squad_member_pkey", columns: [t.squadId, t.userId] }),
+    // The direction every request takes: "which squads is this account in".
+    index("squad_member_user_idx").on(t.userId),
+  ],
+);
+
+/**
+ * A group granted to a squad. Follows the group: an application added to it later is visible to
+ * every member without anybody revisiting the squad.
+ */
+export const squadGroup = pgTable(
+  "squad_group",
+  {
+    squadId: uuid("squad_id")
+      .notNull()
+      .references(() => squad.id, { onDelete: "cascade" }),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => applicationGroup.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "squad_group_pkey", columns: [t.squadId, t.groupId] }),
+    index("squad_group_group_idx").on(t.groupId),
+  ],
+);
+
+/** One application granted to a squad directly, for services that sit in no group. */
+export const squadApplication = pgTable(
+  "squad_application",
+  {
+    squadId: uuid("squad_id")
+      .notNull()
+      .references(() => squad.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => application.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "squad_application_pkey", columns: [t.squadId, t.applicationId] }),
+    index("squad_application_application_idx").on(t.applicationId),
   ],
 );
 
@@ -1269,6 +1374,41 @@ export const scanVulnSummary = pgTable(
 );
 
 /**
+ * What the vulnerability database says about a version nobody ships yet.
+ *
+ * Fix recommendations name versions that are, by definition, not in the estate — the version an
+ * application should move *to*. Whether that version is itself affected can only be answered by
+ * asking the scanner about it, and that costs a scanner run, so the answer is kept here keyed on
+ * the exact package URL.
+ *
+ * Deliberately not a `component` row. Components are what builds shipped; every count, search
+ * and analytics figure reads them as such, and a version that exists only because a
+ * recommendation asked about it would surface as inventory nobody has.
+ *
+ * Invalidated by `watermark`, the same marker the sweep uses: a row checked against an older
+ * database, or under another provider, is stale and is asked again rather than trusted.
+ */
+export const fixCandidateCheck = pgTable("fix_candidate_check", {
+  /** The package URL with the candidate version substituted in. */
+  purl: text("purl").primaryKey(),
+  provider: text("provider").notNull(),
+  watermark: timestamp("watermark", { withTimezone: true }).notNull(),
+  /** Advisories reported against this version: id, severity, fix state and fix versions. */
+  findings: jsonb("findings")
+    .$type<
+      Array<{
+        vulnerabilityId: string;
+        severity: VulnSeverity;
+        fixState: FixState;
+        fixVersions: string[];
+      }>
+    >()
+    .notNull()
+    .default([]),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Accepted risk: a finding an administrator has assessed and chosen to exclude.
  *
  * Without this, a vulnerability dashboard only ever grows, and a list nobody can
@@ -1910,3 +2050,5 @@ export type MaliciousAcknowledgementRow = typeof maliciousAcknowledgement.$infer
 export type MaliciousFeedUpdateRow = typeof maliciousFeedUpdate.$inferSelect;
 export type AccessRequestRow = typeof accessRequest.$inferSelect;
 export type ApiTokenRow = typeof apiToken.$inferSelect;
+export type SquadRow = typeof squad.$inferSelect;
+export type FixCandidateCheckRow = typeof fixCandidateCheck.$inferSelect;

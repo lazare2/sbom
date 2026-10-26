@@ -186,6 +186,43 @@ export class ApiTokenService {
     if (revoked.length === 0) throw new NotFoundError("API token");
   }
 
+  /**
+   * Deletes one of an account's own tokens outright, which frees its name.
+   *
+   * Names are unique per account across revoked tokens too, so revoking alone left "laptop"
+   * taken forever. Deleting a live token also stops it working, at once -- the row the lookup
+   * would match no longer exists. Scoped to the owner in the predicate, like revoking.
+   */
+  async deleteForUser(userId: string, tokenId: string): Promise<ApiTokenRow> {
+    const rows = await this.deps.db
+      .delete(apiToken)
+      .where(and(eq(apiToken.id, tokenId), eq(apiToken.userId, userId)))
+      .returning();
+    const deleted = rows[0];
+    if (!deleted) throw new NotFoundError("API token");
+    return deleted;
+  }
+
+  /** Deletes anyone's token. Admin only; the route audits it. */
+  async deleteAny(tokenId: string): Promise<ApiTokenWithOwner> {
+    const rows = await this.deps.db.delete(apiToken).where(eq(apiToken.id, tokenId)).returning();
+    const deleted = rows[0];
+    if (!deleted) throw new NotFoundError("API token");
+
+    const [account] = await this.deps.db
+      .select()
+      .from(user)
+      .where(eq(user.id, deleted.userId))
+      .limit(1);
+
+    return {
+      ...toSummary(deleted, account?.isActive ?? false),
+      userId: deleted.userId,
+      userEmail: account?.email ?? "(deleted)",
+      userRole: account?.role ?? "user",
+    };
+  }
+
   /** How many of this account's tokens would authenticate a request right now. */
   async activeCountForUser(userId: string): Promise<number> {
     const result = await this.deps.db.execute<Row<{ n: number }>>(sql`

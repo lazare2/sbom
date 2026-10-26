@@ -155,6 +155,13 @@
       "when": 1792135763799,
       "tag": "0021_api_token",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793027751920,
+      "tag": "0022_squads_and_fix_recommendations",
+      "breakpoints": true
     }
   ]
 }

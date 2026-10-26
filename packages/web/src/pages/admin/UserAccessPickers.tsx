@@ -261,7 +261,7 @@ export function ReachablePanel({
           <LoadingBlock label="Scoring access" />
         ) : rows.length === 0 ? (
           <p className="p-3 text-[11px] text-text-faint">
-            Nothing yet. Tick a group or an application on the left and this fills in.
+            Nothing yet. Tick a squad, a group or an application and this fills in.
           </p>
         ) : (
           <ul className="divide-y divide-border-base">
@@ -273,6 +273,13 @@ export function ReachablePanel({
                   {row.viaGroups.map((group) => (
                     <Badge key={group} tone="neutral" title={`Reached through the group ${group}`}>
                       {group}
+                    </Badge>
+                  ))}
+                  {/* A different tone, because the remedy differs: leaving the squad, not
+                      unticking anything on this screen. */}
+                  {row.viaSquads.map((squad) => (
+                    <Badge key={`squad-${squad}`} tone="info" title={`Reached through the squad ${squad}`}>
+                      squad: {squad}
                     </Badge>
                   ))}
                 </span>

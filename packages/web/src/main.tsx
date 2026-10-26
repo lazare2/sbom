@@ -33,6 +33,7 @@ import { AdminTokensPage } from "./pages/admin/AdminTokensPage.tsx";
 import { AdminEnvironmentsPage } from "./pages/admin/AdminEnvironmentsPage.tsx";
 import { AdminAuthenticationPage } from "./pages/admin/AdminAuthenticationPage.tsx";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage.tsx";
+import { AdminSquadsPage } from "./pages/admin/AdminSquadsPage.tsx";
 import { AdminVulnerabilitiesPage } from "./pages/admin/AdminVulnerabilitiesPage.tsx";
 import { AdminMaliciousPage } from "./pages/admin/AdminMaliciousPage.tsx";
 import { AdvisoryDetailPage, VulnerabilitiesPage } from "./pages/VulnerabilitiesPage.tsx";
@@ -157,6 +158,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="pending" element={<AdminPendingPage />} />
                 <Route path="groups" element={<AdminGroupsPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
+                <Route path="squads" element={<AdminSquadsPage />} />
                 <Route path="authentication" element={<AdminAuthenticationPage />} />
                 <Route path="environments" element={<AdminEnvironmentsPage />} />
                 <Route path="attributes" element={<AdminAttributesPage />} />

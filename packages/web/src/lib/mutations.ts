@@ -51,6 +51,10 @@ import type {
   SmtpDiagnosis,
   UpdatePlatformSettings,
   UpdateReportSettings,
+  CreateSquad,
+  SetSquadAccess,
+  SquadDetail,
+  UpdateSquad,
 } from "@sbom/shared";
 import { api } from "./api.ts";
 import { queryKeys } from "./queries.ts";
@@ -403,6 +407,24 @@ export function useRevokeApiToken() {
   });
 }
 
+/**
+ * Deletes one of the caller's own tokens outright, which frees its name for reuse.
+ *
+ * A separate hook from revoking rather than a flag on it, so a call site reads as the
+ * decision it is: revoking keeps a record, deleting does not.
+ */
+export function useDeleteApiToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/auth/api-tokens/${id}?permanent=true`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["auth", "api-tokens"] });
+      void qc.invalidateQueries({ queryKey: ["auth", "api-access"] });
+      void qc.invalidateQueries({ queryKey: ["admin", "api-tokens"] });
+    },
+  });
+}
+
 /** Revokes anybody's token. Admin only. */
 export function useRevokeAnyApiToken() {
   const qc = useQueryClient();
@@ -642,6 +664,82 @@ export function useRevokeIngestToken() {
       void qc.invalidateQueries({ queryKey: queryKeys.ingestTokens });
       void qc.invalidateQueries({ queryKey: ["admin", "audit-log"] });
     },
+  });
+}
+
+/** Deletes a CI token outright, freeing its name. Scans keep the name they recorded. */
+export function useDeleteIngestToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/admin/ingest-tokens/${id}?permanent=true`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.ingestTokens });
+      void qc.invalidateQueries({ queryKey: ["admin", "audit-log"] });
+    },
+  });
+}
+
+// --- squads -----------------------------------------------------------------
+
+/*
+  Every squad write invalidates the whole admin namespace, not only the squad keys. Membership
+  and grants are access: they change the Users list's Access column and any open access
+  preview, and a narrower invalidation would leave those describing yesterday's reach.
+*/
+
+export function useCreateSquad() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateSquad) => api.post<{ squad: SquadDetail }>("/admin/squads", body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+}
+
+export function useUpdateSquad() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; body: UpdateSquad }) =>
+      api.patch<{ squad: SquadDetail }>(`/admin/squads/${vars.id}`, vars.body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+}
+
+export function useDeleteSquad() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/admin/squads/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+}
+
+export function useSetSquadMembers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; userIds: string[] }) =>
+      api.put<{ squad: SquadDetail }>(`/admin/squads/${vars.id}/members`, {
+        userIds: vars.userIds,
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+}
+
+export function useSetSquadAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; body: SetSquadAccess }) =>
+      api.put<{ squad: SquadDetail }>(`/admin/squads/${vars.id}/access`, vars.body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+}
+
+export function useSetUserSquads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; squadIds: string[] }) =>
+      api.put<{ squads: Array<{ id: string; name: string }> }>(`/admin/users/${vars.id}/squads`, {
+        squadIds: vars.squadIds,
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
   });
 }
 

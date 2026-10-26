@@ -55,6 +55,9 @@ function SingleSignOnCard() {
   const [groupName, setGroupName] = useState("");
   const [expiresOn, setExpiresOn] = useState("");
   const [enabled, setEnabled] = useState(false);
+  const [provision, setProvision] = useState(true);
+  /** One domain per line or comma-separated, as typed; parsed on the way out. */
+  const [domains, setDomains] = useState("");
 
   /*
     Seeded when the connection arrives and re-seeded if it changes underneath, never on every
@@ -69,7 +72,18 @@ function SingleSignOnCard() {
     setGroupName(stored.securityGroupName ?? "");
     setExpiresOn(stored.secretExpiresOn ?? "");
     setEnabled(stored.enabled);
+    setProvision(stored.provisionOnSignIn);
+    setDomains(stored.allowedEmailDomains.join(", "));
   }, [stored]);
+
+  const domainList = [
+    ...new Set(
+      domains
+        .split(/[\s,;]+/)
+        .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
+        .filter((d) => d !== ""),
+    ),
+  ];
 
   const secretAvailable = clientSecret.trim() !== "" || (stored?.clientSecretConfigured ?? false);
   const complete = issuerUrl.trim() !== "" && clientId.trim() !== "" && secretAvailable;
@@ -82,13 +96,17 @@ function SingleSignOnCard() {
         clientSecret.trim() !== "" ||
         groupName !== (stored.securityGroupName ?? "") ||
         expiresOn !== (stored.secretExpiresOn ?? "") ||
-        enabled !== stored.enabled;
+        enabled !== stored.enabled ||
+        provision !== stored.provisionOnSignIn ||
+        domainList.join(",") !== stored.allowedEmailDomains.join(",");
 
   const body = {
     issuerUrl: issuerUrl.trim(),
     clientId: clientId.trim(),
     ...(clientSecret.trim() === "" ? {} : { clientSecret: clientSecret.trim() }),
     enabled,
+    provisionOnSignIn: provision,
+    allowedEmailDomains: domainList,
     ...(groupName.trim() === "" ? {} : { securityGroupName: groupName.trim() }),
     ...(expiresOn.trim() === "" ? {} : { secretExpiresOn: expiresOn.trim() }),
   };
@@ -205,6 +223,37 @@ function SingleSignOnCard() {
                 */}
                 Needs an issuer URL, a client ID and a client secret first.
               </p>
+            ) : null}
+          </div>
+
+          {/*
+            Its own section, because it answers a different question from the connection: not
+            "can people sign in" but "what happens to somebody nobody has made an account for".
+          */}
+          <div className="space-y-2 border-t border-border-base pt-3">
+            <Checkbox
+              checked={provision}
+              onChange={setProvision}
+              label="Create an account the first time somebody signs in"
+            />
+            <p className="text-xs text-text-faint">
+              {provision
+                ? "The new account is a read-only user with no access to any application or environment. They can sign in and see that they are in; an administrator then grants applications from Users, or adds them to a squad. Each one is listed under Users → No access yet, and recorded in the audit log."
+                : "Somebody with no account is refused, and their attempt is queued under Users → Access requests for an administrator to create one."}
+            </p>
+            {provision ? (
+              <FormRow
+                label="Only for these email domains (optional)"
+                htmlFor="oidc-domains"
+                hint="Comma-separated, e.g. bog.ge. Subdomains are included. Leave empty to create an account for anybody your provider lets sign in; addresses outside the list are queued as access requests instead."
+              >
+                <TextInput
+                  id="oidc-domains"
+                  value={domains}
+                  onChange={setDomains}
+                  placeholder="example.com"
+                />
+              </FormRow>
             ) : null}
           </div>
 

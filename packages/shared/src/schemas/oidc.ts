@@ -16,13 +16,19 @@ import { z } from "zod";
  * variables would also give "is single sign-on enabled" two answers that can disagree, and
  * the environment would win silently.
  *
- * ## What is deliberately not here
+ * ## Accounts created on first sign-in
  *
- * No list of permitted email domains. Accounts are created by an administrator before anyone
- * can use them, so an identity the directory authenticates but nobody has provisioned is
- * refused on that basis alone — a domain filter would be a second, weaker gate in front of a
- * stronger one. If just-in-time provisioning is ever added, this is where the filter belongs
- * and it must arrive in the same change.
+ * With `provisionOnSignIn` on, somebody the directory authenticates and this platform has no
+ * account for is given one on the spot — a read-only account, narrowed to nothing, in no
+ * environment. They can sign in and see that they are in; they cannot see a single application
+ * until an administrator grants one or adds them to a squad. That is the line that makes
+ * provisioning safe to switch on: the decision about what somebody may *read* is still made by
+ * a person, and only the paperwork of creating the row is automated.
+ *
+ * `allowedEmailDomains` arrived in the same change, as this note always said it had to. The
+ * provider decides who can authenticate at all; this narrows which of those people get an
+ * account made for them, for the tenant that also holds guests and contractors. Empty means
+ * every identity the provider vouches for.
  */
 
 /**
@@ -109,6 +115,37 @@ export const oidcConnectionInputSchema = z.object({
    * anybody gets.
    */
   secretExpiresOn: z.string().trim().max(40).optional(),
+  /**
+   * Whether an identity with no account here is given one when it signs in.
+   *
+   * On by default: the account it creates can reach nothing, so the default costs no exposure
+   * and saves every new colleague a round trip through an administrator just to exist. Off
+   * restores pre-provisioning, where the refusal goes onto the access-request queue instead.
+   */
+  provisionOnSignIn: z.boolean().default(true),
+  /**
+   * Address domains an account may be created for, lowercased, without the `@`.
+   *
+   * Only consulted when creating. An account that already exists signs in whatever its domain,
+   * because an administrator made or kept it on purpose.
+   */
+  allowedEmailDomains: z
+    .array(
+      z
+        .string()
+        .trim()
+        .toLowerCase()
+        .transform((v) => v.replace(/^@/, ""))
+        .pipe(
+          z
+            .string()
+            .min(1)
+            .max(253)
+            .regex(/^[a-z0-9.-]+$/, "must be a domain such as example.com"),
+        ),
+    )
+    .max(50)
+    .default([]),
 });
 export type OidcConnectionInput = z.infer<typeof oidcConnectionInputSchema>;
 
@@ -121,6 +158,22 @@ export interface OidcConnection {
   enabled: boolean;
   securityGroupName: string | null;
   secretExpiresOn: string | null;
+  provisionOnSignIn: boolean;
+  allowedEmailDomains: string[];
+}
+
+/**
+ * Whether an address may have an account created for it under these domains.
+ *
+ * Exact domain or a subdomain of it, never a suffix match on the raw string: `evilexample.com`
+ * must not pass a list naming `example.com`.
+ */
+export function emailDomainAllowed(email: string, domains: readonly string[]): boolean {
+  if (domains.length === 0) return true;
+  const at = email.lastIndexOf("@");
+  if (at < 0) return false;
+  const domain = email.slice(at + 1).toLowerCase();
+  return domains.some((allowed) => domain === allowed || domain.endsWith(`.${allowed}`));
 }
 
 export interface OidcSettings {

@@ -44,6 +44,11 @@ function userOrderBy(sortBy: ListUsersQuery["sortBy"], dir: SortDirection): SQL 
       return orderBy([sql`u.role ${dir_}`, byEmail], sql`u.id`);
     case "isActive":
       return orderBy([sql`u.is_active ${dir_}`, byEmail], sql`u.id`);
+    case "firstName":
+      // NULLS LAST both ways: an account nobody has named is not alphabetically first.
+      return orderBy([sql`lower(u.first_name) ${directionNullsLast(dir)}`, byEmail], sql`u.id`);
+    case "lastName":
+      return orderBy([sql`lower(u.last_name) ${directionNullsLast(dir)}`, byEmail], sql`u.id`);
     case "activeSessions":
       return orderBy(
         [sql`(SELECT count(*) FROM session s WHERE s.user_id = u.id AND s.expires_at > now()) ${dir_}`, byEmail],
@@ -84,20 +89,23 @@ export class AdminUsersService {
     const conditions: SQL[] = [sql`TRUE`];
 
     if (query.search) {
-      conditions.push(sql`u.email ILIKE ${"%" + query.search + "%"}`);
+      // Names as well as the identifier: people look colleagues up by name, and an address
+      // is the one thing about them they are least likely to remember exactly.
+      const like = "%" + query.search + "%";
+      conditions.push(sql`(
+        u.email ILIKE ${like}
+        OR u.first_name ILIKE ${like}
+        OR u.last_name ILIKE ${like}
+        OR (coalesce(u.first_name, '') || ' ' || coalesce(u.last_name, '')) ILIKE ${like}
+      )`);
     }
     if (query.role) conditions.push(sql`u.role = ${query.role}`);
     if (query.isActive !== undefined) conditions.push(sql`u.is_active = ${query.isActive}`);
+    if (query.access === "none") conditions.push(sql`NOT ${HAS_ACCESS}`);
 
     const rows = await this.deps.db.execute<Row<UserQueryRow>>(sql`
       SELECT
-        u.id, u.email, u.role, u.auth_provider, u.is_active,
-        u.must_change_password, u.application_access_restricted,
-        u.last_login_at, u.created_at,
-        (
-          SELECT count(*) FROM session s
-          WHERE s.user_id = u.id AND s.expires_at > now()
-        )::int AS active_sessions,
+        ${USER_COLUMNS},
         count(*) OVER () AS total
       FROM "user" u
       WHERE ${sql.join(conditions, sql` AND `)}
@@ -110,12 +118,7 @@ export class AdminUsersService {
 
   async getById(id: string): Promise<UserSummary> {
     const rows = await this.deps.db.execute<Row<UserQueryRow>>(sql`
-      SELECT
-        u.id, u.email, u.role, u.auth_provider, u.is_active,
-        u.must_change_password, u.application_access_restricted,
-        u.last_login_at, u.created_at,
-        (SELECT count(*) FROM session s WHERE s.user_id = u.id AND s.expires_at > now())::int
-          AS active_sessions
+      SELECT ${USER_COLUMNS}
       FROM "user" u
       WHERE u.id = ${id}::uuid
     `);
@@ -163,6 +166,8 @@ export class AdminUsersService {
         .insert(user)
         .values({
           email: input.email,
+          firstName: input.firstName ?? null,
+          lastName: input.lastName ?? null,
           role: input.role,
           authProvider: input.authProvider,
           passwordHash,
@@ -208,7 +213,7 @@ export class AdminUsersService {
       render as an empty box somebody would try to copy.
     */
     return {
-      user: toUserSummary(rowToQueryRow(created, 0)),
+      user: await this.getById(created.id),
       temporaryPassword: password ?? undefined,
     };
   }
@@ -223,6 +228,10 @@ export class AdminUsersService {
     const patch: Partial<typeof user.$inferInsert> = { updatedAt: new Date() };
     if (input.role !== undefined) patch.role = input.role;
     if (input.isActive !== undefined) patch.isActive = input.isActive;
+    // Null clears a name; omitted leaves it alone. Editing one's own name is allowed -- the
+    // self-protection above is about access, and a name grants nothing.
+    if (input.firstName !== undefined) patch.firstName = input.firstName;
+    if (input.lastName !== undefined) patch.lastName = input.lastName;
 
     const [updated] = await this.deps.db.update(user).set(patch).where(eq(user.id, id)).returning();
     if (!updated) throw new NotFoundError("User");
@@ -240,8 +249,18 @@ export class AdminUsersService {
       targetId: id,
       metadata: {
         email: updated.email,
-        before: { role: existing.role, isActive: existing.isActive },
-        after: { role: updated.role, isActive: updated.isActive },
+        before: {
+          role: existing.role,
+          isActive: existing.isActive,
+          firstName: existing.firstName,
+          lastName: existing.lastName,
+        },
+        after: {
+          role: updated.role,
+          isActive: updated.isActive,
+          firstName: updated.firstName,
+          lastName: updated.lastName,
+        },
       },
     });
 
@@ -330,7 +349,7 @@ export class AdminUsersService {
     });
 
     return {
-      user: toUserSummary(rowToQueryRow(updated, 0)),
+      user: await this.getById(id),
       temporaryPassword: password ?? undefined,
     };
   }
@@ -485,9 +504,50 @@ export class AdminUsersService {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether an account can reach anything, as one SQL expression over `u`.
+ *
+ * Coarse by design, and the comment on `UserSummary.hasAccess` says why: it finds accounts that
+ * plainly reach nothing -- no estate, or narrowed to no grants, and on no squad that grants
+ * anything -- rather than computing the exact intersection for every row of a list.
+ */
+const HAS_ACCESS: SQL = sql`(
+  u.role = 'admin'
+  OR EXISTS (
+    SELECT 1 FROM squad_member sm
+     WHERE sm.user_id = u.id
+       AND (EXISTS (SELECT 1 FROM squad_group sg WHERE sg.squad_id = sm.squad_id)
+            OR EXISTS (SELECT 1 FROM squad_application sa WHERE sa.squad_id = sm.squad_id))
+  )
+  OR (
+    EXISTS (SELECT 1 FROM user_environment ue WHERE ue.user_id = u.id)
+    AND (
+      NOT u.application_access_restricted
+      OR EXISTS (SELECT 1 FROM user_group ug WHERE ug.user_id = u.id)
+      OR EXISTS (SELECT 1 FROM user_application ua WHERE ua.user_id = u.id)
+    )
+  )
+)`;
+
+/** The columns every summary query selects, so the list and the single read cannot drift. */
+const USER_COLUMNS: SQL = sql`
+  u.id, u.email, u.first_name, u.last_name, u.role, u.auth_provider, u.is_active,
+  u.must_change_password, u.application_access_restricted,
+  u.last_login_at, u.created_at,
+  (SELECT count(*) FROM session s WHERE s.user_id = u.id AND s.expires_at > now())::int
+    AS active_sessions,
+  COALESCE((
+    SELECT json_agg(json_build_object('id', sq.id, 'name', sq.name) ORDER BY lower(sq.name))
+      FROM squad_member sm JOIN squad sq ON sq.id = sm.squad_id
+     WHERE sm.user_id = u.id
+  ), '[]'::json) AS squads,
+  ${HAS_ACCESS} AS has_access`;
+
 interface UserQueryRow {
   id: string;
   email: string;
+  first_name: string | null;
+  last_name: string | null;
   role: "admin" | "user";
   /*
     The shared union, not a copy of it. Spelling the providers out here meant adding one
@@ -501,6 +561,8 @@ interface UserQueryRow {
   last_login_at: Date | string | null;
   created_at: Date | string;
   active_sessions: number | string;
+  squads: Array<{ id: string; name: string }> | null;
+  has_access: boolean;
   total?: number | string;
 }
 
@@ -508,29 +570,17 @@ function toUserSummary(row: UserQueryRow): UserSummary {
   return {
     id: row.id,
     email: row.email,
+    firstName: row.first_name,
+    lastName: row.last_name,
     role: row.role,
     authProvider: row.auth_provider,
     isActive: row.is_active,
     mustChangePassword: row.must_change_password,
     applicationAccessRestricted: row.application_access_restricted,
+    squads: row.squads ?? [],
+    hasAccess: row.has_access === true,
     lastLoginAt: toIso(row.last_login_at),
     activeSessions: Number(row.active_sessions),
     createdAt: toIso(row.created_at)!,
-  };
-}
-
-/** Adapts a freshly-inserted Drizzle row to the shape the SELECT queries produce. */
-function rowToQueryRow(row: typeof user.$inferSelect, activeSessions: number): UserQueryRow {
-  return {
-    id: row.id,
-    email: row.email,
-    role: row.role,
-    auth_provider: row.authProvider,
-    is_active: row.isActive,
-    must_change_password: row.mustChangePassword,
-    application_access_restricted: row.applicationAccessRestricted,
-    last_login_at: row.lastLoginAt,
-    created_at: row.createdAt,
-    active_sessions: activeSessions,
   };
 }

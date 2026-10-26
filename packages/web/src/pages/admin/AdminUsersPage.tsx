@@ -12,6 +12,7 @@ import {
   useSettleAccessRequest,
   useSetUserApplicationAccess,
   useSetUserEnvironments,
+  useSetUserSquads,
   useUpdateUser,
 } from "../../lib/mutations.ts";
 import {
@@ -22,6 +23,8 @@ import {
   useUserApplicationAccess,
   useUserEnvironments,
   useOidcEnabled,
+  useSquads,
+  useUserSquads,
   useUsers,
 } from "../../lib/queries.ts";
 import { useDebounced } from "../../lib/useDebounced.ts";
@@ -52,11 +55,13 @@ import {
 } from "../../components/ui.tsx";
 
 const ROLES = ["", "admin", "user"] as const;
+const ACCESS = ["", "none"] as const;
 
 const spec = {
   defaults: {
     search: "",
     role: "" as (typeof ROLES)[number],
+    access: "" as (typeof ACCESS)[number],
     sortBy: userSort.defaultField,
     sortDir: userSort.defaultDirection,
     page: 1,
@@ -64,6 +69,7 @@ const spec = {
   parse: (p: URLSearchParams) => ({
     search: readString(p, "search"),
     role: readEnum(p, "role", ROLES, ""),
+    access: readEnum(p, "access", ACCESS, ""),
     sortBy: readEnum(p, "sortBy", userSort.fields, userSort.defaultField),
     sortDir: readEnum(p, "sortDir", sortDirections, userSort.defaultDirection),
     page: readNumber(p, "page", 1),
@@ -87,6 +93,7 @@ export function AdminUsersPage() {
   const [accessTarget, setAccessTarget] = useState<UserSummary | null>(null);
   const [methodTarget, setMethodTarget] = useState<UserSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserSummary | null>(null);
+  const [nameTarget, setNameTarget] = useState<UserSummary | null>(null);
   /** Shown once, after a create or reset. Cleared when the modal closes. */
   const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
   const [actionError, setActionError] = useState<unknown>(null);
@@ -104,6 +111,7 @@ export function AdminUsersPage() {
   const query = {
     search: state.search || undefined,
     role: state.role || undefined,
+    access: state.access || undefined,
     sortBy: state.sortBy,
     sortDir: state.sortDir,
     page: state.page,
@@ -193,7 +201,7 @@ export function AdminUsersPage() {
             <TextInput
               value={state.search}
               onChange={(v) => setState({ search: v })}
-              placeholder="Search by identifier…"
+              placeholder="Search by name or identifier…"
               ariaLabel="Search accounts"
             />
           </div>
@@ -205,6 +213,19 @@ export function AdminUsersPage() {
               { value: "", label: "All roles" },
               { value: "admin", label: "Admins" },
               { value: "user", label: "Users" },
+            ]}
+          />
+          {/*
+            The working list once directory sign-in creates accounts by itself: everybody who
+            has signed in and is waiting for somebody to give them something to see.
+          */}
+          <Select
+            value={state.access}
+            ariaLabel="Filter by access"
+            onChange={(v) => setState({ access: v, page: 1 })}
+            options={[
+              { value: "", label: "Any access" },
+              { value: "none", label: "No access yet" },
             ]}
           />
         </div>
@@ -249,6 +270,12 @@ export function AdminUsersPage() {
                   <tr>
                     <Th onSort={() => sort.toggle("email")} sorted={sort.stateOf("email")}>
                       Identifier
+                    </Th>
+                    <Th onSort={() => sort.toggle("firstName")} sorted={sort.stateOf("firstName")}>
+                      First name
+                    </Th>
+                    <Th onSort={() => sort.toggle("lastName")} sorted={sort.stateOf("lastName")}>
+                      Last name
                     </Th>
                     <Th onSort={() => sort.toggle("role")} sorted={sort.stateOf("role")}>
                       Role
@@ -316,6 +343,8 @@ export function AdminUsersPage() {
                             </>
                           ) : null}
                         </Td>
+                        <Td>{u.firstName ?? <span className="text-text-faint">—</span>}</Td>
+                        <Td>{u.lastName ?? <span className="text-text-faint">—</span>}</Td>
                         <Td>
                           <Badge tone={u.role === "admin" ? "accent" : "neutral"}>{u.role}</Badge>
                         </Td>
@@ -342,6 +371,15 @@ export function AdminUsersPage() {
                         </Td>
                         <Td align="right">
                           <div className="flex flex-wrap justify-end gap-1.5">
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setActionError(null);
+                                setNameTarget(u);
+                              }}
+                            >
+                              Edit name
+                            </Button>
                             {/* Hidden rather than disabled for a directory account: there is
                                 no password to reset and the API refuses it, so offering the
                                 button at all would be an action that can only fail. */}
@@ -420,6 +458,12 @@ export function AdminUsersPage() {
       </Card>
 
       <UserAccessModal target={accessTarget} onClose={() => setAccessTarget(null)} />
+
+      <EditNameModal
+        key={nameTarget?.id ?? "none"}
+        target={nameTarget}
+        onClose={() => setNameTarget(null)}
+      />
 
       {/*
         Keyed on where the create came from, so the form's initial state is seeded by its
@@ -524,6 +568,9 @@ function CreateUserModal({
 }) {
   const createUser = useCreateUser();
   const [email, setEmail] = useState(prefill?.email ?? "");
+  // Seeded from the directory's display name when the create came from the queue.
+  const [firstName, setFirstName] = useState(prefill?.displayName?.split(/\s+/).slice(0, -1).join(" ") ?? "");
+  const [lastName, setLastName] = useState(prefill?.displayName?.split(/\s+/).slice(-1)[0] ?? "");
   const [role, setRole] = useState<"admin" | "user">("user");
   const [password, setPassword] = useState("");
   const [useOwnPassword, setUseOwnPassword] = useState(false);
@@ -544,6 +591,8 @@ function CreateUserModal({
     // Back to where this instance started, which is the prefilled state when it was opened
     // from a request -- not blank. Clearing to blank would discard the address on a cancel.
     setEmail(prefill?.email ?? "");
+    setFirstName(prefill?.displayName?.split(/\s+/).slice(0, -1).join(" ") ?? "");
+    setLastName(prefill?.displayName?.split(/\s+/).slice(-1)[0] ?? "");
     setRole("user");
     setPassword("");
     setUseOwnPassword(false);
@@ -557,6 +606,8 @@ function CreateUserModal({
     try {
       const result = await createUser.mutateAsync({
         email,
+        firstName: firstName.trim() || null,
+        lastName: lastName.trim() || null,
         role,
         authProvider: directory ? "oidc" : "local",
         // Meaningless for a directory account, which gets no password to change. The server
@@ -660,6 +711,15 @@ function CreateUserModal({
               required
             />
           </FormRow>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormRow label="First name" htmlFor="new-user-first-name">
+              <TextInput id="new-user-first-name" value={firstName} onChange={setFirstName} />
+            </FormRow>
+            <FormRow label="Last name" htmlFor="new-user-last-name">
+              <TextInput id="new-user-last-name" value={lastName} onChange={setLastName} />
+            </FormRow>
+          </div>
 
           <FormRow label="Role" htmlFor="new-user-role">
             <Select
@@ -1012,7 +1072,7 @@ function ResetPasswordModal({
  */
 function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void }) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       {/*
         Administrators get the badge and the button, not the badge alone.
 
@@ -1036,11 +1096,24 @@ function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void })
         count of groups would be the misleading half of the answer anyway, since groups
         overlap and say nothing about how many applications they reach.
       */}
-      {user.role !== "admin" && user.applicationAccessRestricted ? (
+      {/*
+        "No access" outranks "Restricted": it is the state of every account directory sign-in
+        has just created, and the one an administrator scanning this column is looking for.
+      */}
+      {user.role !== "admin" && !user.hasAccess ? (
+        <Badge tone="danger" title="This account can sign in but reaches no application yet.">
+          No access
+        </Badge>
+      ) : user.role !== "admin" && user.applicationAccessRestricted ? (
         <Badge tone="warn" title="This account sees only the groups and applications granted to it.">
           Restricted
         </Badge>
       ) : null}
+      {user.squads.map((squad) => (
+        <Badge key={squad.id} tone="info" title="A squad this account is on. It reaches everything the squad is granted.">
+          {squad.name}
+        </Badge>
+      ))}
       {/*
         One label for both states, in the default boxed style rather than the borderless one.
         "Review…" and "Choose…" described the state of the grants, which the badge beside it
@@ -1072,11 +1145,15 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
   const access = useUserApplicationAccess(target?.id ?? null);
   const saveEnvironments = useSetUserEnvironments();
   const saveAccess = useSetUserApplicationAccess();
+  const squads = useSquads();
+  const userSquads = useUserSquads(target?.id ?? null);
+  const saveSquads = useSetUserSquads();
 
   const [envIds, setEnvIds] = useState<string[] | null>(null);
   const [restricted, setRestricted] = useState<boolean | null>(null);
   const [groupIds, setGroupIds] = useState<string[] | null>(null);
   const [appIds, setAppIds] = useState<string[] | null>(null);
+  const [squadIds, setSquadIds] = useState<string[] | null>(null);
 
   /*
     Two tabs rather than two stacked lists. Both axes used to be flex-wrapped side by side,
@@ -1095,14 +1172,16 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
   const currentRestricted = restricted ?? access.data?.restricted ?? false;
   const currentGroups = groupIds ?? access.data?.groupIds ?? [];
   const currentApps = appIds ?? access.data?.applicationIds ?? [];
+  const currentSquads = squadIds ?? userSquads.data?.squads.map((s) => s.id) ?? [];
 
   const grantable = useGrantableScope(currentEnvs, debouncedAppSearch);
   const allEnvironments = environments.data?.environments ?? [];
   const isAdmin = target?.role === "admin";
 
-  const loading = grantedEnvironments.isLoading || access.isLoading;
-  const saving = saveEnvironments.isPending || saveAccess.isPending;
-  const dirty = envIds !== null || restricted !== null || groupIds !== null || appIds !== null;
+  const loading = grantedEnvironments.isLoading || access.isLoading || userSquads.isLoading;
+  const saving = saveEnvironments.isPending || saveAccess.isPending || saveSquads.isPending;
+  const dirty =
+    envIds !== null || restricted !== null || groupIds !== null || appIds !== null || squadIds !== null;
 
   /*
     Scored against the boxes as they stand rather than against the last save. Both axes are
@@ -1116,6 +1195,7 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
       groupIds: currentGroups,
       applicationIds: currentApps,
       environmentIds: currentEnvs,
+      squadIds: currentSquads,
     },
     !loading,
   );
@@ -1143,11 +1223,13 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
     setRestricted(null);
     setGroupIds(null);
     setAppIds(null);
+    setSquadIds(null);
     setAppSearch("");
     setGroupSearch("");
     setTab("applications");
     saveEnvironments.reset();
     saveAccess.reset();
+    saveSquads.reset();
     onClose();
   }
 
@@ -1167,6 +1249,7 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
         applicationIds: currentApps,
       },
     });
+    if (squadIds !== null) await saveSquads.mutateAsync({ id: target.id, squadIds: currentSquads });
     close();
   }
 
@@ -1188,7 +1271,7 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
       }
     >
       <div className="space-y-4 text-sm">
-        <FormError error={saveEnvironments.error ?? saveAccess.error} />
+        <FormError error={saveEnvironments.error ?? saveAccess.error ?? saveSquads.error} />
 
         {loading ? (
           <LoadingBlock label="Loading access" />
@@ -1222,9 +1305,39 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
               </div>
               {currentEnvs.length === 0 ? (
                 <p className="mt-1.5 text-[11px] text-warn">
-                  With no environments this account can sign in and see nothing at all.
+                  With no environments this account sees only what its squads grant.
                 </p>
               ) : null}
+            </section>
+
+            {/*
+              Squads before the per-account grants, because they are the way access is meant to
+              be given: put somebody on their team and they reach what the team reaches. The
+              boxes below are for the exceptions.
+            */}
+            <section className="border-t border-border-base pt-3">
+              <h3 className="mb-1.5 text-xs font-medium text-text-muted">Squads</h3>
+              {(squads.data?.squads ?? []).length === 0 ? (
+                <p className="text-[11px] text-text-faint">
+                  No squads exist yet. Create them under Administration → Squads to grant a team
+                  its applications in one place.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                  {(squads.data?.squads ?? []).map((squad) => (
+                    <Checkbox
+                      key={squad.id}
+                      checked={currentSquads.includes(squad.id)}
+                      onChange={(on) => setSquadIds(toggle(currentSquads, squad.id, on))}
+                      label={`${squad.name} (${squad.reachableApplicationCount} apps)`}
+                    />
+                  ))}
+                </div>
+              )}
+              <p className="mt-1.5 text-[11px] text-text-faint">
+                A squad adds its applications, and the environments they live in, to whatever is
+                granted below.
+              </p>
             </section>
 
             <section className="border-t border-border-base pt-3">
@@ -1402,6 +1515,69 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
 // ---------------------------------------------------------------------------
 
 /**
+ * Correcting a person's name.
+ *
+ * Its own small dialog rather than inline cells: the table is already wide, and a name typed
+ * into a cell and lost to a stray click is worse than one more modal. A directory account's
+ * name arrives from its first sign-in; anything typed here wins from then on.
+ */
+function EditNameModal({ target, onClose }: { target: UserSummary | null; onClose: () => void }) {
+  const update = useUpdateUser();
+  const [firstName, setFirstName] = useState(target?.firstName ?? "");
+  const [lastName, setLastName] = useState(target?.lastName ?? "");
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!target) return;
+    try {
+      await update.mutateAsync({
+        id: target.id,
+        body: { firstName: firstName.trim() || null, lastName: lastName.trim() || null },
+      });
+      onClose();
+    } catch {
+      // Rendered from the mutation's error state.
+    }
+  }
+
+  return (
+    <Modal
+      open={target !== null}
+      onClose={onClose}
+      title={target ? `Name for ${target.email}` : "Name"}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={update.isPending}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit" form="edit-name-form" disabled={update.isPending}>
+            {update.isPending ? "Saving…" : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <form id="edit-name-form" onSubmit={save} className="space-y-3" noValidate>
+        <FormError error={update.error} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <FormRow label="First name" htmlFor="edit-first-name">
+            <TextInput id="edit-first-name" value={firstName} onChange={setFirstName} autoFocus />
+          </FormRow>
+          <FormRow label="Last name" htmlFor="edit-last-name">
+            <TextInput id="edit-last-name" value={lastName} onChange={setLastName} />
+          </FormRow>
+        </div>
+        <p className="text-xs text-text-faint">
+          Leave a field empty to clear it. Names are for people reading this list; nobody signs in
+          with them.
+        </p>
+      </form>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
  * People the directory authenticated who have no account here.
  *
  * Pre-provisioning is the security posture and stays that way: an identity the directory
@@ -1464,7 +1640,7 @@ function AccessRequestsCard({
         title={
           pending.length > 0 ? `Access requests (${pending.length})` : "Access requests"
         }
-        subtitle="Recorded when somebody signs in through your organisation's directory and this platform has no account for them."
+        subtitle="Recorded when somebody signs in through your organisation's directory and no account could be made for them — automatic account creation is off, their address is outside the allowed domains, or the directory sent no address."
       />
 
       {error ? (

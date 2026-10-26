@@ -241,8 +241,29 @@ export class EnvironmentService {
   async accessFor(user: UserRow): Promise<EnvironmentAccess> {
     if (user.role === "admin") return { all: true, environmentIds: [] };
 
+    /*
+      The account's own estates, plus every estate its squads' grants live in.
+
+      A squad brings its estates with it so that putting somebody on the team that owns a
+      production service is enough on its own -- nobody has to remember to tick production as
+      well. That is safe only because the application axis names exactly what the squad grants
+      in those estates (see `combineAccess`); opening the estate here does not open the rest of
+      it.
+    */
     const result = await this.deps.db.execute<Row<{ environment_id: string }>>(sql`
       SELECT environment_id FROM user_environment WHERE user_id = ${user.id}::uuid
+      UNION
+      SELECT a.environment_id
+        FROM squad_member sm
+        JOIN squad_application sa ON sa.squad_id = sm.squad_id
+        JOIN application a ON a.id = sa.application_id
+       WHERE sm.user_id = ${user.id}::uuid
+      UNION
+      SELECT g.environment_id
+        FROM squad_member sm
+        JOIN squad_group sg ON sg.squad_id = sm.squad_id
+        JOIN application_group g ON g.id = sg.group_id
+       WHERE sm.user_id = ${user.id}::uuid
     `);
     return { all: false, environmentIds: rowsOf(result).map((r) => r.environment_id) };
   }

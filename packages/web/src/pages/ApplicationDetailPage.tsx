@@ -34,6 +34,7 @@ import {
   type FindingsFilters,
 } from "../components/Findings.tsx";
 import { ScanningDisabledNotice } from "../components/Severity.tsx";
+import { FixRecommendationsCard } from "../components/FixRecommendations.tsx";
 import { useApplicationVulnerabilities, useVulnStatus } from "../lib/queries.ts";
 import {
   Badge,
@@ -61,6 +62,8 @@ import {
 } from "../components/ui.tsx";
 
 const TABS = ["components", "history", "removed", "changes", "vulnerabilities"] as const;
+/** The two views inside the Vulnerabilities tab. */
+const VULN_VIEWS = ["findings", "recommendations"] as const;
 const COMPONENT_SORTS = componentListSort.fields;
 const DIRECTIONS = ["asc", "desc"] as const;
 
@@ -80,6 +83,7 @@ const DEFAULTS = {
   historyPage: 1,
   removedPage: 1,
   ignoreVersion: false,
+  vulnView: "findings" as (typeof VULN_VIEWS)[number],
 };
 
 const urlSpec = {
@@ -98,6 +102,7 @@ const urlSpec = {
     historyPage: readNumber(params, "historyPage", 1),
     removedPage: readNumber(params, "removedPage", 1),
     ignoreVersion: readBool(params, "ignoreVersion"),
+    vulnView: readEnum(params, "vulnView", VULN_VIEWS, "findings"),
   }),
 };
 
@@ -283,7 +288,13 @@ export function ApplicationDetailPage() {
       ) : state.tab === "changes" ? (
         <ChangesTab applicationId={app.id} />
       ) : state.tab === "vulnerabilities" ? (
-        <VulnerabilitiesTab applicationId={app.id} enabled={vulnEnabled} isAdmin={isAdmin} />
+        <VulnerabilitiesTab
+          applicationId={app.id}
+          enabled={vulnEnabled}
+          isAdmin={isAdmin}
+          view={state.vulnView}
+          onViewChange={(vulnView) => setState({ vulnView })}
+        />
       ) : state.tab === "removed" ? (
         <RemovedTab applicationId={app.id} state={state} setState={setState} />
       ) : (
@@ -680,10 +691,14 @@ function VulnerabilitiesTab({
   applicationId,
   enabled,
   isAdmin,
+  view,
+  onViewChange,
 }: {
   applicationId: string;
   enabled: boolean;
   isAdmin: boolean;
+  view: (typeof VULN_VIEWS)[number];
+  onViewChange: (view: (typeof VULN_VIEWS)[number]) => void;
 }) {
   const [filters, setFilters] = useState<FindingsFilters>(DEFAULT_FINDINGS_FILTERS);
   const params = useMemo(() => findingsParams(filters), [filters]);
@@ -696,8 +711,51 @@ function VulnerabilitiesTab({
 
   if (!enabled) return <ScanningDisabledNotice what="Vulnerability findings" isAdmin={isAdmin} />;
 
+  /*
+    The view sits in the URL, so a link to "the upgrades for this service" opens on them. The
+    scope is shared by both views on purpose: narrowing to the base image and switching to
+    recommendations should show the base image's upgrades, not quietly widen back out.
+  */
+  const viewSwitch = (
+    <div role="tablist" aria-label="Vulnerability views" className="mb-3 flex gap-1 rounded-md bg-bg-subtle p-1 sm:w-fit">
+      {(
+        [
+          ["findings", "Findings"],
+          ["recommendations", "Recommendations"],
+        ] as const
+      ).map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={view === id}
+          onClick={() => onViewChange(id)}
+          className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+            view === id ? "bg-bg-raised text-text-base shadow-sm" : "text-text-muted hover:text-text-base"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (view === "recommendations") {
+    return (
+      <>
+        {viewSwitch}
+        <FixRecommendationsCard
+          applicationId={applicationId}
+          scope={filters.scope}
+          onScopeChange={(scope) => setFilters((prev) => ({ ...prev, scope, page: 1 }))}
+        />
+      </>
+    );
+  }
+
   return (
     <>
+      {viewSwitch}
       {error ? <ErrorBanner error={error} onRetry={() => void refetch()} /> : null}
       <FindingsCard
         title="Vulnerabilities in the current build"

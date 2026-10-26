@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import type { SessionUser } from "@sbom/shared";
+import { emailDomainAllowed, type SessionUser } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import { user, type UserRow } from "../../db/schema.js";
@@ -9,6 +9,7 @@ import { AuthProviderRegistry, type AuthContext, type AuthCredentials } from "./
 import type { IssuedSession, SessionService } from "./session.service.js";
 import type { VerifiedIdentity } from "../../services/auth/id-token.js";
 import type { AccessRequestService } from "./access-request.service.js";
+import type { AuditService } from "../admin/audit.service.js";
 
 export interface LoginOutcome {
   user: UserRow;
@@ -55,7 +56,14 @@ export type DirectorySignIn =
    * somebody told to wait for a notification nobody received waits forever.
    */
   | { ok: false; reason: "no_account"; requested: boolean }
-  | { ok: false; reason: "inactive" | "identity_conflict" };
+  /**
+   * An account exists for this address, but it signs in with a password.
+   *
+   * Not created over, and not linked automatically: converting an account to the directory
+   * discards its password, which is an administrator's decision rather than a side effect of
+   * somebody clicking the other button on the sign-in page.
+   */
+  | { ok: false; reason: "inactive" | "identity_conflict" | "local_account" };
 
 export class AuthService {
   constructor(
@@ -74,6 +82,15 @@ export class AuthService {
        */
       accessRequests: AccessRequestService;
       logger: { warn(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void };
+      /**
+       * Whether a directory identity with no account is given one, and for which domains.
+       *
+       * Optional, and absent means no: the safe reading of "nobody wired this up" is the
+       * pre-provisioning behaviour, where the refusal is queued for an administrator.
+       */
+      provisioning?: () => Promise<{ enabled: boolean; allowedEmailDomains: string[] }>;
+      /** Where a provisioned account is recorded. Optional for the same reason. */
+      audit?: Pick<AuditService, "record">;
     },
   ) {}
 
@@ -138,11 +155,12 @@ export class AuthService {
   /**
    * Starts a session for an identity the directory has already authenticated.
    *
-   * No account is ever created here. An identity the provider vouches for is a person who
-   * works at the organisation; it is not a person who should see this platform's data, and
-   * the difference is the whole access model. Provisioning on first sign-in would hand every
-   * employee an account the moment they found the URL -- and since a new account defaults to
-   * unrestricted application access, several of them would see the entire estate.
+   * An identity the provider vouches for is a person who works at the organisation; it is not a
+   * person who should see this platform's data, and that difference is the whole access model.
+   * So when provisioning is on and nobody has an account for them, one is created that *reaches
+   * nothing*: a read-only role, narrowed to no applications, in no environment. They are in, and
+   * can see that they are; what they may read is still decided by an administrator granting
+   * something or adding them to a squad. With provisioning off, the refusal is queued instead.
    *
    * Matching runs subject first, email second:
    *
@@ -206,6 +224,12 @@ export class AuthService {
     }
 
     if (!account) {
+      const provisioned = await this.provision(identity);
+      if (provisioned.outcome === "created") account = provisioned.account;
+      else if (provisioned.outcome === "local_account") return { ok: false, reason: "local_account" };
+    }
+
+    if (!account) {
       /*
         The directory vouched for this person and this platform has nobody by that identity.
 
@@ -227,7 +251,19 @@ export class AuthService {
     if (!account.isActive) return { ok: false, reason: "inactive" };
 
     const session = await sessions.create(account.id, ctx);
-    await db.update(user).set({ lastLoginAt: new Date() }).where(eq(user.id, account.id));
+    await db
+      .update(user)
+      .set({
+        lastLoginAt: new Date(),
+        /*
+          Names fill in only where empty. The directory is the better source on day one, but
+          once an administrator has corrected a name -- the split of a display name is a guess --
+          the next sign-in must not quietly put the guess back.
+        */
+        firstName: sql`COALESCE(${user.firstName}, ${identity.givenName})`,
+        lastName: sql`COALESCE(${user.lastName}, ${identity.familyName})`,
+      })
+      .where(eq(user.id, account.id));
 
     /*
       Whoever got in no longer needs to be on the queue.
@@ -245,6 +281,89 @@ export class AuthService {
     });
 
     return { ok: true, user: account, session };
+  }
+
+  /**
+   * Creates the account for a directory identity seen for the first time, when that is allowed.
+   *
+   * Every refusal here is quiet and falls back to the access-request queue, except one. An
+   * identity with no address cannot have an account (the address is the identifier), and one
+   * outside the allowed domains is not meant to; both are things an administrator may still
+   * want to act on, which is what the queue is for. A *local* account already holding the
+   * address is different: it needs converting, not creating, and says so.
+   *
+   * The insert is `ON CONFLICT DO NOTHING` against both unique indexes -- the address and the
+   * bound subject -- rather than a check followed by a write. Two first sign-ins racing (two
+   * tabs, a double click) would otherwise both pass the check and one would die on the index
+   * with a 500 instead of signing in.
+   */
+  private async provision(
+    identity: VerifiedIdentity,
+  ): Promise<
+    | { outcome: "created"; account: UserRow }
+    | { outcome: "local_account" }
+    | { outcome: "not_provisioned" }
+  > {
+    const { db, provisioning, audit, logger } = this.deps;
+    const settings = provisioning ? await provisioning() : null;
+    if (!settings?.enabled || !identity.email) return { outcome: "not_provisioned" };
+    if (!emailDomainAllowed(identity.email, settings.allowedEmailDomains)) {
+      return { outcome: "not_provisioned" };
+    }
+
+    const inserted = await db
+      .insert(user)
+      .values({
+        email: identity.email,
+        firstName: identity.givenName,
+        lastName: identity.familyName,
+        role: "user",
+        authProvider: "oidc",
+        authSubject: identity.subject,
+        passwordHash: null,
+        mustChangePassword: false,
+        /*
+          Restricted, with no grants and no environments: an account that can sign in and read
+          nothing. Unrestricted would be the default for an administrator-created account, and
+          here it would hand every colleague who finds the URL the whole of every estate they
+          were later given -- the exact outcome the old refusal existed to prevent.
+        */
+        applicationAccessRestricted: true,
+      })
+      .onConflictDoNothing()
+      .returning();
+
+    const created = inserted[0];
+    if (created) {
+      try {
+        await audit?.record({
+          // Nobody: the directory vouched, the platform acted. Recorded so "who let this person
+          // in" has an answer -- the setting did, at this moment, for this identity.
+          actor: null,
+          action: "user.provision",
+          targetType: "user",
+          targetId: created.id,
+          metadata: { email: created.email, provider: "oidc", restricted: true, environments: 0 },
+        });
+      } catch (error) {
+        // The account exists and the person is mid-sign-in; losing the audit row is worse than
+        // nothing only if it is silent, so it is logged rather than failing the sign-in.
+        logger.warn({ err: error }, "could not audit a provisioned account");
+      }
+      return { outcome: "created", account: created };
+    }
+
+    // Lost a race to a concurrent first sign-in by the same person: use what it created.
+    const [bySubject] = await db
+      .select()
+      .from(user)
+      .where(sql`${user.authProvider} = 'oidc' AND ${user.authSubject} = ${identity.subject}`)
+      .limit(1);
+    if (bySubject) return { outcome: "created", account: bySubject };
+
+    // Otherwise the address belongs to an account the directory lookups above did not match,
+    // which can only be one that signs in some other way.
+    return { outcome: "local_account" };
   }
 
   async logout(token: string): Promise<void> {

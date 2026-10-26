@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { API_TOKEN_SECRET_PREFIX, type ApiTokenSummary } from "@sbom/shared";
 import { useApiAccess, useApiTokens } from "../lib/queries.ts";
-import { useCreateApiToken, useRevokeApiToken } from "../lib/mutations.ts";
+import { useCreateApiToken, useDeleteApiToken, useRevokeApiToken } from "../lib/mutations.ts";
 import { formatDate, formatRelative } from "../lib/format.ts";
 import {
   Badge,
@@ -138,6 +138,7 @@ function TokenCard({
 }) {
   const create = useCreateApiToken();
   const revoke = useRevokeApiToken();
+  const remove = useDeleteApiToken();
 
   const [name, setName] = useState("");
   const [scope, setScope] = useState<"read" | "write">("read");
@@ -275,10 +276,26 @@ function TokenCard({
                   <TokenRow
                     key={token.id}
                     token={token}
-                    busy={revoke.isPending}
+                    busy={revoke.isPending || remove.isPending}
                     onRevoke={() => {
                       setActionError(null);
                       revoke.mutate(token.id, { onError: (err) => setActionError(err) });
+                    }}
+                    onDelete={() => {
+                      // Confirmed in the browser rather than a dialog: it is the caller's own
+                      // token, and the one thing worth saying is that it cannot be undone.
+                      const live = token.revokedAt === null;
+                      if (
+                        !window.confirm(
+                          live
+                            ? `Delete "${token.name}"? It stops working immediately and cannot be restored.`
+                            : `Delete "${token.name}"? The name becomes free to use again.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setActionError(null);
+                      remove.mutate(token.id, { onError: (err) => setActionError(err) });
                     }}
                   />
                 ))}
@@ -301,10 +318,12 @@ function TokenRow({
   token,
   busy,
   onRevoke,
+  onDelete,
 }: {
   token: ApiTokenSummary;
   busy: boolean;
   onRevoke: () => void;
+  onDelete: () => void;
 }) {
   return (
     <Tr>
@@ -346,11 +365,17 @@ function TokenRow({
         )}
       </Td>
       <Td align="right">
-        {token.revokedAt === null ? (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onRevoke}>
-            Revoke
+        <div className="flex justify-end gap-1.5">
+          {token.revokedAt === null ? (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={onRevoke}>
+              Revoke
+            </Button>
+          ) : null}
+          {/* Revoking keeps the row, and with it the name; deleting frees the name. */}
+          <Button size="sm" variant="ghost" disabled={busy} onClick={onDelete}>
+            Delete
           </Button>
-        ) : null}
+        </div>
       </Td>
     </Tr>
   );

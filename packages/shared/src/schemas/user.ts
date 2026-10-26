@@ -15,6 +15,20 @@ import { defineSortTable } from "./sort.js";
  * `mustChangePassword`, so the credential the admin saw stops working the
  * moment the user logs in.
  */
+/**
+ * A person's name, as typed or as the directory gave it.
+ *
+ * Blank is folded to null rather than stored as an empty string, so "not known" has one
+ * representation and a cleared field reads back as absent rather than as a name of nothing.
+ */
+export const personNameSchema = z
+  .string()
+  .trim()
+  .max(120)
+  .regex(/^[^\p{C}]*$/u, "must not contain control characters")
+  .transform((v) => (v === "" ? null : v))
+  .nullable();
+
 export const createUserRequestSchema = z.object({
   /**
    * Which environments this account may read. Omitted grants every one that exists.
@@ -24,6 +38,8 @@ export const createUserRequestSchema = z.object({
    */
   environmentIds: z.array(uuidSchema).max(100).optional(),
   email: emailSchema,
+  firstName: personNameSchema.optional(),
+  lastName: personNameSchema.optional(),
   role: userRoleSchema.default("user"),
   /**
    * Which backend owns this account's credentials.
@@ -48,10 +64,18 @@ export const updateUserRequestSchema = z
   .object({
     role: userRoleSchema.optional(),
     isActive: z.boolean().optional(),
+    /** Null clears the name; omitted leaves it alone. */
+    firstName: personNameSchema.optional(),
+    lastName: personNameSchema.optional(),
   })
-  .refine((v) => v.role !== undefined || v.isActive !== undefined, {
-    message: "at least one of role or isActive must be provided",
-  });
+  .refine(
+    (v) =>
+      v.role !== undefined ||
+      v.isActive !== undefined ||
+      v.firstName !== undefined ||
+      v.lastName !== undefined,
+    { message: "at least one of role, isActive, firstName or lastName must be provided" },
+  );
 export type UpdateUserRequest = z.infer<typeof updateUserRequestSchema>;
 
 /**
@@ -95,6 +119,8 @@ export type ResetUserPasswordRequest = z.infer<typeof resetUserPasswordRequestSc
 export const userSort = defineSortTable(
   {
     email: "text",
+    firstName: "text",
+    lastName: "text",
     role: "text",
     isActive: "text",
     lastLoginAt: "date",
@@ -111,12 +137,21 @@ export const listUsersQuerySchema = paginationQuerySchema.extend({
     .enum(["true", "false"])
     .transform((v) => v === "true")
     .optional(),
+  /**
+   * `none` lists the accounts that can sign in and reach nothing.
+   *
+   * The working list after directory sign-in started creating accounts on its own: everybody
+   * who signed in once and is waiting for an administrator to give them something to see.
+   */
+  access: z.enum(["none"]).optional(),
 }).merge(userSort.querySchema);
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 
 export interface UserSummary {
   id: string;
   email: string;
+  firstName: string | null;
+  lastName: string | null;
   role: "admin" | "user";
   /*
     The shared union, not a copy of it. Spelled out, this narrowed every consumer to
@@ -134,6 +169,21 @@ export interface UserSummary {
    * fetching grants per row would be one request per row to draw one column.
    */
   applicationAccessRestricted: boolean;
+  /**
+   * The squads this account is a member of, by name.
+   *
+   * On the row because a squad is now one of the ways an account reaches applications, and an
+   * Access column that showed only the account's own grants would describe half of it.
+   */
+  squads: Array<{ id: string; name: string }>;
+  /**
+   * False when the account can sign in and reach nothing at all.
+   *
+   * A non-admin with no estate, or narrowed to nothing, and in no squad that grants anything.
+   * Coarse on purpose — it does not intersect grants with estates — because its job is to find
+   * the accounts nobody has looked at yet, not to answer what a particular one can see.
+   */
+  hasAccess: boolean;
   lastLoginAt: string | null;
   /** Live session count, so an admin can see who is currently signed in. */
   activeSessions: number;

@@ -7,6 +7,7 @@ import {
   idParamSchema,
   loginRequestSchema,
   OIDC_CALLBACK_PATH,
+  tokenDeleteQuerySchema,
   type ApiAccessInfo,
 } from "@sbom/shared";
 import { OidcClient } from "../../services/auth/oidc-client.js";
@@ -439,6 +440,21 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.delete("/api-tokens/:id", { preHandler: fastify.requireAuth }, async (request, reply) => {
     const user = getUser(request);
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const { permanent } = parseOrThrow(tokenDeleteQuerySchema, request.query, "Query");
+
+    if (permanent) {
+      // Owner-scoped in the service, exactly like revoking.
+      const deleted = await apiTokens.deleteForUser(user.id, id);
+      await audit.record({
+        actor: { id: user.id, email: user.email },
+        action: "api_token.delete",
+        targetType: "api_token",
+        targetId: id,
+        metadata: { own: true, name: deleted.name, scope: deleted.scope },
+      });
+      return reply.status(204).send();
+    }
+
     // Scoped to the owner inside the service, so guessing another person's token id finds
     // nothing rather than revoking it.
     await apiTokens.revokeForUser(user.id, id);

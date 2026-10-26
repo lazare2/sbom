@@ -8,6 +8,7 @@ import {
   acknowledgeMaliciousRequestSchema,
   createGroupRequestSchema,
   createIngestTokenRequestSchema,
+  createSquadSchema,
   createUserRequestSchema,
   idParamSchema,
   listApiErrorsQuerySchema,
@@ -19,11 +20,16 @@ import {
   resetUserPasswordRequestSchema,
   setGroupMembersRequestSchema,
   setSignInMethodSchema,
+  setSquadAccessSchema,
+  setSquadMembersSchema,
+  setUserSquadsSchema,
+  updateSquadSchema,
   oidcConnectionInputSchema,
   previewUserApplicationAccessSchema,
   resolveAccessRequestSchema,
   setUserApplicationAccessSchema,
   testOidcConnectionSchema,
+  tokenDeleteQuerySchema,
   OIDC_CALLBACK_PATH,
   type OidcDiagnosis,
   setUserEnvironmentsRequestSchema,
@@ -90,6 +96,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     applicationAccess,
     adminApplications,
     adminGroups,
+    squads,
     adminScans,
     adminMalicious,
     malicious,
@@ -312,8 +319,76 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       every unsaved edit would be scored as reaching nothing.
     */
     const environmentIds = body.environmentIds ?? (await environments.environmentsForUser(id));
+    // Same null-versus-empty rule for squads: untouched means "as stored", not "on none".
+    const squadIds = body.squadIds ?? (await applicationAccess.squadIdsForUser(id));
 
-    return reply.send(await applicationAccess.preview(body, environmentIds));
+    return reply.send(await applicationAccess.preview(body, environmentIds, squadIds));
+  });
+
+  /** The squads one account is on. */
+  fastify.get("/users/:id/squads", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    await adminUsers.getById(id);
+    return reply.send({ squads: await squads.forUser(id) });
+  });
+
+  /**
+   * Sets one account's squads from the account's side.
+   *
+   * The same rows the squad screen edits, reached from the other end, because the two questions
+   * arrive from different places: "who is on Payments" is asked on the squad, "what should this
+   * new colleague be on" is asked on the person. PUT for the reason the other grant routes are.
+   */
+  fastify.put("/users/:id/squads", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setUserSquadsSchema, request.body);
+    await adminUsers.getById(id);
+    await squads.setForUser(id, body.squadIds, actorOf(request));
+    return reply.send({ squads: await squads.forUser(id) });
+  });
+
+  // -------------------------------------------------------------------------
+  // Squads
+  // -------------------------------------------------------------------------
+
+  fastify.get("/squads", async (_request, reply) => {
+    return reply.send({ squads: await squads.list() });
+  });
+
+  fastify.get("/squads/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    return reply.send({ squad: await squads.get(id) });
+  });
+
+  fastify.post("/squads", async (request, reply) => {
+    const body = parseOrThrow(createSquadSchema, request.body);
+    return reply.status(201).send({ squad: await squads.create(body, actorOf(request)) });
+  });
+
+  fastify.patch("/squads/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(updateSquadSchema, request.body);
+    return reply.send({ squad: await squads.update(id, body, actorOf(request)) });
+  });
+
+  fastify.delete("/squads/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    await squads.remove(id, actorOf(request));
+    return reply.status(204).send();
+  });
+
+  /** The complete member list. PUT, not PATCH: the screen edits a checklist and knows the whole. */
+  fastify.put("/squads/:id/members", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setSquadMembersSchema, request.body);
+    return reply.send({ squad: await squads.setMembers(id, body.userIds, actorOf(request)) });
+  });
+
+  /** The complete grant set: groups and individual applications, across any environment. */
+  fastify.put("/squads/:id/access", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setSquadAccessSchema, request.body);
+    return reply.send({ squad: await squads.setAccess(id, body, actorOf(request)) });
   });
 
   // -------------------------------------------------------------------------
@@ -604,6 +679,22 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.delete("/ingest-tokens/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const { permanent } = parseOrThrow(tokenDeleteQuerySchema, request.query, "Query");
+
+    if (permanent) {
+      const removed = await ingestTokens.remove(id);
+      if (!removed) throw new NotFoundError("Ingest token");
+      await audit.record({
+        actor: actorOf(request),
+        action: "ingest_token.delete",
+        targetType: "ingest_token",
+        targetId: id,
+        // The name is the only trace left of the row, and it is what scans recorded.
+        metadata: { name: removed.name, wasActive: removed.wasActive },
+      });
+      return reply.status(204).send();
+    }
+
     const revoked = await ingestTokens.revoke(id);
     if (!revoked) throw new NotFoundError("Ingest token");
 
@@ -747,6 +838,15 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         enabled: {
           from: before.connection?.enabled ?? false,
           to: after.connection?.enabled ?? false,
+        },
+        // Who gets an account made for them is an access decision, so both halves are kept.
+        provisionOnSignIn: {
+          from: before.connection?.provisionOnSignIn ?? null,
+          to: after.connection?.provisionOnSignIn ?? null,
+        },
+        allowedEmailDomains: {
+          from: before.connection?.allowedEmailDomains ?? [],
+          to: after.connection?.allowedEmailDomains ?? [],
         },
         secretReplaced: body.clientSecret !== undefined && body.clientSecret !== "",
       },
@@ -940,6 +1040,25 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.delete("/api-tokens/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const { permanent } = parseOrThrow(tokenDeleteQuerySchema, request.query, "Query");
+
+    if (permanent) {
+      const deleted = await apiTokens.deleteAny(id);
+      await audit.record({
+        actor: actorOf(request),
+        action: "api_token.delete",
+        targetType: "api_token",
+        targetId: id,
+        metadata: {
+          own: false,
+          ownerEmail: deleted.userEmail,
+          name: deleted.name,
+          scope: deleted.scope,
+        },
+      });
+      return reply.status(204).send();
+    }
+
     const revoked = await apiTokens.revokeAny(id);
 
     await audit.record({

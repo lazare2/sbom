@@ -27,16 +27,38 @@ import { uuidSchema } from "./common.js";
  * reachable deliberately (an account created before anyone decided what it should reach) and
  * must never be confused with unrestricted, which is why the flag is stored rather than
  * inferred from whether any grant rows exist.
+ *
+ * ## Squads, and why `wholeEnvironmentIds` exists
+ *
+ * A squad grant is a union, not an intersection: being on a squad adds its applications to
+ * whatever the account already reaches, and brings the estates those applications live in with
+ * it. That cannot be expressed with "unrestricted" alone. An account that sees everything in
+ * test and is put on a squad owning one production service must see that one service — not
+ * the whole of production, which is what turning production on for an unrestricted account
+ * would mean.
+ *
+ * So the restricted form carries the estates in which *every* application is visible, beside
+ * the grants. An unrestricted account on a squad becomes restricted-in-form: its own estates
+ * are whole, and the squad's grants are named. The ids are resolved against the account's own
+ * environment grants before they get here, which is what keeps a squad from silently widening
+ * an account's own group grants into an estate nobody gave it.
  */
 export type ApplicationAccess =
-  | { unrestricted: true; groupIds: []; applicationIds: [] }
-  | { unrestricted: false; groupIds: string[]; applicationIds: string[] };
+  | { unrestricted: true; groupIds: []; applicationIds: []; wholeEnvironmentIds: [] }
+  | {
+      unrestricted: false;
+      groupIds: string[];
+      applicationIds: string[];
+      /** Estates in which every application is visible, including ones created later. */
+      wholeEnvironmentIds: string[];
+    };
 
 /** For the paths that are not restricting anybody: an admin, a background job, a seed. */
 export const UNRESTRICTED_APPLICATIONS: ApplicationAccess = {
   unrestricted: true,
   groupIds: [],
   applicationIds: [],
+  wholeEnvironmentIds: [],
 };
 
 /**
@@ -110,6 +132,13 @@ export const previewUserApplicationAccessSchema = z.object({
    * axis as "no environments granted" would report every account as reaching nothing.
    */
   environmentIds: z.array(uuidSchema).nullable().default(null),
+  /**
+   * The squads to score as members of, or null for the account's stored memberships.
+   *
+   * Same null-versus-empty reasoning as the environments: an untouched list must not be scored
+   * as "on no squads", or adding a person to their team would read as taking access away.
+   */
+  squadIds: z.array(uuidSchema).max(100).nullable().default(null),
 });
 export type PreviewUserApplicationAccess = z.infer<typeof previewUserApplicationAccessSchema>;
 
@@ -139,6 +168,13 @@ export interface ReachableApplication {
   direct: boolean;
   /** Granted groups that contain it. Empty for a direct-only grant. */
   viaGroups: string[];
+  /**
+   * Squads the account is on that reach it. Empty when only the account's own grants do.
+   *
+   * Listed separately because the remedy differs: a squad grant goes away by leaving the squad,
+   * and unticking the account's own boxes will not remove it.
+   */
+  viaSquads: string[];
 }
 
 /**

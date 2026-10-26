@@ -42,6 +42,11 @@ export function visibleApplications(access: ApplicationAccess, alias: string): S
 
   const a = sql.raw(alias);
   /*
+    Whole estates first. Empty for an account narrowed to its grants; populated for an
+    unrestricted account that is also on a squad, whose own estates stay whole while the squad
+    adds named applications elsewhere -- see `ApplicationAccess`.
+  */
+  /*
     `sql.param` on both arrays, not a bare `${array}`.
 
     Drizzle flattens a bare array into one placeholder per element, so `= ANY($3::uuid[])`
@@ -52,7 +57,8 @@ export function visibleApplications(access: ApplicationAccess, alias: string): S
     with no grants should see. `= ANY('{}')` is false rather than an error.
   */
   return sql`(
-    ${a}.id = ANY(${sql.param(access.applicationIds)}::uuid[])
+    ${a}.environment_id = ANY(${sql.param(access.wholeEnvironmentIds)}::uuid[])
+    OR ${a}.id = ANY(${sql.param(access.applicationIds)}::uuid[])
     OR EXISTS (
       SELECT 1 FROM application_group_member gm
       WHERE gm.application_id = ${a}.id
@@ -74,7 +80,56 @@ export function visibleApplications(access: ApplicationAccess, alias: string): S
  */
 export function visibleGroups(access: ApplicationAccess, alias: string): SQL {
   if (access.unrestricted) return sql`TRUE`;
-  return sql`${sql.raw(alias)}.id = ANY(${sql.param(access.groupIds)}::uuid[])`;
+  const g = sql.raw(alias);
+  // Every group in a whole estate, for the same reason every application in it is visible.
+  return sql`(
+    ${g}.id = ANY(${sql.param(access.groupIds)}::uuid[])
+    OR ${g}.environment_id = ANY(${sql.param(access.wholeEnvironmentIds)}::uuid[])
+  )`;
+}
+
+/** What a set of squads grants, as two id lists. */
+export interface SquadGrants {
+  groupIds: string[];
+  applicationIds: string[];
+}
+
+const NO_SQUAD_GRANTS: SquadGrants = { groupIds: [], applicationIds: [] };
+
+/**
+ * Combines an account's own grants with its squads' into the value every read applies.
+ *
+ * Pure, and exported for the tests, because this is where the union-versus-intersection rule
+ * actually lives. `own*` must already be confined to the account's own estates -- the caller
+ * does that in SQL -- so a squad that opens production for one service cannot carry the
+ * account's own production group grants in with it.
+ */
+export function combineAccess(input: {
+  restricted: boolean;
+  ownEnvironmentIds: readonly string[];
+  ownGroupIds: readonly string[];
+  ownApplicationIds: readonly string[];
+  squad: SquadGrants;
+}): ApplicationAccess {
+  const squadEmpty = input.squad.groupIds.length === 0 && input.squad.applicationIds.length === 0;
+
+  if (!input.restricted) {
+    // Unchanged from before squads existed: the environment axis alone limits this account.
+    if (squadEmpty) return UNRESTRICTED_APPLICATIONS;
+    return {
+      unrestricted: false,
+      wholeEnvironmentIds: [...new Set(input.ownEnvironmentIds)],
+      groupIds: [...new Set(input.squad.groupIds)],
+      applicationIds: [...new Set(input.squad.applicationIds)],
+    };
+  }
+
+  return {
+    unrestricted: false,
+    wholeEnvironmentIds: [],
+    groupIds: [...new Set([...input.ownGroupIds, ...input.squad.groupIds])],
+    applicationIds: [...new Set([...input.ownApplicationIds, ...input.squad.applicationIds])],
+  };
 }
 
 export class ApplicationAccessService {
@@ -88,20 +143,73 @@ export class ApplicationAccessService {
    */
   async accessFor(user: UserRow): Promise<ApplicationAccess> {
     if (user.role === "admin") return UNRESTRICTED_APPLICATIONS;
-    if (!user.applicationAccessRestricted) return UNRESTRICTED_APPLICATIONS;
 
-    // One round trip for both lists. Two queries to build one predicate would double the
-    // cost of every request made by a restricted account.
+    /*
+      One round trip for everything. Two or three queries to build one predicate would multiply
+      the cost of every request made by a restricted account.
+
+      The account's own grants are joined to its own environment grants here, so a group or
+      application in an estate it was never given is dropped before it reaches the predicate.
+      That used to happen for free -- the environment axis was applied separately and always
+      intersected -- but a squad can now bring an estate along for its own applications, and
+      without this join it would bring the account's own grants in that estate with it.
+    */
     const result = await this.deps.db.execute<Row<{ kind: string; id: string }>>(sql`
-      SELECT 'group' AS kind, group_id AS id FROM user_group WHERE user_id = ${user.id}::uuid
+      SELECT 'group' AS kind, ug.group_id AS id
+        FROM user_group ug
+        JOIN application_group g ON g.id = ug.group_id
+        JOIN user_environment ue ON ue.user_id = ug.user_id AND ue.environment_id = g.environment_id
+       WHERE ug.user_id = ${user.id}::uuid
       UNION ALL
-      SELECT 'application' AS kind, application_id AS id
-        FROM user_application WHERE user_id = ${user.id}::uuid
+      SELECT 'application' AS kind, ua.application_id AS id
+        FROM user_application ua
+        JOIN application a ON a.id = ua.application_id
+        JOIN user_environment ue ON ue.user_id = ua.user_id AND ue.environment_id = a.environment_id
+       WHERE ua.user_id = ${user.id}::uuid
+      UNION ALL
+      SELECT 'environment' AS kind, environment_id AS id
+        FROM user_environment WHERE user_id = ${user.id}::uuid
+      UNION ALL
+      SELECT 'squad_group' AS kind, sg.group_id AS id
+        FROM squad_member sm JOIN squad_group sg ON sg.squad_id = sm.squad_id
+       WHERE sm.user_id = ${user.id}::uuid
+      UNION ALL
+      SELECT 'squad_application' AS kind, sa.application_id AS id
+        FROM squad_member sm JOIN squad_application sa ON sa.squad_id = sm.squad_id
+       WHERE sm.user_id = ${user.id}::uuid
     `);
 
     const rows = rowsOf(result);
+    const of = (kind: string) => rows.filter((r) => r.kind === kind).map((r) => r.id);
+    return combineAccess({
+      restricted: user.applicationAccessRestricted,
+      ownEnvironmentIds: of("environment"),
+      ownGroupIds: of("group"),
+      ownApplicationIds: of("application"),
+      squad: { groupIds: of("squad_group"), applicationIds: of("squad_application") },
+    });
+  }
+
+  /** The squads an account is on, by id. */
+  async squadIdsForUser(userId: string): Promise<string[]> {
+    const result = await this.deps.db.execute<Row<{ squad_id: string }>>(
+      sql`SELECT squad_id FROM squad_member WHERE user_id = ${userId}::uuid`,
+    );
+    return rowsOf(result).map((r) => r.squad_id);
+  }
+
+  /** What these squads grant between them. */
+  async squadGrants(squadIds: readonly string[]): Promise<SquadGrants> {
+    if (squadIds.length === 0) return NO_SQUAD_GRANTS;
+    const result = await this.deps.db.execute<Row<{ kind: string; id: string }>>(sql`
+      SELECT 'group' AS kind, group_id AS id FROM squad_group
+       WHERE squad_id = ANY(${sql.param([...squadIds])}::uuid[])
+      UNION
+      SELECT 'application' AS kind, application_id AS id FROM squad_application
+       WHERE squad_id = ANY(${sql.param([...squadIds])}::uuid[])
+    `);
+    const rows = rowsOf(result);
     return {
-      unrestricted: false,
       groupIds: rows.filter((r) => r.kind === "group").map((r) => r.id),
       applicationIds: rows.filter((r) => r.kind === "application").map((r) => r.id),
     };
@@ -133,15 +241,45 @@ export class ApplicationAccessService {
     const groupIds = rows.filter((r) => r.kind === "group").map((r) => r.id);
     const applicationIds = rows.filter((r) => r.kind === "application").map((r) => r.id);
     const environmentIds = rows.filter((r) => r.kind === "environment").map((r) => r.id);
+    const squad = await this.squadGrants(await this.squadIdsForUser(userId));
 
     return {
       restricted,
       groupIds,
       applicationIds,
       visibleApplicationCount: restricted
-        ? await this.countVisible({ unrestricted: false, groupIds, applicationIds }, environmentIds)
+        ? await this.countVisible(
+            { unrestricted: false, groupIds, applicationIds, wholeEnvironmentIds: [] },
+            environmentIds,
+            squad,
+          )
         : null,
     };
+  }
+
+  /**
+   * The one expression for "this candidate reaches that application".
+   *
+   * The account's own grants intersect its own estates, exactly as before squads; a squad's
+   * grants are added on top with no estate condition, because the estate comes with them.
+   * Every scoring query below goes through this, so the count, the list and the gaps cannot
+   * disagree about what a squad contributes.
+   */
+  private reaches(
+    alias: string,
+    own: ApplicationAccess,
+    environmentIds: readonly string[],
+    squad: SquadGrants,
+  ): SQL {
+    const a = sql.raw(alias);
+    const viaOwn = sql`(${a}.environment_id = ANY(${sql.param([...environmentIds])}::uuid[])
+      AND ${visibleApplications(own, alias)})`;
+    if (squad.groupIds.length === 0 && squad.applicationIds.length === 0) return viaOwn;
+    const viaSquad = visibleApplications(
+      { unrestricted: false, wholeEnvironmentIds: [], ...squad },
+      alias,
+    );
+    return sql`(${viaOwn} OR ${viaSquad})`;
   }
 
   /**
@@ -160,12 +298,12 @@ export class ApplicationAccessService {
   private async countVisible(
     access: ApplicationAccess,
     environmentIds: readonly string[],
+    squad: SquadGrants = NO_SQUAD_GRANTS,
   ): Promise<number> {
     const result = await this.deps.db.execute<Row<{ n: number | string }>>(
       sql`SELECT count(*)::int AS n
             FROM application a
-           WHERE a.environment_id = ANY(${sql.param([...environmentIds])}::uuid[])
-             AND ${visibleApplications(access, "a")}`,
+           WHERE ${this.reaches("a", access, environmentIds, squad)}`,
     );
     return Number(rowsOf(result)[0]?.n ?? 0);
   }
@@ -173,9 +311,9 @@ export class ApplicationAccessService {
   /**
    * Scores a candidate grant set without storing it.
    *
-   * Takes the environment grants as an argument rather than reading them, so the screen can
-   * score ticks the administrator has not saved on either axis. The caller supplies the
-   * stored set when only the application axis is being edited.
+   * Takes the environment grants and the squads as arguments rather than reading them, so the
+   * screen can score ticks the administrator has not saved on any axis. The caller supplies the
+   * stored set for whichever axis is not being edited.
    *
    * Nothing here writes. The route is a POST only because the candidate does not fit in a
    * query string, and it records no audit row for the same reason.
@@ -183,26 +321,29 @@ export class ApplicationAccessService {
   async preview(
     input: Pick<PreviewUserApplicationAccess, "restricted" | "groupIds" | "applicationIds">,
     environmentIds: readonly string[],
+    squadIds: readonly string[] = [],
   ): Promise<ApplicationAccessPreview> {
     const access: ApplicationAccess = input.restricted
       ? {
           unrestricted: false,
           groupIds: [...new Set(input.groupIds)],
           applicationIds: [...new Set(input.applicationIds)],
+          wholeEnvironmentIds: [],
         }
       : UNRESTRICTED_APPLICATIONS;
+    const squad = await this.squadGrants(squadIds);
 
     const [reachableApplicationCount, reachable, blockedByEnvironment, emptyGroups] =
       await Promise.all([
-      this.countVisible(access, environmentIds),
-      this.listVisible(access, environmentIds, input.groupIds, input.applicationIds),
+      this.countVisible(access, environmentIds, squad),
+      this.listVisible(access, environmentIds, input.groupIds, input.applicationIds, squad, squadIds),
       /*
         Both lists are empty for an unrestricted account on purpose. It names no applications
         and no groups, so there is nothing for an estate to hold back and no group whose
         emptiness matters -- reporting either would be a warning about a grant nobody made.
       */
       input.restricted
-        ? this.environmentGaps(access, environmentIds)
+        ? this.environmentGaps(access, environmentIds, squad)
         : Promise.resolve<ApplicationAccessEnvironmentGap[]>([]),
       input.restricted
         ? this.emptyGroups(input.groupIds)
@@ -220,8 +361,8 @@ export class ApplicationAccessService {
    * an unrestricted account on a large estate cannot make the screen unusable. Deriving one
    * from the other would silently cap the count too.
    *
-   * `direct` and `viaGroups` are computed from the candidate grants being previewed, not from
-   * whatever is stored for the account -- the whole point of a preview is to score boxes
+   * `direct`, `viaGroups` and `viaSquads` are computed from the candidate being previewed, not
+   * from whatever is stored for the account -- the whole point of a preview is to score boxes
    * nobody has saved yet.
    */
   private async listVisible(
@@ -229,7 +370,10 @@ export class ApplicationAccessService {
     environmentIds: readonly string[],
     groupIds: readonly string[],
     applicationIds: readonly string[],
+    squad: SquadGrants,
+    squadIds: readonly string[],
   ): Promise<ReachableApplication[]> {
+    const ownEstate = sql`a.environment_id = ANY(${sql.param([...environmentIds])}::uuid[])`;
     const result = await this.deps.db.execute<
       Row<{
         id: string;
@@ -237,12 +381,14 @@ export class ApplicationAccessService {
         environment_name: string;
         direct: boolean;
         via_groups: string[] | null;
+        via_squads: string[] | null;
       }>
     >(sql`
       SELECT a.id,
              a.name,
              e.name AS environment_name,
-             (a.id = ANY(${sql.param([...applicationIds])}::uuid[])) AS direct,
+             -- An own grant only counts inside the account's own estates, as everywhere else.
+             (${ownEstate} AND a.id = ANY(${sql.param([...applicationIds])}::uuid[])) AS direct,
              /*
                FILTER rather than array_remove: the LEFT JOIN contributes one NULL row for an
                application in none of the granted groups, and array_agg would otherwise
@@ -252,20 +398,32 @@ export class ApplicationAccessService {
              COALESCE(
                array_agg(DISTINCT g.name) FILTER (WHERE g.id IS NOT NULL),
                '{}'
-             ) AS via_groups
+             ) AS via_groups,
+             COALESCE((
+               SELECT array_agg(DISTINCT s.name ORDER BY s.name)
+                 FROM squad s
+                WHERE s.id = ANY(${sql.param([...squadIds])}::uuid[])
+                  AND (
+                    EXISTS (SELECT 1 FROM squad_application sa
+                             WHERE sa.squad_id = s.id AND sa.application_id = a.id)
+                    OR EXISTS (SELECT 1 FROM squad_group sg
+                                 JOIN application_group_member sgm ON sgm.group_id = sg.group_id
+                                WHERE sg.squad_id = s.id AND sgm.application_id = a.id)
+                  )
+             ), '{}') AS via_squads
         FROM application a
         JOIN environment e ON e.id = a.environment_id
         /*
-          Joined only to the groups being previewed. Joining every group the application
-          belongs to would list groups the account was never granted, which reads as an
-          explanation of access it does not have.
+          Joined only to the groups being previewed, and only inside the account's own estates.
+          Joining every group the application belongs to would list groups the account was
+          never granted, which reads as an explanation of access it does not have.
         */
         LEFT JOIN application_group_member gm
                ON gm.application_id = a.id
               AND gm.group_id = ANY(${sql.param([...groupIds])}::uuid[])
+              AND ${ownEstate}
         LEFT JOIN application_group g ON g.id = gm.group_id
-       WHERE a.environment_id = ANY(${sql.param([...environmentIds])}::uuid[])
-         AND ${visibleApplications(access, "a")}
+       WHERE ${this.reaches("a", access, environmentIds, squad)}
        GROUP BY a.id, a.name, e.name
        ORDER BY a.name ASC
        LIMIT ${sql.raw(String(REACHABLE_APPLICATION_LIST_CAP))}
@@ -277,6 +435,7 @@ export class ApplicationAccessService {
       environmentName: row.environment_name,
       direct: row.direct === true,
       viaGroups: row.via_groups ?? [],
+      viaSquads: row.via_squads ?? [],
     }));
   }
 
@@ -289,12 +448,18 @@ export class ApplicationAccessService {
    *
    * An empty environment list correctly blocks everything, because `= ANY` over an empty
    * array is false and its negation is true -- which is the right answer for an account that
-   * has been granted no estates at all.
+   * has been granted no estates at all. An application a squad reaches anyway is not blocked,
+   * and is left out.
    */
   private async environmentGaps(
     access: ApplicationAccess,
     environmentIds: readonly string[],
+    squad: SquadGrants,
   ): Promise<ApplicationAccessEnvironmentGap[]> {
+    const squadReach =
+      squad.groupIds.length === 0 && squad.applicationIds.length === 0
+        ? sql`FALSE`
+        : visibleApplications({ unrestricted: false, wholeEnvironmentIds: [], ...squad }, "a");
     const result = await this.deps.db.execute<
       Row<{ environment_id: string; environment_name: string; application_count: number | string }>
     >(
@@ -304,6 +469,7 @@ export class ApplicationAccessService {
             JOIN environment e ON e.id = a.environment_id
            WHERE ${visibleApplications(access, "a")}
              AND NOT (a.environment_id = ANY(${sql.param([...environmentIds])}::uuid[]))
+             AND NOT ${squadReach}
            GROUP BY e.id, e.name
            ORDER BY count(*) DESC, e.name ASC`,
     );

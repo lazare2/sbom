@@ -26,9 +26,9 @@ appear on the dashboards, in the report, and in a "who is affected by CVE-X" sea
 | 9 | Vulnerability scanning (Grype) | ✅ done |
 | 10 | Monthly management report | ✅ done |
 
-All ten phases are implemented. Out of scope by design: any per-application or
-per-squad access restriction — every authenticated user can read every application,
-and the two roles are `admin` (writes) and `user` (reads).
+All ten phases are implemented. The two roles are `admin` (writes) and `user` (reads);
+a `user` is further narrowed by environment, by group and application grants, and by
+the squads they are on — see [Squads](#squads).
 
 ---
 
@@ -736,12 +736,13 @@ The split between the two pages runs along *who acts on it*. The overview ranks
 advisories**, because that is what gets fixed — usually once, centrally, clearing
 several applications at a stroke.
 
-**Application detail** has four tabs:
+**Application detail** has these tabs:
 
 | Tab | What it shows |
 |---|---|
 | Current components | The latest build's dependencies |
 | Latest build changes | Removed / version-changed / added against the previous build |
+| Vulnerabilities | *Findings* (opens on all packages; narrow to application dependencies or base image) and *Recommendations* — one upgrade target per package, see [Fix recommendations](#fix-recommendations). Shown only while scanning is on |
 | No longer used | Everything ever shipped that the current build does not contain, each with the build it was last seen in |
 | Scan history | Every build that submitted an SBOM, plus **Upload SBOM** and, for admins, per-build **Delete** |
 
@@ -810,13 +811,20 @@ Visible only to admins, at `/admin`.
   merge once, merge and record a permanent alias, or delete. *Merge always* is the
   one that fixes the cause rather than the occurrence: the alias redirects every
   future build posting that name.
-- **Users** — create accounts, change roles, deactivate, delete, and reset
-  passwords. The last active admin cannot be demoted, deactivated or deleted, and
-  an admin cannot do any of those to their own account.
+- **Users** — create accounts, record first and last names, change roles,
+  deactivate, delete, and reset passwords. The last active admin cannot be demoted,
+  deactivated or deleted, and an admin cannot do any of those to their own account.
+  The *No access yet* filter lists accounts that can sign in but reach nothing —
+  typically the ones single sign-on just created.
+- **Squads** — teams of people granted groups and applications together; see
+  [Squads](#squads).
 - **Attributes** — add, edit, hide, or delete the attribute definitions. Deleting
   one that applications still carry values for is refused with the count, and
   offers to purge those values as a separate, deliberate step.
-- **CI tokens** — mint and revoke ingest tokens. Environment-configured tokens are
+- **CI tokens** — mint, revoke and delete ingest tokens. Revoking keeps the row (and
+  its name); deleting removes it so the name can be reused. Scans record the token's
+  name as text, so their provenance survives the deletion. Personal API tokens on the
+  *API* page can be deleted the same way. Environment-configured tokens are
   listed too, marked as such, because listing only database rows would report "no
   tokens" on a deployment where CI is authenticating perfectly well.
 - **Monthly report** — generate the management report, switch scheduled sending on
@@ -871,6 +879,39 @@ password has by construction been seen by someone other than its owner, often vi
 a chat message. Re-entering the issued password as the "new" one is rejected for
 the same reason. Resetting a password also revokes every live session for that
 account immediately — which is why sessions are Postgres-backed rather than JWTs.
+
+### Accounts created by single sign-on
+
+With **Create an account the first time somebody signs in** ticked on the
+Authentication tab (the default), a person your identity provider authenticates who
+has no account here gets one on the spot: a read-only `user`, narrowed to nothing, in
+no environment. They can sign in and are told they have no access yet; nothing is
+visible until an admin grants applications or adds them to a squad. First and last
+name come from the `given_name`/`family_name` claims, or are split from `name` when
+the provider sends only that (Entra's default), and are filled only while empty, so a
+correction typed by an admin is never overwritten. The creation is audited as
+`user.provision` with no actor.
+
+An optional domain list limits which addresses get an account; anything outside it,
+or a token with no address, goes to the access-request queue as before. An address
+already held by a *password* account is refused (`local_account`) rather than taken
+over — converting it is an admin decision. With the box unticked, the old
+pre-provisioning behaviour applies unchanged.
+
+### Squads
+
+A squad is a team of people with a name, an optional team email and a set of granted
+groups and applications. Every member reaches what the squad is granted **in addition
+to** their own grants, and the environments those applications live in come along
+with them — a squad owning one production service opens that service, not the rest of
+production. Adding or removing a member is the whole change; no application has to be
+re-ticked. Group grants follow the group, so an application added to it later is
+visible to every member.
+
+Squads are managed under **Admin → Squads**, or from the person's side in their
+*Edit Access* dialog, whose preview names the squad each application is reached
+through. The team email is stored for reporting about the squad's applications; nothing
+is sent to it yet.
 
 ---
 
@@ -1137,6 +1178,39 @@ version, one application, or the whole estate. Accepted findings are **excluded 
 count and ranking but never deleted** — a dashboard that only grows is one people stop
 reading, and a silently dropped finding is one nobody can audit later. They stay listed
 under Accepted risks with who accepted them and why.
+
+### Fix recommendations
+
+Each finding carries its own *fixed in*, so a package with five advisories offers five
+versions. The **Recommendations** view on an application's Vulnerabilities tab turns
+those into one target per package (grouped by ecosystem and name, across every version
+the build ships):
+
+1. **Minimum** — for each advisory, the lowest fix above the installed version; the
+   target is the highest of those, and never below a version already shipped. Three
+   advisories fixed in 1.2, 2.3 and 1.8 give *at least 2.3*.
+2. **Checked** — that version is put to the scanner as if it were a package (its purl
+   with the version substituted, qualifiers such as `distro=` kept). If it is itself
+   affected and a later fix exists, the next version is checked, up to five rounds. The
+   row then reads *2.8 — no known vulnerabilities*, with *not 2.3 — it is affected too*
+   beneath it, and **Why** shows the chain.
+
+Statuses: *no known vulnerabilities*, *N unfixed remain* (the best version still carries
+advisories with no fix), *not checked*, and *no fix published*. Packages with no fix are
+hidden behind a toggle, since on a base image they are usually most of the list. The
+scope filter (show all / application dependencies / base image) is shared with the
+Findings view, and accepted risks are excluded as everywhere else.
+
+The table is drawn first from stored findings, then the checked answer replaces it.
+Checks are cached in `fix_candidate_check`, keyed on the purl and the database
+watermark, so a new database re-checks and an unchanged one answers instantly. The first
+check of a large base image costs a scanner run per round (about 45 s for 76 Debian
+packages here); at most 400 packages are checked per request. A check holds the database
+open, so a database replacement waits for it, exactly as for a sweep.
+
+Version ordering is a cross-ecosystem heuristic (numeric runs, pre-release words, Debian
+`~` and epochs); the scanner check is what catches its mistakes. These are
+recommendations about vulnerabilities, not about compatibility.
 
 ### Disabled means "not assessed", never "zero"
 
@@ -1500,6 +1574,7 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `GET /vulnerabilities` | Estate-wide advisory search — "who is affected by CVE-X". 409 when disabled |
 | `GET /vulnerabilities/:id` | One advisory's blast radius: applications and the packages carrying it |
 | `GET /applications/:id/vulnerabilities` | Findings for an application's current build, with the app/base-image split |
+| `GET /applications/:id/vulnerabilities/recommendations` | One upgrade target per vulnerable package (`scope=all\|app\|os`, `verify=true\|false`) |
 | `GET /scans/:id/vulnerabilities` | Findings for one build, evaluated against today's database |
 | `GET /malicious` | Malicious-package findings. **409** `malicious_detection_disabled` when off |
 | `GET /malicious/:id` | One report, with every application it ever reached |
@@ -1523,7 +1598,10 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `GET/POST/PATCH/DELETE /admin/users[/:id]` | Account management |
 | `POST /admin/users/:id/reset-password` | Issue a new password, returned once |
 | `POST/PATCH/DELETE /admin/attribute-definitions[/:id]` | Attribute schema |
-| `GET/POST/DELETE /admin/ingest-tokens[/:id]` | CI credentials |
+| `GET/POST/DELETE /admin/ingest-tokens[/:id]` | CI credentials. DELETE revokes; `?permanent=true` deletes and frees the name |
+| `GET/POST/PATCH/DELETE /admin/squads[/:id]` | Squads |
+| `PUT /admin/squads/:id/members`, `PUT /admin/squads/:id/access` | A squad's members, and its granted groups and applications |
+| `GET/PUT /admin/users/:id/squads` | One account's squads |
 | `GET /admin/vuln/status` | Scanner, database, schedule and coverage, reported separately |
 | `PATCH /admin/vuln/settings` | Enable/disable scanning; set the check interval |
 | `POST /admin/vuln/update` | Update the database now. 200 with `unreachable` when offline |
@@ -1658,9 +1736,6 @@ At roughly 1000 applications building a few times a day:
   be carried into a meeting and acted on as though it meant something.
 - **Alerting.** No email, no webhooks. The platform is a place to look, not a thing that
   interrupts you — consistent with there being no outbound mail anywhere in it.
-- **Per-application or per-squad access control.** Every authenticated user sees
-  every application. Deferred to the LDAP phase; nothing in the schema makes an
-  `access_grant` table awkward to add.
 - **Elasticsearch or a search service.** Postgres with a trigram index is the
   right size for this.
 - **Email to user accounts.** No invites, notifications, or password-reset links,
@@ -1668,4 +1743,6 @@ At roughly 1000 applications building a few times a day:
   admin-driven; see [Accounts and passwords](#accounts-and-passwords). The only
   outbound mail is the monthly report, to a recipient list configured on purpose,
   and a deployment that leaves it unconfigured never connects to a relay.
-- **Self-service signup.** Accounts are created by an admin only.
+- **Self-service signup with access.** Password accounts are created by an admin
+  only. Single sign-on can create an account on first sign-in, but that account
+  reaches nothing until an admin grants it something or adds it to a squad.

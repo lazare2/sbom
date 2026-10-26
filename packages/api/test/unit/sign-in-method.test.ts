@@ -72,8 +72,31 @@ function harness(target: Row, otherLocalAdmins = 1) {
         };
       },
     }),
-    // Only the last-local-admin count reaches this.
-    execute: async () => ({ rows: [{ count: otherLocalAdmins }] }),
+    /*
+      Two queries reach this: the last-local-admin count, and the summary re-read once the
+      conversion is written. One row answers both -- each reads only its own columns.
+    */
+    execute: async () => ({
+      rows: [
+        {
+          count: otherLocalAdmins,
+          id: target.id,
+          email: target.email,
+          first_name: null,
+          last_name: null,
+          role: target.role,
+          auth_provider: patch?.authProvider ?? target.authProvider,
+          is_active: target.isActive,
+          must_change_password: false,
+          application_access_restricted: target.applicationAccessRestricted,
+          last_login_at: null,
+          created_at: target.createdAt,
+          active_sessions: 0,
+          squads: [],
+          has_access: true,
+        },
+      ],
+    }),
   } as unknown as Database;
 
   const revokeAllForUser = vi.fn(async () => 3);

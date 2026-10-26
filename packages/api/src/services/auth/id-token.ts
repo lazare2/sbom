@@ -67,6 +67,39 @@ export interface VerifiedIdentity {
   /** Best available address, for matching a pre-created account. May be absent. */
   email: string | null;
   name: string | null;
+  /**
+   * The person's given and family names, for an account created on first sign-in.
+   *
+   * From `given_name` and `family_name` where the provider sends them. Entra sends those only
+   * when they are configured as optional claims, so the display name is split as a fallback --
+   * see `splitDisplayName` for what that can and cannot get right.
+   */
+  givenName: string | null;
+  familyName: string | null;
+}
+
+/**
+ * A best guess at given and family name from a display name.
+ *
+ * "Surname, Given" is read as the directory export convention it is. Otherwise the last word is
+ * taken as the family name, which is right for most Western-order names and wrong for some --
+ * which is acceptable only because the result is a label an administrator can correct, never
+ * an identity anything is matched on.
+ */
+export function splitDisplayName(name: string | null): { given: string | null; family: string | null } {
+  const trimmed = name?.trim() ?? "";
+  if (trimmed === "") return { given: null, family: null };
+
+  const comma = trimmed.indexOf(",");
+  if (comma > 0) {
+    const family = trimmed.slice(0, comma).trim();
+    const given = trimmed.slice(comma + 1).trim();
+    return { given: given || null, family: family || null };
+  }
+
+  const words = trimmed.split(/\s+/);
+  if (words.length === 1) return { given: words[0]!, family: null };
+  return { given: words.slice(0, -1).join(" "), family: words[words.length - 1]! };
 }
 
 /**
@@ -104,6 +137,8 @@ interface JwtPayload {
   email?: unknown;
   preferred_username?: unknown;
   name?: unknown;
+  given_name?: unknown;
+  family_name?: unknown;
 }
 
 function decodeSegment(segment: string, what: string): Record<string, unknown> {
@@ -234,9 +269,22 @@ export function verifyIdToken(token: string, options: VerifyOptions): VerifiedId
         ? payload.preferred_username
         : null;
 
+  const text = (value: unknown): string | null =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  const name = text(payload.name);
+  const claimedGiven = text(payload.given_name);
+  const claimedFamily = text(payload.family_name);
+  // Both claims or neither: half a pair from the provider and half guessed would mix sources.
+  const split =
+    claimedGiven !== null || claimedFamily !== null
+      ? { given: claimedGiven, family: claimedFamily }
+      : splitDisplayName(name);
+
   return {
     subject,
     email: email?.toLowerCase() ?? null,
-    name: typeof payload.name === "string" && payload.name !== "" ? payload.name : null,
+    name,
+    givenName: split.given,
+    familyName: split.family,
   };
 }

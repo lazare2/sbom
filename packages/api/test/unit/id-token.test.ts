@@ -1,6 +1,6 @@
 import { createHmac, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { IdTokenError, verifyIdToken } from "../../src/services/auth/id-token.js";
+import { IdTokenError, splitDisplayName, verifyIdToken } from "../../src/services/auth/id-token.js";
 
 /**
  * The single check standing between a stranger and a session.
@@ -196,5 +196,38 @@ describe("key rotation", () => {
     // routine rotation into an outage nobody could explain.
     const token = signToken(claims(), { header: { kid: "key-published-after-we-cached" } });
     expect(reasonOf(() => verify(token, { keys: [JWK] }))).toBe("unknown_key");
+  });
+});
+
+/**
+ * Names, for the account a first sign-in creates.
+ *
+ * Not identity -- nothing is matched on them -- but they are what the user list shows, and a
+ * list of addresses is not how anybody finds a colleague.
+ */
+describe("reading a person's name", () => {
+  it("prefers the provider's own given and family name claims", () => {
+    const identity = verify(signToken(claims({ given_name: "Lazare", family_name: "Shavgulidze" })));
+    expect(identity).toMatchObject({ givenName: "Lazare", familyName: "Shavgulidze" });
+  });
+
+  it("splits the display name when the provider sends no name claims", () => {
+    // Entra's default: `name` only, unless optional claims are configured.
+    expect(verify(signToken(claims()))).toMatchObject({
+      givenName: "Lazare",
+      familyName: "Shavgulidze",
+    });
+  });
+
+  it("never mixes a claimed half with a guessed half", () => {
+    const identity = verify(signToken(claims({ given_name: "Lazare" })));
+    expect(identity).toMatchObject({ givenName: "Lazare", familyName: null });
+  });
+
+  it("reads the directory-export order, and leaves a single word as a given name", () => {
+    expect(splitDisplayName("Shavgulidze, Lazare")).toEqual({ given: "Lazare", family: "Shavgulidze" });
+    expect(splitDisplayName("Madonna")).toEqual({ given: "Madonna", family: null });
+    expect(splitDisplayName("Mary Ann Smith")).toEqual({ given: "Mary Ann", family: "Smith" });
+    expect(splitDisplayName("   ")).toEqual({ given: null, family: null });
   });
 });

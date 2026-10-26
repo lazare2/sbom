@@ -137,6 +137,10 @@ interface StoredOidc {
   enabled: boolean;
   securityGroupName: string | null;
   secretExpiresOn: string | null;
+  /** Create an account for a directory identity this platform has never seen. */
+  provisionOnSignIn: boolean;
+  /** Domains an account may be created for. Empty means any the provider vouches for. */
+  allowedEmailDomains: string[];
   /** The last connection test, so the screen opens with a verdict rather than a blank. */
   lastTest: OidcDiagnosis | null;
 }
@@ -156,6 +160,13 @@ const DEFAULT_OIDC: StoredOidc = {
   enabled: false,
   securityGroupName: null,
   secretExpiresOn: null,
+  /*
+    On, including for a connection stored before the field existed: the account it creates
+    reaches nothing until an administrator grants something, so the default exposes nothing
+    and spares every new colleague a round trip just to exist. See the note in `schemas/oidc`.
+  */
+  provisionOnSignIn: true,
+  allowedEmailDomains: [],
   lastTest: null,
 };
 
@@ -596,6 +607,12 @@ export class SettingsService {
       if (typeof raw.enabled === "boolean") value.enabled = raw.enabled;
       if (typeof raw.securityGroupName === "string") value.securityGroupName = raw.securityGroupName;
       if (typeof raw.secretExpiresOn === "string") value.secretExpiresOn = raw.secretExpiresOn;
+      if (typeof raw.provisionOnSignIn === "boolean") value.provisionOnSignIn = raw.provisionOnSignIn;
+      if (Array.isArray(raw.allowedEmailDomains)) {
+        value.allowedEmailDomains = raw.allowedEmailDomains.filter(
+          (d): d is string => typeof d === "string" && d !== "",
+        );
+      }
       if (raw.lastTest && typeof raw.lastTest === "object") {
         value.lastTest = raw.lastTest as OidcDiagnosis;
       }
@@ -627,6 +644,8 @@ export class SettingsService {
         enabled: stored.enabled,
         securityGroupName: stored.securityGroupName,
         secretExpiresOn: stored.secretExpiresOn,
+        provisionOnSignIn: stored.provisionOnSignIn,
+        allowedEmailDomains: stored.allowedEmailDomains,
       },
       lastTest: stored.lastTest,
     };
@@ -665,8 +684,24 @@ export class SettingsService {
       enabled: input.enabled,
       securityGroupName: input.securityGroupName ?? null,
       secretExpiresOn: input.secretExpiresOn ?? null,
+      provisionOnSignIn: input.provisionOnSignIn,
+      allowedEmailDomains: [...new Set(input.allowedEmailDomains)],
       lastTest: null,
     });
+  }
+
+  /**
+   * Whether, and for which addresses, a directory sign-in may create an account.
+   *
+   * Read on the sign-in path, which is why it is its own small accessor rather than the whole
+   * settings object: the callback has no business holding the client secret's envelope.
+   */
+  async oidcProvisioning(): Promise<{ enabled: boolean; allowedEmailDomains: string[] }> {
+    const stored = await this.getOidc();
+    return {
+      enabled: stored.provisionOnSignIn,
+      allowedEmailDomains: stored.allowedEmailDomains,
+    };
   }
 
   /** Records what the test found, so the screen knows which configuration it describes. */

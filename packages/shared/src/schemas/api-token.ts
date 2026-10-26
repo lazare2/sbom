@@ -133,3 +133,14 @@ export const API_TOKEN_PREFIX = "Bearer ";
  * `sbp` for "SBOM platform"; the `_` keeps it from running into the random part.
  */
 export const API_TOKEN_SECRET_PREFIX = "sbp_";
+
+/**
+ * `?permanent=true` on a token DELETE removes the row instead of revoking it.
+ *
+ * A query flag on the existing route rather than a new one, so every script already calling
+ * DELETE to revoke keeps doing exactly that. Revoking stays the default because it keeps the
+ * row as a record; deleting is the deliberate choice, made to free a name for reuse.
+ */
+export const tokenDeleteQuerySchema = z.object({
+  permanent: z.enum(["true", "false"]).transform((v) => v === "true").default("false"),
+});

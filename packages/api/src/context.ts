@@ -1,7 +1,8 @@
 import type { FastifyBaseLogger } from "fastify";
 import { getConfig, type Config } from "./config.js";
 import { getDb, type Database } from "./db/client.js";
-import { AccessRequestService } from "./modules/auth/access-request.service.js";
+import { AccessRequestService } from "./modules/auth/access-request.service.js";
+
 import { ApiTokenService } from "./modules/auth/api-token.service.js";
 import { AuthService } from "./modules/auth/auth.service.js";
 import { AuthProviderRegistry } from "./modules/auth/provider.js";
@@ -19,6 +20,7 @@ import { ComponentsService } from "./modules/components/components.service.js";
 import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
+import { SquadsService } from "./modules/squads/squads.service.js";
 import { ScansAdminService } from "./modules/scans/scans.admin.service.js";
 import { ExportService } from "./modules/exports/export.service.js";
 import { MaliciousService } from "./modules/malicious/malicious.service.js";
@@ -40,6 +42,7 @@ import { SnapshotService } from "./modules/reports/snapshot.service.js";
 import { ScansService } from "./modules/scans/scans.service.js";
 import { SettingsService } from "./modules/settings/settings.service.js";
 import { SweepService } from "./modules/vulnerabilities/sweep.service.js";
+import { FixAdvisorService } from "./modules/vulnerabilities/fix-advisor.js";
 import { VulnDbService } from "./modules/vulnerabilities/vuln-db.service.js";
 import { VulnWorker } from "./modules/vulnerabilities/vuln-worker.js";
 import { VulnerabilityService } from "./modules/vulnerabilities/vulnerability.service.js";
@@ -67,7 +70,8 @@ export interface AppContext {
   providers: AuthProviderRegistry;
   sessions: SessionService;
   auth: AuthService;
-  accessRequests: AccessRequestService;
+  accessRequests: AccessRequestService;
+
   apiTokens: ApiTokenService;
   ingestTokens: IngestTokenService;
   ingestion: IngestionService;
@@ -113,6 +117,7 @@ export interface AppContext {
   vulnerabilities: VulnerabilityService;
   vulnDb: VulnDbService;
   sweep: SweepService;
+  fixAdvisor: FixAdvisorService;
   vulnWorker: VulnWorker;
   /*
    * Malicious-package detection.
@@ -138,6 +143,7 @@ export interface AppContext {
   adminUsers: AdminUsersService;
   adminApplications: AdminApplicationsService;
   adminGroups: GroupsAdminService;
+  squads: SquadsService;
   adminScans: ScansAdminService;
   adminMalicious: MaliciousAdminService;
   attributeDefinitions: AttributeDefinitionsService;
@@ -191,7 +197,23 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   */
   const apiTokens = new ApiTokenService({ db, logger });
 
-  const auth = new AuthService({ db, config, providers, sessions, accessRequests, logger });
+  // Needs only the pool, and the sign-in path records the accounts it provisions through it.
+  const audit = new AuditService({ db });
+
+  const auth = new AuthService({
+    db,
+    config,
+    providers,
+    sessions,
+    accessRequests,
+    logger,
+    audit,
+    /*
+      A thunk, because `settings` is built further down with the read side. It is only called
+      on a sign-in, long after this function has returned.
+    */
+    provisioning: () => settings.oidcProvisioning(),
+  });
 
   const ingestTokens = new IngestTokenService({ db, config });
   const ingestion = new IngestionService({ db, blobStore, logger });
@@ -280,7 +302,10 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     settings,
     // Annotated: without an explicit return type TypeScript tries to infer it through
     // the mutual reference and gives up with TS7022.
-    scanBusy: (): boolean => sweep.isRunning,
+    //
+    // A fix-recommendation check holds the database open exactly as a sweep does, so it
+    // blocks a replacement for the same reason.
+    scanBusy: (): boolean => sweep.isRunning || fixAdvisor.isChecking,
   });
   const sweep = new SweepService({
     db,
@@ -291,6 +316,13 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     dbReplacing: (): boolean => vulnDb.replacingDatabase,
   });
   const vulnWorker = new VulnWorker({ settings, vulnDb, sweep, logger });
+  const fixAdvisor = new FixAdvisorService({
+    db,
+    scanner,
+    provider: () => settings.vulnProvider(),
+    dbReplacing: (): boolean => vulnDb.replacingDatabase,
+    logger,
+  });
 
   /*
    * Constructed after `settings` and `mailer`, which both feed it, and after `sweep` only for
@@ -329,12 +361,12 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     logger,
   });
 
-  // Write side.
-  const audit = new AuditService({ db });
+  // Write side. (`audit` is built above, with the auth service that also writes to it.)
   const apiErrors = new ApiErrorService({ db });
   const adminUsers = new AdminUsersService({ db, sessions, audit, environments });
   const adminApplications = new AdminApplicationsService({ db, audit, applications });
   const adminGroups = new GroupsAdminService({ db, audit, groups });
+  const squads = new SquadsService({ db, audit });
   const adminMalicious = new MaliciousAdminService({
     db,
     audit,
@@ -377,6 +409,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     vulnerabilities,
     vulnDb,
     sweep,
+    fixAdvisor,
     vulnWorker,
     maliciousFeed,
     maliciousMatch,
@@ -389,6 +422,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     adminUsers,
     adminApplications,
     adminGroups,
+    squads,
     adminScans,
     adminMalicious,
     attributeDefinitions,

@@ -109,3 +109,9 @@ export const STATUS_LABELS: Record<string, string> = {
   inactive: "Inactive",
   pending_confirmation: "Unconfirmed",
 };
+
+/** "First Last", or whichever half exists, or null when the account has no name at all. */
+export function displayName(u: { firstName: string | null; lastName: string | null }): string | null {
+  const full = [u.firstName, u.lastName].filter((part) => part).join(" ");
+  return full === "" ? null : full;
+}

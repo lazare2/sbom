@@ -190,4 +190,23 @@ export class IngestTokenService {
       .returning({ id: ingestToken.id });
     return rows.length > 0;
   }
+
+  /**
+   * Removes the row outright, active or not, and frees its name.
+   *
+   * Revoking keeps the row so a list of tokens stays a history -- and keeps its name taken,
+   * because names are unique. That made "rotate the Jenkins token" mean inventing `jenkins-2`,
+   * then `jenkins-3`. Deleting is the way to reuse a name.
+   *
+   * Nothing else points at this row: a scan records the token's *name* as text, not its id, so
+   * every build it submitted keeps saying which token sent it after the row is gone.
+   */
+  async remove(id: string): Promise<{ name: string; wasActive: boolean } | null> {
+    const rows = await this.deps.db
+      .delete(ingestToken)
+      .where(eq(ingestToken.id, id))
+      .returning({ name: ingestToken.name, isActive: ingestToken.isActive });
+    const row = rows[0];
+    return row ? { name: row.name, wasActive: row.isActive } : null;
+  }
 }

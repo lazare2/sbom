@@ -37,6 +37,8 @@ const SSO_FAILURES: Record<string, string> = {
   inactive: "This account has been deactivated. Contact an administrator.",
   identity_conflict:
     "An account exists for your address but is already linked to a different identity. Contact an administrator.",
+  local_account:
+    "An account exists for your address, but it signs in with a password. Use the password sign-in, or ask an administrator to switch it to your organisation account.",
 };
 
 /** Which of the two ways in is on screen. */

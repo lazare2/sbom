@@ -60,8 +60,15 @@ export interface FindingsFilters {
   page: number;
 }
 
+/*
+  Opens on everything. It used to open on application dependencies alone, which left the
+  reader looking at a short list with no sign that the base image -- usually most of the
+  findings -- had been filtered out before they arrived. Starting from the whole picture and
+  narrowing is the order people actually read in; the split is one click away, and the
+  breakdown tiles above keep the two halves apart regardless.
+*/
 export const DEFAULT_FINDINGS_FILTERS: FindingsFilters = {
-  scope: "app",
+  scope: "all",
   sortBy: findingSort.defaultField,
   sortDir: findingSort.defaultDirection,
   severity: "",
@@ -127,6 +134,13 @@ export function BreakdownTiles({ breakdown }: { breakdown: VulnBreakdown }) {
   );
 }
 
+/** The scope choices, shared with the recommendations view so the two read alike. */
+export const FINDINGS_SCOPE_OPTIONS: Array<{ value: FindingsFilters["scope"]; label: string }> = [
+  { value: "all", label: "Show all" },
+  { value: "app", label: "Application dependencies" },
+  { value: "os", label: "Base image and runtimes" },
+];
+
 export function FindingsFilterBar({
   filters,
   onChange,
@@ -140,11 +154,7 @@ export function FindingsFilterBar({
         value={filters.scope}
         onChange={(scope) => onChange({ scope: scope as FindingsFilters["scope"], page: 1 })}
         ariaLabel="Package scope"
-        options={[
-          { value: "app", label: "Application dependencies" },
-          { value: "os", label: "Base image and runtimes" },
-          { value: "all", label: "Everything" },
-        ]}
+        options={FINDINGS_SCOPE_OPTIONS}
       />
       <Select
         value={filters.severity}

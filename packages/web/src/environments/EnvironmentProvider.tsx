@@ -139,9 +139,14 @@ export function EnvironmentProvider({ children }: { children: ReactNode }) {
     return (
       <div className="mx-auto max-w-[1600px] px-5 py-6">
         <Card>
+          {/*
+            Worded for the person most likely to land here now: somebody whose account was
+            created by their first organisation sign-in and who has been given nothing yet.
+            Telling them they are in, and what happens next, beats a bare "no environments".
+          */}
           <EmptyState
-            title="No environments"
-            hint="This account has not been granted access to any environment yet. An administrator can grant one from Admin → Users."
+            title="You're signed in, but have no access yet"
+            hint="Your account exists, but it has not been given access to any applications. An administrator grants access from Admin → Users, or by adding you to your team's squad. Once they have, reload this page."
           />
         </Card>
       </div>

@@ -30,6 +30,8 @@ const IDENTITY: VerifiedIdentity = {
   subject: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
   email: "lazare.shavgulidze@bog.ge",
   name: "Lazare Shavgulidze",
+  givenName: "Lazare",
+  familyName: "Shavgulidze",
 };
 
 /**

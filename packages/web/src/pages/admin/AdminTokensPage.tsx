@@ -2,7 +2,11 @@ import { useState } from "react";
 import type { IngestTokenSummary } from "@sbom/shared";
 import { useClientSort } from "../../lib/useSort.ts";
 import { formatDate, formatRelative } from "../../lib/format.ts";
-import { useCreateIngestToken, useRevokeIngestToken } from "../../lib/mutations.ts";
+import {
+  useCreateIngestToken,
+  useDeleteIngestToken,
+  useRevokeIngestToken,
+} from "../../lib/mutations.ts";
 import { useIngestTokens } from "../../lib/queries.ts";
 import {
   Badge,
@@ -49,7 +53,10 @@ const TOKEN_COLUMNS = {
 export function AdminTokensPage() {
   const tokens = useIngestTokens();
   const revoke = useRevokeIngestToken();
+  const remove = useDeleteIngestToken();
   const [createOpen, setCreateOpen] = useState(false);
+  /** The token awaiting confirmation of deletion, held whole so the dialog can name it. */
+  const [deleteTarget, setDeleteTarget] = useState<IngestTokenSummary | null>(null);
   const [actionError, setActionError] = useState<unknown>(null);
 
   const sort = useClientSort(
@@ -175,11 +182,30 @@ export function AdminTokensPage() {
                     </Td>
                     <Td>{token.createdAt ? formatDate(token.createdAt) : "—"}</Td>
                     <Td align="right">
-                      {token.source === "db" && token.isActive ? (
-                        <Button size="sm" variant="ghost" onClick={() => void handleRevoke(token)} disabled={revoke.isPending}>
-                          Revoke
-                        </Button>
-                      ) : null}
+                      <div className="flex justify-end gap-1.5">
+                        {token.source === "db" && token.isActive ? (
+                          <Button size="sm" variant="ghost" onClick={() => void handleRevoke(token)} disabled={revoke.isPending}>
+                            Revoke
+                          </Button>
+                        ) : null}
+                        {/*
+                          Offered on every database token, revoked or not. Revoking keeps the
+                          row and its name; deleting is how a name such as "jenkins" is freed
+                          to be used again for the replacement.
+                        */}
+                        {token.source === "db" ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              remove.reset();
+                              setDeleteTarget(token);
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        ) : null}
+                      </div>
                     </Td>
                   </Tr>
                 ))}
@@ -190,6 +216,47 @@ export function AdminTokensPage() {
       </Card>
 
       <CreateTokenModal open={createOpen} onClose={() => setCreateOpen(false)} />
+
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete CI token"
+        footer={
+          <>
+            <Button onClick={() => setDeleteTarget(null)} disabled={remove.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={remove.isPending}
+              onClick={() => {
+                if (!deleteTarget?.id) return;
+                remove.mutate(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) });
+              }}
+            >
+              {remove.isPending ? "Deleting…" : "Delete token"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm text-text-muted">
+          <FormError error={remove.error} />
+          <p>
+            Deletes <strong className="text-text-base">{deleteTarget?.name}</strong> permanently, so
+            the name can be used for a new token.
+          </p>
+          {deleteTarget?.isActive ? (
+            <p className="text-warn">
+              This token is still active. Any pipeline using it will be refused from its next
+              upload.
+            </p>
+          ) : null}
+          <p>
+            Builds it already submitted keep showing its name. The deletion is recorded in the audit
+            log.
+          </p>
+        </div>
+      </Modal>
     </>
   );
 }

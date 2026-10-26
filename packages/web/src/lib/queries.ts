@@ -57,6 +57,9 @@ import type {
   PlatformSettings,
   ReportRunSummary,
   ReportSettings,
+  FixRecommendationReport,
+  SquadDetail,
+  SquadSummary,
 } from "@sbom/shared";
 import type { componentSearchSort } from "@sbom/shared";
 import { api, toQueryString } from "./api.ts";
@@ -145,6 +148,11 @@ export const queryKeys = {
     ["applications", id, "vulnerabilities", params] as const,
   scanVulnerabilities: (id: string, params: Record<string, unknown>) =>
     ["scans", id, "vulnerabilities", params] as const,
+  fixRecommendations: (id: string, params: Record<string, unknown>) =>
+    ["applications", id, "vulnerabilities", "recommendations", params] as const,
+  squads: ["admin", "squads"] as const,
+  squad: (id: string) => ["admin", "squads", id] as const,
+  userSquads: (id: string) => ["admin", "user-squads", id] as const,
 };
 
 // --- auth ------------------------------------------------------------------
@@ -1018,6 +1026,75 @@ export function useScanVulnerabilities(
     queryFn: () => api.get<FindingsResponse>(`/scans/${id}/vulnerabilities${toQueryString(params)}`),
     enabled: Boolean(id) && enabled,
     placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * Fix recommendations for an application's current build, in two passes.
+ *
+ * The unverified pass is a single query and draws the table at once. The verified pass may
+ * run the scanner over every recommended version the first time a build is opened, which can
+ * take most of a minute on a large base image -- so the screen shows the first answer and
+ * swaps in the second when it lands, rather than leaving a blank page for that long.
+ */
+export function useFixRecommendations(id: string | undefined, scope: string, enabled = true) {
+  const base = useQuery({
+    queryKey: queryKeys.fixRecommendations(id ?? "", { scope, verify: false }),
+    queryFn: () =>
+      api.get<FixRecommendationReport>(
+        `/applications/${id}/vulnerabilities/recommendations${toQueryString({ scope, verify: "false" })}`,
+      ),
+    enabled: Boolean(id) && enabled,
+    placeholderData: (previous) => previous,
+  });
+  const verified = useQuery({
+    queryKey: queryKeys.fixRecommendations(id ?? "", { scope, verify: true }),
+    queryFn: () =>
+      api.get<FixRecommendationReport>(
+        `/applications/${id}/vulnerabilities/recommendations${toQueryString({ scope, verify: "true" })}`,
+      ),
+    enabled: Boolean(id) && enabled,
+    // Checked versions change only when the database does; re-asking on every window focus
+    // would restart a scanner run for nothing.
+    staleTime: 5 * 60 * 1000,
+  });
+  return {
+    data: verified.data ?? base.data,
+    verifying: verified.isFetching && !verified.data,
+    verifyError: verified.error,
+    isLoading: base.isLoading && !verified.data,
+    error: base.error,
+    refetch: () => {
+      void base.refetch();
+      void verified.refetch();
+    },
+  };
+}
+
+// --- squads -------------------------------------------------------------------
+
+export function useSquads() {
+  return useQuery({
+    queryKey: queryKeys.squads,
+    queryFn: () => api.get<{ squads: SquadSummary[] }>("/admin/squads"),
+  });
+}
+
+export function useSquad(id: string | null) {
+  return useQuery({
+    queryKey: queryKeys.squad(id ?? ""),
+    queryFn: () => api.get<{ squad: SquadDetail }>(`/admin/squads/${id}`),
+    enabled: id !== null,
+  });
+}
+
+/** The squads one account is on. Admin only. */
+export function useUserSquads(id: string | null) {
+  return useQuery({
+    queryKey: queryKeys.userSquads(id ?? ""),
+    queryFn: () =>
+      api.get<{ squads: Array<{ id: string; name: string }> }>(`/admin/users/${id}/squads`),
+    enabled: id !== null,
   });
 }
 

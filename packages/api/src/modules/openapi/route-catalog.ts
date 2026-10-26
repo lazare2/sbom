@@ -8,6 +8,7 @@ import {
   createApplicationRequestSchema,
   createGroupRequestSchema,
   createIngestTokenRequestSchema,
+  createSquadSchema,
   createSuppressionSchema,
   createUserRequestSchema,
   loginRequestSchema,
@@ -18,12 +19,16 @@ import {
   resolveAccessRequestSchema,
   setGroupMembersRequestSchema,
   setSignInMethodSchema,
+  setSquadAccessSchema,
+  setSquadMembersSchema,
   setUserApplicationAccessSchema,
+  setUserSquadsSchema,
   setUserEnvironmentsRequestSchema,
   testOidcConnectionSchema,
   updateApplicationRequestSchema,
   updateAttributeDefinitionSchema,
   updateGroupRequestSchema,
+  updateSquadSchema,
   updateMaliciousSettingsSchema,
   updatePlatformSettingsSchema,
   updateUserRequestSchema,
@@ -187,9 +192,12 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
       "account may already do. `scope: read` is the default and refuses every write.",
   },
   "DELETE /api/v1/auth/api-tokens/:id": {
-    summary: "Revoke one of your own tokens. Takes effect on the next request.",
+    summary: "Revoke one of your own tokens, or delete it. Takes effect on the next request.",
     tag: "API tokens",
     auth: "user",
+    notes:
+      "`?permanent=true` deletes the row instead, which frees the name for reuse. Revoking " +
+      "is the default because it keeps the row as a record.",
   },
   "GET /api/v1/admin/api-tokens": {
     summary: "Every API token on the platform, with its owner, scope and last use.",
@@ -197,9 +205,12 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     auth: "admin",
   },
   "DELETE /api/v1/admin/api-tokens/:id": {
-    summary: "Revoke anybody's API token.",
+    summary: "Revoke anybody's API token, or delete it.",
     tag: "API tokens",
     auth: "admin",
+    notes:
+      "`?permanent=true` deletes the row instead, which frees the name for reuse. Revoking " +
+      "is the default because it keeps the row as a record.",
   },
 
   // --- applications ---------------------------------------------------------
@@ -240,6 +251,15 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     summary: "Added, removed and changed packages between two builds.",
     tag: "Applications",
     auth: "user",
+  },
+  "GET /api/v1/applications/:id/vulnerabilities/recommendations": {
+    summary: "Which version to upgrade each vulnerable package to, for the current build.",
+    tag: "Vulnerabilities",
+    auth: "user",
+    notes:
+      "One row per package: the lowest version clearing every advisory reported against it, " +
+      "then -- with `verify=true`, the default -- that version checked against the scanner and " +
+      "walked forward while it is still affected. `scope=all|app|os`. 409 while scanning is off.",
   },
   "GET /api/v1/applications/:id/vulnerabilities": {
     summary: "Findings for one application, split into application and base-image sides.",
@@ -715,6 +735,59 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
       "Allowed to read-only tokens: it stores nothing. Returns the reachable applications with " +
       "the reason each is reachable, plus any held back by the environment axis.",
   },
+  "GET /api/v1/admin/users/:id/squads": {
+    summary: "The squads an account is on.",
+    tag: "Admin: users",
+    auth: "admin",
+  },
+  "PUT /api/v1/admin/users/:id/squads": {
+    summary: "Replace the squads an account is on.",
+    tag: "Admin: users",
+    auth: "admin",
+    body: setUserSquadsSchema,
+  },
+  "GET /api/v1/admin/squads": {
+    summary: "Every squad, with member, grant and reach counts.",
+    tag: "Admin: squads",
+    auth: "admin",
+  },
+  "GET /api/v1/admin/squads/:id": {
+    summary: "One squad, with its members and what it is granted.",
+    tag: "Admin: squads",
+    auth: "admin",
+  },
+  "POST /api/v1/admin/squads": {
+    summary: "Create a squad.",
+    tag: "Admin: squads",
+    auth: "admin",
+    body: createSquadSchema,
+  },
+  "PATCH /api/v1/admin/squads/:id": {
+    summary: "Rename a squad, or change its address or description.",
+    tag: "Admin: squads",
+    auth: "admin",
+    body: updateSquadSchema,
+  },
+  "DELETE /api/v1/admin/squads/:id": {
+    summary: "Delete a squad. Members keep their accounts and lose only what it granted.",
+    tag: "Admin: squads",
+    auth: "admin",
+  },
+  "PUT /api/v1/admin/squads/:id/members": {
+    summary: "Replace a squad's members.",
+    tag: "Admin: squads",
+    auth: "admin",
+    body: setSquadMembersSchema,
+    notes:
+      "Membership is access: every member reaches what the squad is granted, in addition to " +
+      "their own grants, and the estates those applications live in come with it.",
+  },
+  "PUT /api/v1/admin/squads/:id/access": {
+    summary: "Replace the groups and applications a squad is granted.",
+    tag: "Admin: squads",
+    auth: "admin",
+    body: setSquadAccessSchema,
+  },
   "GET /api/v1/admin/access-requests": {
     summary: "People the directory authenticated who have no account here.",
     tag: "Admin: users",
@@ -785,9 +858,13 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
       "the pipeline unable to put a test build into production's inventory.",
   },
   "DELETE /api/v1/admin/ingest-tokens/:id": {
-    summary: "Revoke a CI ingest token.",
+    summary: "Revoke a CI ingest token, or delete it.",
     tag: "Admin: platform",
     auth: "admin",
+    notes:
+      "`?permanent=true` deletes the row instead, which frees the name for reuse. Revoking " +
+      "is the default because it keeps the row as a record." +
+      " Scans record the token's name as text, so deleting it leaves their provenance intact.",
   },
   "GET /api/v1/admin/auth/oidc": {
     summary: "The single sign-on connection. Never the client secret.",
