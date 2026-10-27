@@ -5,9 +5,9 @@ import { OidcClient } from "../../src/services/auth/oidc-client.js";
  * Talking to an OpenID Connect provider, and telling an administrator what went wrong.
  *
  * Almost everything here is about the diagnosis rather than the happy path, because the happy
- * path announces itself and the failures do not. Three of them look identical from a browser —
+ * path announces itself and the failures do not. Three of them look identical from a browser -
  * an unreachable issuer, a wrong client secret, and an issuer URL that disagrees with the
- * provider's own — and all three are reported by the provider in a redirect this platform
+ * provider's own - and all three are reported by the provider in a redirect this platform
  * never sees. If this code cannot tell them apart, nobody can.
  *
  * The guarantee that matters most is negative: the client secret is sent in a request body on

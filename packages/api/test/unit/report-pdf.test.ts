@@ -7,7 +7,7 @@ import { renderReportPdf } from "../../src/modules/reports/pdf.js";
 /**
  * Tests for the generated PDF.
  *
- * The layout in `pdf.ts` is hand-computed — pdfkit has no cell model — so the
+ * The layout in `pdf.ts` is hand-computed - pdfkit has no cell model - so the
  * failure modes are geometric: text that overflows its column, content that
  * collides with the footer band, and pages that pdfkit appends on its own. None
  * of those are visible in a byte-size assertion, so these tests read the finished
@@ -30,7 +30,7 @@ interface TextItem {
   str: string;
   /** Distance from the left edge. */
   x: number;
-  /** Baseline distance from the BOTTOM edge — pdf.js reports PDF-space coords. */
+  /** Baseline distance from the BOTTOM edge - pdf.js reports PDF-space coords. */
   y: number;
   width: number;
 }
@@ -47,8 +47,8 @@ async function extract(pdf: Buffer): Promise<ExtractedPage[]> {
     /*
      * Errors only.
      *
-     * The report uses the standard-14 fonts and does not embed them — that is
-     * the reason for choosing them — so pdf.js looks for its own copies of the
+     * The report uses the standard-14 fonts and does not embed them - that is
+     * the reason for choosing them - so pdf.js looks for its own copies of the
      * metrics and warns once per font per page when it cannot fetch them. It
      * does not need them for what these tests read: the strings and their
      * positions come from the page's content stream. Left at the default
@@ -204,7 +204,7 @@ function fullReport(overrides: Partial<AnalyticsReport> = {}): AnalyticsReport {
  * Numbers chosen to mirror the real shape rather than to be tidy: base-image findings
  * dwarf application-dependency findings (720 vs 161 in the demo estate, ~100:1 on a real
  * container image), and the ranking must ignore them. `identity-provider` exists in this
- * fixture specifically to prove that — it has the fewest app findings and by far the most
+ * fixture specifically to prove that - it has the fewest app findings and by far the most
  * base-image ones, so a ranking that summed the two would put it at the top.
  */
 function scannedReport(overrides: Partial<VulnerabilityReport> = {}): AnalyticsReport {
@@ -298,7 +298,7 @@ function scannedReport(overrides: Partial<VulnerabilityReport> = {}): AnalyticsR
   });
 }
 
-/** An estate with nothing in it — every list empty, every count zero. */
+/** An estate with nothing in it - every list empty, every count zero. */
 function emptyReport(): AnalyticsReport {
   return fullReport({
     totals: {
@@ -416,7 +416,7 @@ describe("renderReportPdf", () => {
 
   it("says nothing was assessed, rather than omitting the section or showing zeros", () => {
     /*
-     * The fixture has `vulnerabilities: null` — scanning disabled.
+     * The fixture has `vulnerabilities: null` - scanning disabled.
      *
      * The single most damaging thing this report could do is let a reader conclude an
      * unscanned estate is clean. Silence would do it, and so would a section full of
@@ -532,8 +532,8 @@ describe("renderReportPdf with vulnerability scanning enabled", () => {
     /*
      * 465 app + 1,729 base image = 2,194. All three are required.
      *
-     * The combined figure is the one that gets quoted, and on this fixture — as on a real
-     * container estate — it is roughly four fifths base image. Printing it without both
+     * The combined figure is the one that gets quoted, and on this fixture - as on a real
+     * container estate - it is roughly four fifths base image. Printing it without both
      * halves beside it would make the quotable number the misleading one; printing only
      * the halves leaves the reader to add them up themselves and get no warning that the
      * sum is dominated by base-image age.
@@ -547,7 +547,7 @@ describe("renderReportPdf with vulnerability scanning enabled", () => {
     /*
      * Headers are rendered uppercase and abbreviated. The abbreviation is not cosmetic:
      * nine columns leave about 40pt each, and a full-length `MEDIUM` was silently clipped
-     * by `truncate()` — so this asserts the short form that actually fits.
+     * by `truncate()` - so this asserts the short form that actually fits.
      */
     for (const header of ["SCOPE", "TOTAL", "CRIT", "HIGH", "MED", "LOW", "OTHER"]) {
       expect(allText).toContain(header);
@@ -556,7 +556,7 @@ describe("renderReportPdf with vulnerability scanning enabled", () => {
     expect(allText).toContain("Base image and runtimes");
     /*
      * app: 39 + 128 + 240 + 51 + (5 negligible + 2 unrated) = 465, which the previous
-     * assertion already pins. What matters here is that the fold is explained — a reader
+     * assertion already pins. What matters here is that the fold is explained - a reader
      * who assumes "Other" means "not yet rated" will treat it as a queue of work that
      * does not exist.
      */
@@ -585,7 +585,7 @@ describe("renderReportPdf with vulnerability scanning enabled", () => {
         knownExploited: 2,
         affectedPackages: 31,
       },
-      // Excluded by `scope: app`. Null, not zeroed — the report has to be able to say
+      // Excluded by `scope: app`. Null, not zeroed - the report has to be able to say
       // "not counted" rather than implying a clean base image.
       baseImage: null,
       baseImageExposure: null,
@@ -646,7 +646,7 @@ describe("renderReportPdf with vulnerability scanning enabled", () => {
     });
     const pages = await extract(await renderReportPdf(clean));
     const text = pages.map((p) => p.text).join("\n");
-    // A genuine clean result reads differently from an unassessed one — this is the
+    // A genuine clean result reads differently from an unassessed one - this is the
     // other side of the disabled-state test, and the pair is what makes either honest.
     expect(text).toContain("No application dependency has a known vulnerability");
     expect(text).not.toContain("Not assessed");
@@ -691,7 +691,7 @@ describe("renderReportPdf edge cases", () => {
     // These three buckets have to add up to every scanned application, or a
     // reader reconciling them against the application total finds a gap. The
     // count comes from the service, not from subtracting the other two off a
-    // total computed with a different status filter — which is what it used to
+    // total computed with a different status filter - which is what it used to
     // do, across two different populations.
     const text = (await extract(await renderReportPdf(fullReport()))).map((p) => p.text).join("\n");
     expect(text).toContain("240 applications had builds on both sides");

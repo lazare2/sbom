@@ -6,7 +6,7 @@ import type { VulnDbService } from "./vuln-db.service.js";
 /**
  * Background driver for vulnerability scanning.
  *
- * Owns three triggers, all of which converge on the same two operations — update the
+ * Owns three triggers, all of which converge on the same two operations - update the
  * database if it is due, then bring the component set up to date:
  *
  *   - the schedule (default every 3 hours, admin-editable)
@@ -32,8 +32,8 @@ const HEARTBEAT_MS = 60_000;
 /**
  * Delay before the first heartbeat after boot.
  *
- * Long enough to stay out of the way of startup — migrations, seeding, the first
- * requests — and short enough that a container which was off for a week notices
+ * Long enough to stay out of the way of startup - migrations, seeding, the first
+ * requests - and short enough that a container which was off for a week notices
  * promptly rather than waiting a full interval.
  */
 const STARTUP_DELAY_MS = 60_000;
@@ -157,7 +157,7 @@ export class VulnWorker {
     if (result.outcome === "unreachable") {
       /*
        * Expected on an air-gapped deployment, and deliberately not an error. The
-       * message — which names the exact URL — is recorded in the update history and
+       * message - which names the exact URL - is recorded in the update history and
        * shown in the admin panel, which is where an administrator can act on it. A log
        * line every interval, forever, would be noise.
        */
@@ -203,7 +203,7 @@ export class VulnWorker {
    * few seconds of work rather than a full sweep.
    *
    * `maxBatches` bounds it so one unusually large first-ever application cannot occupy
-   * the worker indefinitely — the heartbeat picks up whatever is left.
+   * the worker indefinitely - the heartbeat picks up whatever is left.
    */
   requestSweepAfterIngest(): void {
     void (async () => {
@@ -220,9 +220,9 @@ export class VulnWorker {
    * Called when an administrator switches scanning on.
    *
    * Fetches a database if none is installed, then matches everything already in the
-   * estate. Without the backfill, enabling the feature would appear to do nothing —
+   * estate. Without the backfill, enabling the feature would appear to do nothing -
    * the packages are all already ingested, so there would be no new SBOM to trigger a
-   * match — and the reasonable conclusion would be that it is broken.
+   * match - and the reasonable conclusion would be that it is broken.
    *
    * Runs detached so the settings request returns immediately; progress is visible
    * through the coverage figures in the admin panel.
@@ -243,7 +243,7 @@ export class VulnWorker {
    * Called after a database is installed by hand from the admin panel.
    *
    * A new database makes every previously matched component pending again, by virtue of
-   * the build timestamp having moved — so this is a plain sweep, with nothing to
+   * the build timestamp having moved - so this is a plain sweep, with nothing to
    * enqueue or invalidate.
    */
   requestSweepAfterDbChange(): void {

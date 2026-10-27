@@ -2,14 +2,21 @@ import { useMemo, useState } from "react";
 import type { SquadDetail, SquadSummary, UserSummary } from "@sbom/shared";
 import { displayName, formatNumber } from "../../lib/format.ts";
 import {
-  useCreateSquad,
   useDeleteSquad,
   useSetSquadAccess,
   useSetSquadMembers,
-  useUpdateSquad,
+  useUpdateSquadSettings,
 } from "../../lib/mutations.ts";
-import { useEnvironments, useGrantableScope, useSquad, useSquads, useUsers } from "../../lib/queries.ts";
+import {
+  useEnvironments,
+  useGrantableScope,
+  useSquad,
+  useSquadSettings,
+  useSquads,
+  useUsers,
+} from "../../lib/queries.ts";
 import { useDebounced } from "../../lib/useDebounced.ts";
+import { SquadFormModal } from "../../components/TeamForms.tsx";
 import { ApplicationPicker, GroupPicker } from "./UserAccessPickers.tsx";
 import {
   Badge,
@@ -21,13 +28,11 @@ import {
   EmptyState,
   ErrorBanner,
   FormError,
-  FormRow,
   LoadingBlock,
   Modal,
   Table,
   TableWrap,
   Td,
-  Textarea,
   TextInput,
   Th,
   Tr,
@@ -51,8 +56,11 @@ export function AdminSquadsPage() {
   const [managing, setManaging] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SquadSummary | null>(null);
   const remove = useDeleteSquad();
+  const [search, setSearch] = useState("");
 
-  const list = squads.data?.squads ?? [];
+  const all = squads.data?.squads ?? [];
+  const needle = search.trim().toLowerCase();
+  const list = needle === "" ? all : all.filter((s) => s.name.toLowerCase().includes(needle));
 
   return (
     <>
@@ -67,23 +75,33 @@ export function AdminSquadsPage() {
           }
         />
 
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-base px-4 py-3">
+          <div className="w-full max-w-xs">
+            <TextInput value={search} onChange={setSearch} placeholder="Search squads by name…" ariaLabel="Search squads" />
+          </div>
+          <RequireTribeSwitch />
+        </div>
+
         {squads.isLoading ? (
           <LoadingBlock label="Loading squads" />
         ) : squads.error ? (
           <div className="p-4">
             <ErrorBanner error={squads.error} onRetry={() => void squads.refetch()} />
           </div>
-        ) : list.length === 0 ? (
+        ) : all.length === 0 ? (
           <EmptyState
             title="No squads yet"
             hint="Create one per team, grant it the groups and applications the team owns, and add its people. New colleagues then need only to be put on their squad."
           />
+        ) : list.length === 0 ? (
+          <EmptyState title="No squad matches that search" hint={`Nothing is named like "${search.trim()}".`} />
         ) : (
           <TableWrap>
             <Table>
               <thead>
                 <tr>
                   <Th>Squad</Th>
+                  <Th>Tribes</Th>
                   <Th>Email</Th>
                   <Th align="right">Members</Th>
                   <Th align="right">Groups</Th>
@@ -103,7 +121,20 @@ export function AdminSquadsPage() {
                       ) : null}
                     </Td>
                     <Td>
-                      {squad.email ?? <span className="text-text-faint">—</span>}
+                      {squad.tribes.length === 0 ? (
+                        <span className="text-text-faint">-</span>
+                      ) : (
+                        <span className="flex flex-wrap gap-1">
+                          {squad.tribes.map((t) => (
+                            <Badge key={t.id} tone="info">
+                              {t.name}
+                            </Badge>
+                          ))}
+                        </span>
+                      )}
+                    </Td>
+                    <Td>
+                      {squad.email ?? <span className="text-text-faint">-</span>}
                     </Td>
                     <Td align="right" className="nums">
                       {formatNumber(squad.memberCount)}
@@ -151,11 +182,14 @@ export function AdminSquadsPage() {
         )}
       </Card>
 
-      <SquadDetailsModal
+      <SquadFormModal
         key={editing === "new" ? "new" : (editing?.id ?? "none")}
         target={editing}
         onClose={() => setEditing(null)}
-        onCreated={(id) => setManaging(id)}
+        // Straight on to members and access: a new squad with neither does nothing.
+        onSaved={(squad, created) => {
+          if (created) setManaging(squad.id);
+        }}
       />
 
       {managing ? <ManageSquadModal squadId={managing} onClose={() => setManaging(null)} /> : null}
@@ -184,76 +218,24 @@ export function AdminSquadsPage() {
 
 // ---------------------------------------------------------------------------
 
-/** Name, address and description. Membership and grants live in the other dialog. */
-function SquadDetailsModal({
-  target,
-  onClose,
-  onCreated,
-}: {
-  target: SquadSummary | "new" | null;
-  onClose: () => void;
-  onCreated: (id: string) => void;
-}) {
-  const existing = target !== null && target !== "new" ? target : null;
-  const create = useCreateSquad();
-  const update = useUpdateSquad();
-  const [name, setName] = useState(existing?.name ?? "");
-  const [email, setEmail] = useState(existing?.email ?? "");
-  const [description, setDescription] = useState(existing?.description ?? "");
-  const error = create.error ?? update.error;
-  const busy = create.isPending || update.isPending;
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const body = { name: name.trim(), email: email.trim(), description: description.trim() };
-    try {
-      if (existing) {
-        await update.mutateAsync({ id: existing.id, body });
-        onClose();
-      } else {
-        const created = await create.mutateAsync(body);
-        onClose();
-        // Straight on to members and access: a squad with neither does nothing.
-        onCreated(created.squad.id);
-      }
-    } catch {
-      // Rendered from the mutation's error state.
-    }
-  }
-
+/**
+ * Whether every squad must sit under a tribe. Off by default, so squads can be set up before the
+ * tribes are; turning it on applies to new squads and to any squad whose tribes are next edited.
+ */
+function RequireTribeSwitch() {
+  const settings = useSquadSettings();
+  const save = useUpdateSquadSettings();
+  const on = settings.data?.settings.requireTribe === true;
   return (
-    <Modal
-      open={target !== null}
-      onClose={onClose}
-      title={existing ? `Edit ${existing.name}` : "New squad"}
-      footer={
-        <>
-          <Button onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button variant="primary" type="submit" form="squad-form" disabled={busy || name.trim() === ""}>
-            {busy ? "Saving…" : existing ? "Save" : "Create squad"}
-          </Button>
-        </>
-      }
-    >
-      <form id="squad-form" onSubmit={submit} className="space-y-3" noValidate>
-        <FormError error={error} />
-        <FormRow label="Name" htmlFor="squad-name">
-          <TextInput id="squad-name" value={name} onChange={setName} placeholder="Payments" autoFocus />
-        </FormRow>
-        <FormRow
-          label="Team email (optional)"
-          htmlFor="squad-email"
-          hint="The squad's shared mailbox, kept for reports about its applications. Nothing is sent to it yet."
-        >
-          <TextInput id="squad-email" value={email} onChange={setEmail} placeholder="payments-team@example.com" />
-        </FormRow>
-        <FormRow label="Description (optional)" htmlFor="squad-description">
-          <Textarea id="squad-description" rows={2} value={description} onChange={setDescription} />
-        </FormRow>
-      </form>
-    </Modal>
+    <div className="flex items-center gap-2">
+      <Checkbox
+        label="Every squad must belong to a tribe"
+        checked={on}
+        disabled={settings.isLoading || save.isPending}
+        onChange={(next) => save.mutate({ requireTribe: next })}
+      />
+      {save.error ? <span className="text-xs text-danger">Could not save</span> : null}
+    </div>
   );
 }
 
@@ -356,7 +338,7 @@ function MembersEditor({ squad, onDone }: { squad: SquadDetail; onDone: () => vo
                   onChange={(on) =>
                     setSelected(on ? [...selected, u.id] : selected.filter((id) => id !== u.id))
                   }
-                  label={displayName(u) ? `${displayName(u)} — ${u.email}` : u.email}
+                  label={displayName(u) ? `${displayName(u)} - ${u.email}` : u.email}
                 />
                 {u.role === "admin" ? (
                   <Badge tone="accent" title="Administrators already reach everything; membership is recorded for when that changes.">

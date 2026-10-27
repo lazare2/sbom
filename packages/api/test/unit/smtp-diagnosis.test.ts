@@ -5,13 +5,13 @@ import { diagnose } from "../../src/modules/reports/mailer.js";
 /**
  * Turning a mail failure into something an administrator can act on.
  *
- * The failure this protects against is not a crash — it is a confident wrong answer. Every
+ * The failure this protects against is not a crash - it is a confident wrong answer. Every
  * way SMTP fails arrives as an `Error` with a short code, and the first two versions of this
  * mapping both read those codes at face value and were wrong:
  *
  *   - `ENOTFOUND` was matched against `error.code`, which nodemailer never sets to that. An
  *     unresolvable host fell through to "could not reach the server", so the one message that
- *     names the actual problem — a typo in the host — was the one nobody saw.
+ *     names the actual problem - a typo in the host - was the one nobody saw.
  *   - `ESOCKET` was mapped to "encryption mismatch". It is nodemailer's catch-all for socket
  *     trouble, so a closed port was reported as a TLS problem, sending the reader to change a
  *     dropdown that was already correct.

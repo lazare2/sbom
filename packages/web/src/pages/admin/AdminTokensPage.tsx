@@ -32,15 +32,15 @@ import {
  * CI credentials for the ingest endpoint.
  *
  * These attest "a trusted CI system is calling", not which application is being
- * reported — the application comes entirely from the `app_name` form field.
+ * reported - the application comes entirely from the `app_name` form field.
  * Separate named tokens exist so Jenkins and GitLab can be rotated and revoked
  * independently rather than sharing one secret nobody dares change.
  */
 /**
  * Sortable columns of the token table.
  *
- * Client-side: the endpoint returns every token in one response — there are a handful, one
- * per pipeline — so there is no page for a server sort to reorder.
+ * Client-side: the endpoint returns every token in one response - there are a handful, one
+ * per pipeline - so there is no page for a server sort to reorder.
  */
 const TOKEN_COLUMNS = {
   name: "text",
@@ -180,7 +180,7 @@ export function AdminTokensPage() {
                         formatRelative(token.lastUsedAt)
                       )}
                     </Td>
-                    <Td>{token.createdAt ? formatDate(token.createdAt) : "—"}</Td>
+                    <Td>{token.createdAt ? formatDate(token.createdAt) : " - "}</Td>
                     <Td align="right">
                       <div className="flex justify-end gap-1.5">
                         {token.source === "db" && token.isActive ? (
@@ -315,7 +315,7 @@ function CreateTokenModal({ open, onClose }: { open: boolean; onClose: () => voi
           <SecretReveal
             label={`Token for ${issued.name}`}
             value={issued.token}
-            note="Shown once — only its hash is stored. Copy it into your CI credential store now."
+            note="Shown once - only its hash is stored. Copy it into your CI credential store now."
           />
           <div>
             <p className="mb-1 text-xs font-medium text-text-muted">Example pipeline step</p>
@@ -343,7 +343,7 @@ curl -f -X POST "$SBOM_URL/api/v1/scans" \\
           <FormRow
             label="Name"
             htmlFor="token-name"
-            hint="Identifies the CI system. Recorded on every scan it submits, so keep it recognisable — e.g. jenkins-prod."
+            hint="Identifies the CI system. Recorded on every scan it submits, so keep it recognisable - e.g. jenkins-prod."
           >
             <TextInput id="token-name" value={name} onChange={setName} placeholder="jenkins" autoFocus required />
           </FormRow>

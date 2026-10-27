@@ -13,6 +13,7 @@ import {
   Button,
   Card,
   CardHeader,
+  Checkbox,
   EmptyState,
   ErrorBanner,
   FormError,
@@ -46,6 +47,7 @@ const ATTRIBUTE_COLUMNS = {
   key: "text",
   type: "text",
   sortOrder: "number",
+  required: "text",
   status: "text",
 } as const;
 
@@ -83,6 +85,8 @@ export function AdminAttributesPage() {
           return def.type;
         case "sortOrder":
           return def.sortOrder;
+        case "required":
+          return def.isRequired ? "required" : "optional";
         case "status":
           return def.isActive ? "active" : "inactive";
         case "label":
@@ -103,12 +107,21 @@ export function AdminAttributesPage() {
     }
   }
 
+  async function toggleRequired(def: AttributeDefinition, isRequired: boolean) {
+    setActionError(null);
+    try {
+      await updateDef.mutateAsync({ id: def.id, body: { isRequired } });
+    } catch (err) {
+      setActionError(err);
+    }
+  }
+
   return (
     <>
       <Card>
         <CardHeader
           title="Application attributes"
-          subtitle="Squad, owner and severity are seeded. Anything added here appears on every application's edit form and as a filter on the applications list."
+          subtitle="Anything added here appears on every application's edit form. Tribe and Squad are linked to Access: their values are the tribes and squads a project is assigned to. A required attribute must be filled whenever an administrator creates, edits or confirms a project; CI uploads are never refused over one."
           actions={
             <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
               New attribute
@@ -152,6 +165,9 @@ export function AdminAttributesPage() {
                   <Th onSort={() => sort.toggle("sortOrder")} sorted={sort.stateOf("sortOrder")} align="right">
                     Order
                   </Th>
+                  <Th onSort={() => sort.toggle("required")} sorted={sort.stateOf("required")}>
+                    Required
+                  </Th>
                   <Th onSort={() => sort.toggle("status")} sorted={sort.stateOf("status")}>
                     Status
                   </Th>
@@ -165,12 +181,31 @@ export function AdminAttributesPage() {
                     <Td>
                       <code className="font-mono text-xs text-text-muted">{def.key}</code>
                     </Td>
-                    <Td className="text-text-muted">{TYPE_LABELS[def.type]}</Td>
                     <Td className="text-text-muted">
-                      {def.options && def.options.length > 0 ? def.options.join(", ") : "—"}
+                      {def.linkedTo ? (
+                        <Badge
+                          tone="info"
+                          title={`The ${def.linkedTo}s this project is assigned to, separated by commas. Editing it assigns and unassigns.`}
+                        >
+                          {def.linkedTo === "squad" ? "Linked to squads" : "Linked to tribes"}
+                        </Badge>
+                      ) : (
+                        TYPE_LABELS[def.type]
+                      )}
+                    </Td>
+                    <Td className="text-text-muted">
+                      {def.options && def.options.length > 0 ? def.options.join(", ") : "-"}
                     </Td>
                     <Td align="right" className="nums">
                       {def.sortOrder}
+                    </Td>
+                    <Td>
+                      <Checkbox
+                        label={def.isRequired ? "Required" : "Optional"}
+                        checked={def.isRequired}
+                        disabled={updateDef.isPending}
+                        onChange={(on) => void toggleRequired(def, on)}
+                      />
                     </Td>
                     <Td>
                       {def.isActive ? (
@@ -192,17 +227,21 @@ export function AdminAttributesPage() {
                         <Button size="sm" onClick={() => void toggleActive(def)} disabled={updateDef.isPending}>
                           {def.isActive ? "Hide" : "Show"}
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setActionError(null);
-                            deleteDef.reset();
-                            setDeleteTarget(def);
-                          }}
-                        >
-                          Delete
-                        </Button>
+                        {/* A linked attribute's values are access assignments; the API refuses
+                            to delete it, so the button is not offered. Hide still works. */}
+                        {def.linkedTo ? null : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setActionError(null);
+                              deleteDef.reset();
+                              setDeleteTarget(def);
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        )}
                       </div>
                     </Td>
                   </Tr>
@@ -244,8 +283,10 @@ function AttributeFormModal({
   const [type, setType] = useState<AttributeType>("string");
   const [optionsText, setOptionsText] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
+  const [isRequired, setIsRequired] = useState(false);
 
   const isEdit = Boolean(existing);
+  const linked = existing?.linkedTo ?? null;
 
   useEffect(() => {
     if (!open) return;
@@ -254,6 +295,7 @@ function AttributeFormModal({
     setType(existing?.type ?? "string");
     setOptionsText((existing?.options ?? []).join("\n"));
     setSortOrder(String(existing?.sortOrder ?? 0));
+    setIsRequired(existing?.isRequired ?? false);
     createDef.reset();
     updateDef.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mutation objects are new every render
@@ -262,8 +304,8 @@ function AttributeFormModal({
   /**
    * Auto-derives the key from the label while creating.
    *
-   * The key is immutable once created — it is the property name inside every
-   * application's jsonb document — so getting it right the first time matters,
+   * The key is immutable once created - it is the property name inside every
+   * application's jsonb document - so getting it right the first time matters,
    * and making the admin invent `lower_snake_case` by hand is how typos happen.
    */
   function onLabelChange(next: string) {
@@ -299,6 +341,7 @@ function AttributeFormModal({
       options: type === "select" ? options : null,
       sortOrder: Number(sortOrder) || 0,
       isActive: existing?.isActive ?? true,
+      isRequired,
     };
     try {
       if (existing) {
@@ -341,24 +384,31 @@ function AttributeFormModal({
           error={!isEdit && key.length > 0 && !keyValid ? "Must be lower_snake_case, starting with a letter" : undefined}
           hint={
             isEdit
-              ? "The key cannot be changed — it is the field name stored on every application that uses it."
+              ? "The key cannot be changed - it is the field name stored on every application that uses it."
               : "Generated from the label. Stored on each application; cannot be changed later."
           }
         >
           <TextInput id="attr-key" value={key} onChange={setKey} required />
         </FormRow>
 
-        <FormRow label="Type" htmlFor="attr-type">
-          <Select
-            id="attr-type"
-            value={type}
-            onChange={(v) => setType(v as AttributeType)}
-            options={(Object.keys(TYPE_LABELS) as AttributeType[]).map((t) => ({
-              value: t,
-              label: TYPE_LABELS[t],
-            }))}
-          />
-        </FormRow>
+        {linked ? (
+          <p className="text-xs text-text-muted">
+            Linked to {linked}s: the value is the list of {linked}s a project is assigned to, and its
+            type cannot change.
+          </p>
+        ) : (
+          <FormRow label="Type" htmlFor="attr-type">
+            <Select
+              id="attr-type"
+              value={type}
+              onChange={(v) => setType(v as AttributeType)}
+              options={(Object.keys(TYPE_LABELS) as AttributeType[]).map((t) => ({
+                value: t,
+                label: TYPE_LABELS[t],
+              }))}
+            />
+          </FormRow>
+        )}
 
         {type === "select" ? (
           <FormRow
@@ -383,6 +433,13 @@ function AttributeFormModal({
         >
           <TextInput id="attr-sort" type="number" value={sortOrder} onChange={setSortOrder} />
         </FormRow>
+
+        <FormRow
+          label="Required"
+          hint="Must be filled when an administrator creates, edits or confirms a project. CI uploads are never refused over it."
+        >
+          <Checkbox label="Required" checked={isRequired} onChange={setIsRequired} />
+        </FormRow>
       </form>
     </Modal>
   );
@@ -392,9 +449,9 @@ function AttributeFormModal({
  * Deletion needs its own modal rather than the generic confirm.
  *
  * The API refuses to delete a definition that applications still carry values
- * for, returning a 409 with the count. That refusal is the useful part — it
+ * for, returning a 409 with the count. That refusal is the useful part - it
  * turns "delete this" into an informed choice between hiding the attribute and
- * destroying data — so the modal surfaces the count and offers purge as a
+ * destroying data - so the modal surfaces the count and offers purge as a
  * separate, deliberate second step.
  */
 function DeleteAttributeModal({
@@ -478,7 +535,7 @@ function DeleteAttributeModal({
           edit form and from the applications list filters.
         </p>
         <p>
-          Hiding it instead keeps every stored value searchable while taking it off the forms — usually the
+          Hiding it instead keeps every stored value searchable while taking it off the forms - usually the
           better choice for an attribute that is simply no longer collected.
         </p>
       </div>

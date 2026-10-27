@@ -76,7 +76,7 @@ describe("loadConfig", () => {
 
   it("accepts a bootstrap admin identifier that is not a deliverable address", () => {
     // Regression guard. This used to be `z.string().email()`, which refused
-    // `admin@localhost` and `svc-ci` outright — a startup failure for an
+    // `admin@localhost` and `svc-ci` outright - a startup failure for an
     // identifier that is perfectly valid now that nothing is ever mailed.
     for (const email of ["admin@localhost", "svc-ci", "admin@sbom.local"]) {
       expect(loadConfig({ ...base, BOOTSTRAP_ADMIN_EMAIL: email }).BOOTSTRAP_ADMIN_EMAIL).toBe(email);

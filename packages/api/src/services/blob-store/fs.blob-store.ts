@@ -11,7 +11,7 @@ const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 
 /**
- * Filesystem driver — the default. Point `BLOB_STORE_FS_ROOT` at a volume or an
+ * Filesystem driver - the default. Point `BLOB_STORE_FS_ROOT` at a volume or an
  * NFS mount and it is production-adequate for an internal tool.
  *
  * Payloads are gzipped before writing. CycloneDX JSON from Syft is extremely

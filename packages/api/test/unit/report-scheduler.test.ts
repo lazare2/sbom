@@ -9,7 +9,7 @@ import type { SettingsService } from "../../src/modules/settings/settings.servic
 /**
  * The scheduler's job is to send the report once a month and never twice.
  *
- * "Never twice" is enforced in the database, not here — but this decides when an attempt is
+ * "Never twice" is enforced in the database, not here - but this decides when an attempt is
  * made at all, and the failure that matters is the one nobody sees: a container restarted at
  * the wrong moment either mailing management two copies or silently skipping the month.
  */

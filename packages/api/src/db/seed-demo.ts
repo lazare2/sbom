@@ -8,7 +8,7 @@ import { closeDb, getDb } from "./client.js";
 /**
  * Generates realistic demo data for local development and UI work.
  *
- * NOT part of `db:seed` — this is explicitly opt-in (`npm run db:seed:demo`) and
+ * NOT part of `db:seed` - this is explicitly opt-in (`npm run db:seed:demo`) and
  * refuses to run against NODE_ENV=production.
  *
  * Scans are created through the real `IngestionService` rather than by inserting
@@ -164,7 +164,7 @@ function distroPackageComponents(distro: Distro): unknown[] {
 
   return entries.map((entry) => ({
     "bom-ref": `distro:${entry.name}@${entry.version}`,
-    // `library`, exactly as Syft emits it — which is the reason the platform splits
+    // `library`, exactly as Syft emits it - which is the reason the platform splits
     // base image from dependencies on ecosystem rather than on component kind.
     type: "library",
     name: entry.name,
@@ -286,7 +286,7 @@ interface DemoApp {
    * Base OS and runtimes, for the early half and the late half of the history.
    *
    * Two entries rather than one so several applications visibly change base
-   * image and runtime version partway through — a Debian 11 to 12 bump, or Node
+   * image and runtime version partway through - a Debian 11 to 12 bump, or Node
    * 20 to 22. Without that the platform data would be static and the "which
    * apps are behind" view would have nothing to distinguish.
    */
@@ -301,8 +301,8 @@ const rt = (name: string, version: string): Pkg => ({ name, version, ecosystem: 
  * from the application's newest one.
  *
  * Graded rather than evenly spaced, for two reasons. It is what a retained
- * history actually looks like — recent builds are dense, older ones are whatever
- * survived — and, more practically, evenly spaced daily builds gave every
+ * history actually looks like - recent builds are dense, older ones are whatever
+ * survived - and, more practically, evenly spaced daily builds gave every
  * application a history only a few days deep, which left the analytics report's
  * churn section with nothing before its window to compare against and printed
  * four zeros as though they were measurements.

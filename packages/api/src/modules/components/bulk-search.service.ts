@@ -24,7 +24,7 @@ import { NotFoundError } from "../../lib/errors.js";
  *
  * The same columns as the single search, over the same row shape, but the aliases differ
  * (`m`/`a` here against a `matched` CTE rather than the search's), so the clause is written
- * out rather than shared. `(m.id, a.id)` is the unique tail — the DISTINCT ON key of
+ * out rather than shared. `(m.id, a.id)` is the unique tail - the DISTINCT ON key of
  * `usage`, one row per output row.
  */
 function bulkMatchesOrderBy(sortBy: BulkSearchQuery["sortBy"], dir: SortDirection): SQL {
@@ -71,7 +71,7 @@ const VERSIONS_PER_ROW = 8;
  * default LIKE escape, so the backslash itself has to be doubled first.
  *
  * Done in JS rather than SQL so the pattern is a plain bound parameter and the arrays stay
- * as they are — the whole query is still four parameters.
+ * as they are - the whole query is still four parameters.
  */
 export function escapeLikeTerm(term: string): string {
   return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
@@ -92,7 +92,7 @@ export function escapeLikeTerm(term: string): string {
  *     is mostly about the other thirty-seven.
  *
  * Name matching defaults to exact and case-insensitive, which is what let the original
- * query stay bounded by the input line count alone — an exact match cannot blow up the way
+ * query stay bounded by the input line count alone - an exact match cannot blow up the way
  * a two-character substring can, so no equivalent of the single search's `MATCH_CAP` was
  * needed. `match=contains` removes that guarantee, and pays for it with
  * BULK_MATCH_CAP_PER_ENTRY: a `dense_rank()` window per input line, so one broad entry
@@ -237,7 +237,7 @@ export class BulkSearchService {
    *
    * The hash covers the normalised match keys, not the raw text, so reordering
    * lines, changing case, or editing a comment still collapses onto one row. The
-   * raw text is stored alongside so reopening the link shows what was typed —
+   * raw text is stored alongside so reopening the link shows what was typed -
    * including the lines that failed to parse, which are the ones someone will want
    * to fix.
    */
@@ -341,7 +341,7 @@ export class BulkSearchService {
     /*
       `dense_rank`, not `row_number`, and the distinction matters.
 
-      The cap counts distinct package *names*, because that is what the row reports —
+      The cap counts distinct package *names*, because that is what the row reports -
       "12 packages matched". Ranking rows instead would count (name, version) pairs, and a
       single deb package with sixty revisions of libc6 in the estate would consume the whole
       budget on its own. The row would then read "1 package matched (partial)", which is
@@ -366,7 +366,7 @@ export class BulkSearchService {
     /**
      * Scope narrowing for the estate-wide affected count only.
      *
-     * The per-line current/historical counts below are deliberately *not* scoped —
+     * The per-line current/historical counts below are deliberately *not* scoped -
      * a reader needs both to tell "never here" from "removed last month". This
      * filter exists because the headline "N applications affected" should mean what
      * the chosen scope says it means.
@@ -382,8 +382,8 @@ export class BulkSearchService {
       WITH q AS (
         /*
          * sql.param is required here, not stylistic. Interpolating a JS array into
-         * a drizzle template expands it into a parenthesised list of placeholders —
-         * a record — and Postgres refuses to cast a record to an array. Wrapping it
+         * a drizzle template expands it into a parenthesised list of placeholders -
+         * a record - and Postgres refuses to cast a record to an array. Wrapping it
          * binds the whole array as one parameter, which is also what keeps this to
          * four parameters no matter how long the list is.
          */
@@ -398,7 +398,7 @@ export class BulkSearchService {
       /*
        * LEFT JOIN, not INNER: an entry that matches nothing must survive to the
        * result as a "not found" row. This is the single most important line in the
-       * query — an inner join would turn the feature back into the single search.
+       * query - an inner join would turn the feature back into the single search.
        *
        * The name comparison is served by component_name_lower_idx, so this is one
        * index probe per entry rather than a scan.
@@ -553,7 +553,7 @@ export class BulkSearchService {
       Capped per input line here too, and it has to be: without it a 200-line paste in
       contains mode joins an unbounded component set against scan_component, which is the
       table this service was written to avoid scanning. The partition is the name key
-      rather than the line because this query does not carry line numbers — two entries
+      rather than the line because this query does not carry line numbers - two entries
       resolving to the same term should share one budget, not two.
 
       `dense_rank` over the name for the same reason as the rollup: the cap counts packages,
@@ -634,7 +634,7 @@ export class BulkSearchService {
    * Every match, unpaginated, for the Excel export.
    *
    * Separate from `matches` because a spreadsheet is the one consumer that wants
-   * the whole set — a paginated export would be a file that silently omits rows.
+   * the whole set - a paginated export would be a file that silently omits rows.
    * Capped so a pathological list cannot exhaust memory building a workbook.
    */
   async allMatches(

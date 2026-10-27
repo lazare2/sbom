@@ -19,7 +19,13 @@ import {
   PG_UNIQUE_VIOLATION,
 } from "../../lib/errors.js";
 import type { ApplicationsService } from "../applications/applications.service.js";
-import { mergeAttributes, validateAttributes } from "./attributes.js";
+import {
+  TEAM_ATTRIBUTE_KEY,
+  type TeamAssignments,
+  type TeamAttributes,
+} from "../squads/team-attributes.js";
+import type { AttributeDefinitionRow } from "../../db/schema.js";
+import { assertRequiredPresent, mergeAttributes, validateAttributes } from "./attributes.js";
 import type { Actor, AuditService } from "./audit.service.js";
 
 /**
@@ -36,6 +42,7 @@ export class AdminApplicationsService {
       db: Database;
       audit: AuditService;
       applications: ApplicationsService;
+      teams: TeamAttributes;
     },
   ) {}
 
@@ -52,14 +59,22 @@ export class AdminApplicationsService {
     actor: Actor,
     scope: ReadScope,
   ): Promise<ApplicationDetail> {
-    const attributes = await this.validate(input.attributes);
+    const { definitions, plain, assignments } = await this.prepare(input.attributes);
+    assertRequiredPresent(definitions, finalView({}, plain, assignments));
+    const attributes = mergeAttributes({}, plain);
 
     let created;
     try {
-      [created] = await this.deps.db
-        .insert(application)
-        .values({ environmentId: scope.id, name: input.name, status: input.status, attributes })
-        .returning();
+      created = await this.deps.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(application)
+          .values({ environmentId: scope.id, name: input.name, status: input.status, attributes })
+          .returning();
+        if (!row) throw new Error("insert returned no row");
+        await this.deps.teams.assign(row.id, assignments, tx);
+        await this.deps.teams.refresh([row.id], tx);
+        return row;
+      });
     } catch (err) {
       if (isPgError(err, PG_UNIQUE_VIOLATION)) {
         throw new ConflictError(
@@ -68,14 +83,13 @@ export class AdminApplicationsService {
       }
       throw err;
     }
-    if (!created) throw new Error("insert returned no row");
 
     await this.deps.audit.record({
       actor,
       action: "application.create",
       targetType: "application",
       targetId: created.id,
-      metadata: { name: created.name, status: created.status, attributes },
+      metadata: { name: created.name, status: created.status, attributes, teams: assignments },
     });
 
     // Behind requireAdmin, so every estate is already readable by this caller.
@@ -86,10 +100,17 @@ export class AdminApplicationsService {
     const existing = await this.requireApplication(id);
 
     const patch: Partial<typeof application.$inferInsert> = { updatedAt: new Date() };
+    let assignments: TeamAssignments = {};
 
     if (input.attributes !== undefined) {
-      const validated = await this.validate(input.attributes);
-      patch.attributes = mergeAttributes(existing.attributes ?? {}, validated);
+      const prepared = await this.prepare(input.attributes);
+      assertRequiredPresent(
+        prepared.definitions,
+        finalView(existing.attributes ?? {}, prepared.plain, prepared.assignments),
+        Object.keys(input.attributes),
+      );
+      assignments = prepared.assignments;
+      patch.attributes = mergeAttributes(existing.attributes ?? {}, prepared.plain);
     }
     if (input.name !== undefined) patch.name = input.name;
     if (input.status !== undefined) {
@@ -105,13 +126,18 @@ export class AdminApplicationsService {
     }
 
     try {
-      await this.deps.db.update(application).set(patch).where(eq(application.id, id));
+      await this.deps.db.transaction(async (tx) => {
+        await tx.update(application).set(patch).where(eq(application.id, id));
+        await this.deps.teams.assign(id, assignments, tx);
+        await this.deps.teams.refresh([id], tx);
+      });
     } catch (err) {
       if (isPgError(err, PG_UNIQUE_VIOLATION)) {
         throw new ConflictError(`An application named "${input.name}" already exists.`);
       }
       throw err;
     }
+    const saved = await this.requireApplication(id);
 
     await this.deps.audit.record({
       actor,
@@ -124,11 +150,11 @@ export class AdminApplicationsService {
         after: {
           name: patch.name ?? existing.name,
           status: patch.status ?? existing.status,
-          attributes: patch.attributes ?? existing.attributes,
+          attributes: saved.attributes,
         },
         // A rename frees the old name. The next CI build posting under it will
         // auto-create a fresh pending application rather than landing here,
-        // unless an alias is added — surfaced in the UI as a warning.
+        // unless an alias is added - surfaced in the UI as a warning.
         renamed: input.name !== undefined && input.name !== existing.name,
       },
     });
@@ -176,17 +202,22 @@ export class AdminApplicationsService {
   /** Confirm: this auto-created record is a real application. Fills attributes and activates. */
   async confirm(id: string, input: ConfirmApplicationRequest, actor: Actor): Promise<ApplicationDetail> {
     const existing = await this.requirePending(id);
-    const validated = await this.validate(input.attributes);
+    const { definitions, plain, assignments } = await this.prepare(input.attributes);
+    assertRequiredPresent(definitions, finalView(existing.attributes ?? {}, plain, assignments));
 
     const patch: Partial<typeof application.$inferInsert> = {
       status: "active",
-      attributes: mergeAttributes(existing.attributes ?? {}, validated),
+      attributes: mergeAttributes(existing.attributes ?? {}, plain),
       updatedAt: new Date(),
     };
     if (input.name !== undefined) patch.name = input.name;
 
     try {
-      await this.deps.db.update(application).set(patch).where(eq(application.id, id));
+      await this.deps.db.transaction(async (tx) => {
+        await tx.update(application).set(patch).where(eq(application.id, id));
+        await this.deps.teams.assign(id, assignments, tx);
+        await this.deps.teams.refresh([id], tx);
+      });
     } catch (err) {
       if (isPgError(err, PG_UNIQUE_VIOLATION)) {
         throw new ConflictError(`An application named "${input.name}" already exists.`);
@@ -213,7 +244,7 @@ export class AdminApplicationsService {
    *
    * `always: true` additionally records an alias, so ingest redirects that
    * `app_name` automatically from then on. That is the difference between
-   * fixing this occurrence and fixing the cause — a CI job whose name will keep
+   * fixing this occurrence and fixing the cause - a CI job whose name will keep
    * arriving every single build wants the alias.
    *
    * The whole thing runs in one transaction. A half-applied merge would leave
@@ -255,8 +286,8 @@ export class AdminApplicationsService {
       `);
 
       // Full recompute rather than an increment: the merged scans may interleave
-      // with the target's own history, so the newest scan overall — and
-      // therefore the current state — can come from either side.
+      // with the target's own history, so the newest scan overall - and
+      // therefore the current state - can come from either side.
       await tx.execute(sql`
         UPDATE application a SET
           scan_count = (SELECT count(*) FROM scan s WHERE s.application_id = a.id),
@@ -399,13 +430,23 @@ export class AdminApplicationsService {
 
   // -------------------------------------------------------------------------
 
-  private async validate(attributes: Attributes) {
+  /**
+   * Validates an attribute patch and splits it: plain attributes to store as they are, and squad
+   * and tribe names turned into the assignments their attributes are rebuilt from.
+   */
+  private async prepare(attributes: Attributes): Promise<{
+    definitions: AttributeDefinitionRow[];
+    plain: Attributes;
+    assignments: TeamAssignments;
+  }> {
     const definitions = await this.deps.db
       .select()
       .from(attributeDefinition)
       .where(eq(attributeDefinition.isActive, true))
       .orderBy(asc(attributeDefinition.sortOrder));
-    return validateAttributes(definitions, attributes);
+    const validated = validateAttributes(definitions, attributes);
+    const { plain, assignments } = await this.deps.teams.resolve(definitions, validated);
+    return { definitions, plain, assignments };
   }
 
   private async requireApplication(id: string) {
@@ -423,4 +464,25 @@ export class AdminApplicationsService {
     }
     return row;
   }
+}
+
+/**
+ * What the application's attributes will read after a save, for the required-attribute check.
+ *
+ * Squad and tribe come from the assignments the save will make, since their stored value is
+ * rewritten from those; a kind the save did not mention keeps the value it has now.
+ */
+function finalView(
+  existing: Attributes,
+  plain: Attributes,
+  assignments: TeamAssignments,
+): Attributes {
+  const view = mergeAttributes(existing, plain);
+  for (const kind of ["squad", "tribe"] as const) {
+    const ids = assignments[kind];
+    if (ids === undefined) continue;
+    if (ids.length > 0) view[TEAM_ATTRIBUTE_KEY[kind]] = ids.join(",");
+    else delete view[TEAM_ATTRIBUTE_KEY[kind]];
+  }
+  return view;
 }

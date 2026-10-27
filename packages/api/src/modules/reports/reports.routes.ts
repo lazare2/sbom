@@ -20,7 +20,7 @@ import { MailTransportError } from "./mailer.js";
  * Registered inside the admin scope, so every route here inherits `requireAdmin`. That is a
  * stricter rule than the rest of the read API, which any authenticated user may call, and it
  * is deliberate: generating a report is a write that files a permanent record and moves
- * nothing else — but the history it writes into is the audit trail for what management was
+ * nothing else - but the history it writes into is the audit trail for what management was
  * told, and an ad-hoc run appearing in it should be attributable to a named person.
  */
 export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
@@ -96,7 +96,7 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
    *
    * Opens the session, greets, negotiates encryption, stops. Almost every way this feature
    * fails happens before a message is composed, so this answers "will it work" without
-   * putting a test message in somebody's inbox — which matters when the answer is "no" and
+   * putting a test message in somebody's inbox - which matters when the answer is "no" and
    * the fourth attempt is being made.
    *
    * 200 either way. A relay that refuses the connection is the answer to the question that
@@ -134,7 +134,7 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
         ok: true,
         code: "ok",
         summary: `Sent to ${body.recipient}.`,
-        hint: "If it does not arrive, the relay accepted it and something after that dropped it — a spam filter, or a rule on the recipient's mailbox.",
+        hint: "If it does not arrive, the relay accepted it and something after that dropped it - a spam filter, or a rule on the recipient's mailbox.",
         detail: null,
       };
     } catch (error) {
@@ -172,11 +172,11 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
 
       The distinction is what the caller asked for. `/:id/send` was told to deliver a report;
       if the relay refuses, the thing it was asked to do did not happen, and 502 is the honest
-      answer. This endpoint was asked to *try one and report back* — and it did, successfully.
+      answer. This endpoint was asked to *try one and report back* - and it did, successfully.
       "No, because the port is closed" is the answer to the question, not a failure to answer.
 
       It also keeps the diagnosis reachable. A non-2xx is turned into an `ApiError` by the
-      client, which keeps the status and the error envelope and discards the body — so every
+      client, which keeps the status and the error envelope and discards the body - so every
       hint and detail assembled above would be replaced by "Request failed with status 502",
       which is how this feature came to report nothing useful in the first place.
     */

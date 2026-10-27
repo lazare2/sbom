@@ -16,7 +16,7 @@ import type { BadgeTone } from "./ui.tsx";
  * several scanners agree the package is malware. There is no good news on this page and the
  * palette must not imply any.
  *
- * The other two are `neutral`, not `warn`. A single-source finding is not a *problem* — it is
+ * The other two are `neutral`, not `warn`. A single-source finding is not a *problem* - it is
  * the ordinary case, 77% of the feed. Colouring three quarters of every table amber would
  * teach people to ignore amber, and the day a genuinely unusual finding appears nobody would
  * see it.

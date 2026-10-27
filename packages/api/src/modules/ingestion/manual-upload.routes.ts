@@ -6,14 +6,14 @@ import { getUser } from "../../plugins/auth.plugin.js";
 import { readAccess } from "../environments/scope.js";
 
 /**
- * `POST /api/v1/applications/:id/scans` — manual SBOM upload.
+ * `POST /api/v1/applications/:id/scans` - manual SBOM upload.
  *
  * The same ingestion as `POST /api/v1/scans`, reached by a signed-in person from
  * an application's scan history instead of by a pipeline with a bearer token. The
  * resulting scan is a normal scan in every respect: it becomes the application's
  * current build, its components are searchable, and it appears in diffs, the
  * dashboard and the analytics report. That equivalence is the requirement, and it
- * is enforced structurally — this route builds no scan rows of its own, it calls
+ * is enforced structurally - this route builds no scan rows of its own, it calls
  * `ingestion.ingestManual()`, which shares one private `store()` with the CI path.
  *
  * Four deliberate differences from the CI endpoint, each because a human is on the
@@ -47,7 +47,7 @@ export async function manualUploadRoutes(fastify: FastifyInstance): Promise<void
    * applications with no human approval, and any pipeline author can use it.
    * Restricting the *named, audited* equivalent to admins while leaving the
    * anonymous-by-design one open to every pipeline would be backwards, and it
-   * would block the case the feature exists for — an engineer holding an SBOM for
+   * would block the case the feature exists for - an engineer holding an SBOM for
    * an application whose pipeline is not wired up yet.
    *
    * The write is also append-only: history is never overwritten, a wrong upload
@@ -149,7 +149,7 @@ export async function manualUploadRoutes(fastify: FastifyInstance): Promise<void
        * The scan is the durable record and it already carries its uploader, so an
        * audit row is a convenience for the admin trail rather than the only
        * evidence. Rolling back a successfully stored scan because the audit insert
-       * failed would be the worse trade — it would turn a logging problem into
+       * failed would be the worse trade - it would turn a logging problem into
        * lost SBOM data.
        */
       await audit.record({
@@ -182,7 +182,7 @@ export async function manualUploadRoutes(fastify: FastifyInstance): Promise<void
         "manual sbom upload completed",
       );
 
-      // Same asynchronous treatment as the CI path — a manual upload is a normal scan
+      // Same asynchronous treatment as the CI path - a manual upload is a normal scan
       // in this respect too, and the receipt should not wait on Grype.
       vulnWorker.requestSweepAfterIngest();
       maliciousWorker.requestSweepAfterIngest();

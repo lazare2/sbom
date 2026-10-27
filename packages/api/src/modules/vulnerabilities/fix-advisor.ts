@@ -101,8 +101,8 @@ function againstEnd(token: Token): number {
  *
  * A heuristic, and stated as one: Maven, npm, PyPI, Debian and RPM each define their own
  * ordering, and none of them is implemented exactly. What is implemented is the part they agree
- * on — numeric runs compare as numbers, `~` and the common pre-release words sort before the
- * release they qualify, an epoch outranks everything — which orders the fix versions scanners
+ * on - numeric runs compare as numbers, `~` and the common pre-release words sort before the
+ * release they qualify, an epoch outranks everything - which orders the fix versions scanners
  * actually report correctly in the overwhelming majority of cases. The recommendation is then
  * checked against the scanner, which is what catches the cases this gets wrong.
  */
@@ -160,7 +160,7 @@ function maxVersion(versions: readonly string[]): string | null {
  *
  * An advisory can list several fixed versions, one per release line (`2.12.2`, `2.15.0`), and
  * the one that matters is the nearest upgrade, not the newest release. Versions at or below the
- * installed one are ignored — they belong to an older line — and if nothing is above it, there
+ * installed one are ignored - they belong to an older line - and if nothing is above it, there
  * is no fix to recommend from this advisory.
  */
 export function chooseFix(fixVersions: readonly string[], installed: string | null): string | null {
@@ -244,7 +244,7 @@ const SEVERITY_RANK: Record<VulnSeverity, number> = {
  * one question.
  *
  * The minimum is the highest of the per-advisory fixes, and never below a version already
- * shipped — recommending 2.15 to a build that also ships 2.16 would be advising a downgrade.
+ * shipped - recommending 2.15 to a build that also ships 2.16 would be advising a downgrade.
  */
 export function planPackages(findings: readonly FindingInput[]): PackagePlan[] {
   const groups = new Map<string, FindingInput[]>();
@@ -627,7 +627,7 @@ export class FixAdvisorService {
 
   /**
    * Answers for a set of candidate purls: from the cache where it is current, from the scanner
-   * otherwise. Never throws — a scanner failure becomes a message, and the recommendations it
+   * otherwise. Never throws - a scanner failure becomes a message, and the recommendations it
    * could not check are reported as unverified.
    */
   private async lookup(

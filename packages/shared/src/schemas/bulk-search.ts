@@ -8,7 +8,7 @@ import { componentSearchSort, nameMatchSchema, type ComponentSearchHit } from ".
  *
  * A different question from the single search, and the difference shapes the
  * response. "Who ships log4j" wants a list of applications. "Of these 40 packages
- * from an advisory, which are we exposed to" wants a verdict on all 40 —
+ * from an advisory, which are we exposed to" wants a verdict on all 40 -
  * *including the misses*, because if only three are present the answer is mostly
  * about the other thirty-seven. A result that returned hits alone would leave the
  * reader diffing two lists by hand, which is the work this exists to remove.
@@ -27,7 +27,7 @@ export const BULK_SEARCH_MAX_ENTRIES = 1000;
 /**
  * Ceiling on distinct packages one input line may match.
  *
- * Only reachable in `contains` mode. Exact matching needs no cap — one name resolves to
+ * Only reachable in `contains` mode. Exact matching needs no cap - one name resolves to
  * one package per ecosystem, and that is what let the original query pass a list of any
  * length as four array parameters and stay bounded. Substring matching removes that
  * guarantee entirely: a one-character entry can match a large slice of the component
@@ -35,7 +35,7 @@ export const BULK_SEARCH_MAX_ENTRIES = 1000;
  *
  * Capped **per line** rather than across the query on purpose. A single global budget lets
  * the first broad entry consume all of it and starve the remaining 199 lines of results
- * they did match — which reads as "those packages aren't here", the exact wrong answer for
+ * they did match - which reads as "those packages aren't here", the exact wrong answer for
  * an audit. Per-line, one bad entry degrades only its own row, and says so.
  *
  * Counts distinct package **names**, not (name, version) rows. That is what the row reports,
@@ -47,12 +47,12 @@ export const BULK_MATCH_CAP_PER_ENTRY = 50;
 
 /** How a version on an input line was interpreted. */
 export type BulkEntryVersionKind =
-  /** No version given — match every version of the package. */
+  /** No version given - match every version of the package. */
   | "any"
   /** An exact version to match. */
   | "exact"
   /**
-   * The line carried a version specifier that is not a single version — a range
+   * The line carried a version specifier that is not a single version - a range
    * (`>=4.2`, `^1.2.3`, `~=2.0`), a wildcard (`==4.2.*`), a negation, or a
    * dist-tag (`@latest`). The specifier is shown but not matched on: the name is
    * matched across all versions instead.
@@ -113,7 +113,7 @@ export interface BulkRollupRow {
   version: string | null;
   versionKind: BulkEntryVersionKind;
   /**
-   * True when the query as asked matched something — including the pinned version,
+   * True when the query as asked matched something - including the pinned version,
    * if one was given.
    */
   found: boolean;
@@ -127,12 +127,12 @@ export interface BulkRollupRow {
    * only "found" would overstate the exposure.
    */
   nameFound: boolean;
-  /** Ecosystems the name was found in — plural when a name exists in several. */
+  /** Ecosystems the name was found in - plural when a name exists in several. */
   ecosystems: string[];
   /**
    * Distinct versions of this package present in the estate, capped for display.
    *
-   * Every version of the name, not just the ones matching a pinned version — so a
+   * Every version of the name, not just the ones matching a pinned version - so a
    * miss can say what *is* there instead of only what is not.
    */
   versionsFound: string[];
@@ -147,7 +147,7 @@ export interface BulkRollupRow {
    *
    * Length is always 0 or 1 in `exact` mode, where the line names one package. In
    * `contains` mode a line can match many, and then the count is the answer the row
-   * leads with — `react` matching twelve packages is neither a yes nor a no, and
+   * leads with - `react` matching twelve packages is neither a yes nor a no, and
    * collapsing it to "found" would overstate the exposure while "not found" would hide it.
    *
    * Capped for display at BULK_MATCH_CAP_PER_ENTRY, and `matchedNamesTruncated` says when
@@ -164,7 +164,7 @@ export interface BulkSearchSummary {
   /** Entries present somewhere in the inventory. */
   found: number;
   notFound: number;
-  /** Entries in some application's current build — the number that usually matters. */
+  /** Entries in some application's current build - the number that usually matters. */
   inCurrentUse: number;
   /** Distinct applications touched by any entry, within the requested scope. */
   applicationsAffected: number;
@@ -181,7 +181,7 @@ const bulkOptionsSchema = z.object({
    */
   view: z.enum(["rollup", "matches"]).default("rollup"),
   /**
-   * Name comparison, defaulting to `exact` — the opposite of the single search.
+   * Name comparison, defaulting to `exact` - the opposite of the single search.
    *
    * That asymmetry is deliberate rather than an oversight. A pasted list is an audit: 200
    * names in, 200 verdicts out, and substring matching would turn a precise question into
@@ -193,7 +193,7 @@ const bulkOptionsSchema = z.object({
 });
 
 /**
- * The `matches` view is the single search's table, so it takes the same sort columns —
+ * The `matches` view is the single search's table, so it takes the same sort columns -
  * one declaration means the two views cannot sort the same header differently.
  */
 const bulkSortSchema = componentSearchSort.querySchema;
@@ -217,7 +217,7 @@ export interface BulkSearchResult {
   /**
    * Identifier of the saved list, so the results have an address.
    *
-   * Every submission gets one — there is no separate "save" action. The list is
+   * Every submission gets one - there is no separate "save" action. The list is
    * the question, and the question is what is worth linking to.
    */
   queryId: string;

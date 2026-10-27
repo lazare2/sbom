@@ -76,7 +76,7 @@ fi
 #
 # Both take a CHARACTER count, not a byte count. Stripping `+/=` out of base64
 # removes an unpredictable number of characters, and `cut` truncates silently
-# rather than failing — so sizing from the input would quietly produce secrets
+# rather than failing - so sizing from the input would quietly produce secrets
 # shorter than intended, including admin passwords under the API's 12-character
 # minimum. Over-generating and cutting to an exact length avoids that.
 rand_b64() {
@@ -87,7 +87,7 @@ rand_hex() {
 }
 
 if [ ! -f .env ]; then
-  step "First run — generating secrets for this deployment"
+  step "First run - generating secrets for this deployment"
 
   SESSION_SECRET="$(rand_b64 64)"
   SECRETS_KEY="$(rand_b64 48)"
@@ -134,7 +134,7 @@ LOG_LEVEL=info
 EOF
 
   cat > CREDENTIALS.txt <<EOF
-SBOM Platform — generated $(date '+%Y-%m-%d %H:%M')
+SBOM Platform - generated $(date '+%Y-%m-%d %H:%M')
 
 Web UI          http://localhost:$PORT
 Sign in         admin@sbom.local

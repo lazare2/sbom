@@ -8,7 +8,7 @@ import type { XrayVulnerability } from "../../src/services/scanner/xray-client.j
  * The shape is fixed by what downstream already expects: the sweep, the frozen per-scan
  * summaries and every dashboard figure are written against `ParsedFinding` and must not be
  * able to tell which provider produced one. So the tests below are mostly about the places
- * where Xray's answer and Grype's answer differ in kind rather than in content — identity,
+ * where Xray's answer and Grype's answer differ in kind rather than in content - identity,
  * fix state, and the two fields Xray simply does not publish.
  *
  * The fixture is shaped like a real response: the Log4Shell issue that the original manual
@@ -45,7 +45,7 @@ describe("mapping an Xray scan onto findings", () => {
     /*
       A CVE is what a reader recognises and searches for. XRAY-192503 is meaningful only
       inside JFrog, so keying on it would make this advisory unrecognisable against anything
-      else the platform stores — and against the same advisory seen under Grype.
+      else the platform stores - and against the same advisory seen under Grype.
     */
     const { findings } = toFindings([LOG4SHELL], mapping);
 
@@ -85,7 +85,7 @@ describe("mapping an Xray scan onto findings", () => {
   it("treats no fix versions as unknown rather than as not-fixed", () => {
     /*
       Xray reports the versions that fix an issue, not a fix *state*. An empty list means
-      Xray knows of no fix — which is not the same claim as "the maintainers will not fix
+      Xray knows of no fix - which is not the same claim as "the maintainers will not fix
       this", and the two differ by whether anybody looked.
     */
     const noFix: XrayVulnerability = {

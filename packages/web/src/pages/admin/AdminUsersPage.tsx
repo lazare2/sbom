@@ -178,7 +178,7 @@ export function AdminUsersPage() {
       <Card>
         <CardHeader
           title="Accounts"
-          subtitle="Sign-in identifiers are usernames, not mailboxes — the platform never sends email. Passwords are issued here and handed over directly."
+          subtitle="Sign-in identifiers are usernames, not mailboxes - the platform never sends email. Passwords are issued here and handed over directly."
           actions={
             <Button
               variant="primary"
@@ -343,8 +343,8 @@ export function AdminUsersPage() {
                             </>
                           ) : null}
                         </Td>
-                        <Td>{u.firstName ?? <span className="text-text-faint">—</span>}</Td>
-                        <Td>{u.lastName ?? <span className="text-text-faint">—</span>}</Td>
+                        <Td>{u.firstName ?? <span className="text-text-faint">-</span>}</Td>
+                        <Td>{u.lastName ?? <span className="text-text-faint">-</span>}</Td>
                         <Td>
                           <Badge tone={u.role === "admin" ? "accent" : "neutral"}>{u.role}</Badge>
                         </Td>
@@ -557,7 +557,7 @@ function CreateUserModal({
    * The access request this create answers, when it was started from the queue.
    *
    * Seeds the identifier and ticks the directory box, because the alternative is reading an
-   * address off the screen and typing it back in — and a typo there creates an account that
+   * address off the screen and typing it back in - and a typo there creates an account that
    * the person it was meant for can never sign in to, with nothing on either screen to show
    * why. The provider already told us the exact string; this uses it.
    */
@@ -690,7 +690,7 @@ function CreateUserModal({
           <SecretReveal
             label={`Password for ${issued.email}`}
             value={issued.password}
-            note="Shown once and never again — it is stored only as a hash. Hand it over directly; the user must change it at first sign-in."
+            note="Shown once and never again - it is stored only as a hash. Hand it over directly; the user must change it at first sign-in."
           />
         </div>
       ) : (
@@ -700,7 +700,7 @@ function CreateUserModal({
           <FormRow
             label="Sign-in identifier"
             htmlFor="new-user-email"
-            hint="Usually a work email, but nothing is ever sent to it — any unique identifier works."
+            hint="Usually a work email, but nothing is ever sent to it - any unique identifier works."
           >
             <TextInput
               id="new-user-email"
@@ -727,8 +727,8 @@ function CreateUserModal({
               value={role}
               onChange={(v) => setRole(v as "admin" | "user")}
               options={[
-                { value: "user", label: "User — read everything" },
-                { value: "admin", label: "Admin — read everything and manage" },
+                { value: "user", label: "User - read everything" },
+                { value: "admin", label: "Admin - read everything and manage" },
               ]}
             />
           </FormRow>
@@ -918,7 +918,7 @@ function SignInMethodModal({
           <SecretReveal
             label={`Password for ${issued.email}`}
             value={issued.password}
-            note="Shown once and never again — it is stored only as a hash. Hand it over directly; the user must change it at first sign-in."
+            note="Shown once and never again - it is stored only as a hash. Hand it over directly; the user must change it at first sign-in."
           />
         </div>
       ) : (
@@ -936,7 +936,7 @@ function SignInMethodModal({
                 Switching to the organisation account{" "}
                 <strong className="text-text-base">discards their password</strong>. They sign in
                 through the provider from then on, and the account is matched to their directory
-                identity the first time they do — by the address above, so it has to be the one
+                identity the first time they do - by the address above, so it has to be the one
                 the directory knows them by.
               </p>
               <p>
@@ -1067,7 +1067,7 @@ function ResetPasswordModal({
  * half the people who expected to see it.
  *
  * The grants themselves are not in the list payload and are deliberately not fetched per
- * row — twenty-five rows would mean twenty-five requests to render a column. They are read
+ * row - twenty-five rows would mean twenty-five requests to render a column. They are read
  * when the editor opens.
  */
 function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void }) {
@@ -1092,7 +1092,7 @@ function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void })
       {/*
         Whether the account is narrowed is worth a badge; *what* it is narrowed to is not,
         because it cannot be rendered honestly here. The grants are not in the list payload
-        and fetching them per row would mean twenty-five requests to draw one column — and a
+        and fetching them per row would mean twenty-five requests to draw one column - and a
         count of groups would be the misleading half of the answer anyway, since groups
         overlap and say nothing about how many applications they reach.
       */}
@@ -1132,8 +1132,8 @@ function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void })
  * Two restrictions with a strict order between them, and the screen is laid out to make that
  * order legible rather than to be tidy. Environments come first because they decide which
  * estates exist for this account at all; groups and applications narrow within those. Ticking
- * a group from an estate the account has not been granted would grant nothing — the two
- * compose by intersection — so only groups from granted estates are offered.
+ * a group from an estate the account has not been granted would grant nothing - the two
+ * compose by intersection - so only groups from granted estates are offered.
  *
  * They were briefly two separate modals. That was worse for one specific reason: an
  * administrator asking "what can this person see" had to open both and hold the intersection
@@ -1286,7 +1286,7 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
             {isAdmin ? (
               <div className="rounded-md border border-accent/40 bg-accent-subtle p-2.5 text-[11px] text-accent">
                 This is an administrator, and administrators reach every environment, group and
-                application — including ones created later. The choices below are stored and
+                application - including ones created later. The choices below are stored and
                 take effect only if the account is changed to a read-only user.
               </div>
             ) : null}
@@ -1640,7 +1640,7 @@ function AccessRequestsCard({
         title={
           pending.length > 0 ? `Access requests (${pending.length})` : "Access requests"
         }
-        subtitle="Recorded when somebody signs in through your organisation's directory and no account could be made for them — automatic account creation is off, their address is outside the allowed domains, or the directory sent no address."
+        subtitle="Recorded when somebody signs in through your organisation's directory and no account could be made for them - automatic account creation is off, their address is outside the allowed domains, or the directory sent no address."
       />
 
       {error ? (
@@ -1697,7 +1697,7 @@ function AccessRequestsCard({
                     ) : null}
                     {request.email === null ? (
                       <div className="text-xs text-warn">
-                        The provider sent no address — ask them for it before creating an account.
+                        The provider sent no address - ask them for it before creating an account.
                       </div>
                     ) : null}
                   </Td>

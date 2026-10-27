@@ -16,7 +16,7 @@ import {
  *
  * Which one a table needs is not a style preference. Sorting one page of a paginated
  * table in the browser reorders the 50 rows on screen and leaves the other 4,000 where they
- * were — the control looks like it works and silently answers a different question. So the
+ * were - the control looks like it works and silently answers a different question. So the
  * rule is: paginated means server-side, always.
  *
  * ## The click cycle
@@ -28,7 +28,7 @@ import {
  *
  * Natural direction comes from the column's kind, declared once in the shared sort table:
  * text opens A→Z, numbers and dates open at the largest and newest. That is the click that
- * answers the question the column is usually opened for — "which application has the most
+ * answers the question the column is usually opened for - "which application has the most
  * findings" wants the most, and "which package is this" wants the alphabet.
  */
 
@@ -44,7 +44,7 @@ export interface SortControl<F extends string> {
 /**
  * Sort state for a server-paginated table.
  *
- * Takes the setter from `useUrlState` so the sort lives in the URL alongside the filters —
+ * Takes the setter from `useUrlState` so the sort lives in the URL alongside the filters -
  * a sorted view is as worth pasting into a ticket as a filtered one.
  */
 export function useServerSort<F extends string>(
@@ -58,7 +58,7 @@ export function useServerSort<F extends string>(
         setState({ sortDir: current.sortDir === "asc" ? "desc" : "asc" });
       } else {
         // A new column starts in its natural direction rather than inheriting the previous
-        // column's — carrying "descending" from a date onto a name column would answer
+        // column's - carrying "descending" from a date onto a name column would answer
         // Z→A to a click that meant "sort by name".
         setState({ sortBy: field, sortDir: table.firstDirectionFor(field) });
       }
@@ -81,13 +81,13 @@ export function useServerSort<F extends string>(
  * covers every column, which keeps the mapping next to the table it belongs to instead of
  * spread across per-column callbacks.
  *
- * `tiebreak` should be something unique per row — the id, or the name. Without it, rows
+ * `tiebreak` should be something unique per row - the id, or the name. Without it, rows
  * with equal values can swap position between renders as the underlying data changes.
  */
 export function useClientSort<T, C extends Readonly<Record<string, SortColumnKind>>>(
   rows: readonly T[] | undefined,
-  // The field union is inferred from these keys. Inferring it from `initial.sortBy` — a
-  // single literal — would narrow it to that one name and reject every other column, the
+  // The field union is inferred from these keys. Inferring it from `initial.sortBy` - a
+  // single literal - would narrow it to that one name and reject every other column, the
   // same trap `defineSortTable` documents.
   columns: C,
   initial: { sortBy: keyof C & string; sortDir?: SortDirection },

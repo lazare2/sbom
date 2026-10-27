@@ -29,14 +29,14 @@ export const REPORT_SEND_HOUR_MAX = 23;
  * A hostname or IP address, and nothing else.
  *
  * Narrow on purpose. This value is handed to a network client, so anything carrying a scheme,
- * a port, a path or a credential pair has to be rejected here rather than interpreted later —
+ * a port, a path or a credential pair has to be rejected here rather than interpreted later -
  * "smtp://user:pass@host:25/" typed into this box should fail loudly rather than silently
  * connect somewhere unintended.
  *
  * ## Why each mistake gets its own message
  *
  * The first version was one regex with one message: "must be a hostname or IP address, with
- * no scheme, port, path or credentials". It is accurate and it is useless — it lists four
+ * no scheme, port, path or credentials". It is accurate and it is useless - it lists four
  * possible mistakes and leaves the reader to work out which one they made, in a field where
  * pasting a connection string is the single most likely thing to do. Each case is now
  * recognised and answered with the specific correction.
@@ -45,7 +45,7 @@ export const REPORT_SEND_HOUR_MAX = 23;
  *
  * That regex allowed a colon, for IPv6 literals. The side effect was that `smtp.corp:25`
  * passed validation, was stored, and was handed to the resolver as a host literally named
- * "smtp.corp:25" — which fails at send time as ENOTFOUND, weeks later, pointing at DNS
+ * "smtp.corp:25" - which fails at send time as ENOTFOUND, weeks later, pointing at DNS
  * rather than at the typo. An IPv6 literal is still accepted, in the bracketed form the URL
  * syntax uses for exactly this reason.
  */
@@ -63,7 +63,7 @@ export const smtpHostSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message });
 
     if (/:\/\//.test(value)) {
-      fail(`Enter the host name on its own — drop the "${value.split("://")[0]}://" prefix.`);
+      fail(`Enter the host name on its own - drop the "${value.split("://")[0]}://" prefix.`);
       return;
     }
     if (value.includes("@")) {
@@ -94,7 +94,7 @@ export const smtpHostSchema = z
  *
  * Deliberately looser than an RFC 5322 parser: a validator that rejects an address the
  * administrator actually has to use is worse than one that accepts an address the relay will
- * refuse anyway — the relay's refusal names the address, and this one used to name nothing.
+ * refuse anyway - the relay's refusal names the address, and this one used to name nothing.
  *
  * A dot in the domain is NOT required, which is the specific case that made this unusable.
  * Internal relays commonly deliver to a single-label domain, and `sbom@intranet` is a real
@@ -148,7 +148,7 @@ export const REPORT_TEMPLATE_PLACEHOLDERS = [
   "{{generatedAt}}",
 ] as const;
 
-export const DEFAULT_REPORT_SUBJECT = "Dependency and vulnerability report — {{period}}";
+export const DEFAULT_REPORT_SUBJECT = "Dependency and vulnerability report - {{period}}";
 
 export const DEFAULT_REPORT_BODY = `Dear all,
 
@@ -171,8 +171,8 @@ Generated automatically on {{generatedAt}}.`;
  * ## Half-configured is a legal state, and refusing it was the bug
  *
  * This used to require a host AND a sender AND them both being valid, on every save. Setting
- * up a relay is not one action — an administrator types the host, saves, tries it, adds the
- * sender, saves again — and every one of those intermediate saves was refused with "Body
+ * up a relay is not one action - an administrator types the host, saves, tries it, adds the
+ * sender, saves again - and every one of those intermediate saves was refused with "Body
  * validation failed" naming a field the person had not reached yet. The form looked
  * configurable and was not, which is exactly how it was reported.
  *
@@ -190,7 +190,7 @@ Generated automatically on {{generatedAt}}.`;
  *
  * Exported separately because `superRefine` returns a wrapper with no `.shape`, and the
  * settings service reads the per-field schemas to recover a stored object one field at a
- * time — so that one value which no longer validates does not discard the recipient list
+ * time - so that one value which no longer validates does not discard the recipient list
  * beside it. Tightening a rule here (as the host rule just was) is exactly when that matters.
  */
 export const reportSettingsFieldsSchema = z.object({
@@ -273,7 +273,7 @@ export type UpdateReportSettings = z.infer<typeof updateReportSettingsSchema>;
  * The connection half of the settings, on its own.
  *
  * Both test actions accept these so an administrator can try what is on screen before
- * committing it. Without that the only way to test a change is to save it first — which means
+ * committing it. Without that the only way to test a change is to save it first - which means
  * the stored configuration briefly describes a relay nobody has confirmed, and if the test
  * fails the previous working values are already gone.
  *
@@ -309,7 +309,7 @@ export type VerifySmtp = z.infer<typeof verifySmtpSchema>;
  * What a test or a connection check reports back.
  *
  * A failure is a 502 carrying this shape rather than an error string, because the useful part
- * is not the relay's raw text — it is which of the handful of things that go wrong went
+ * is not the relay's raw text - it is which of the handful of things that go wrong went
  * wrong, and what to change. `detail` keeps the original message: it is what an administrator
  * pastes to whoever runs the relay.
  */
@@ -337,19 +337,19 @@ export const SMTP_PRESETS = [
   {
     port: 25,
     encryption: "none" as SmtpEncryption,
-    label: "25 — plain",
+    label: "25 - plain",
     hint: "The usual choice for an internal relay that accepts mail from inside the network.",
   },
   {
     port: 587,
     encryption: "starttls" as SmtpEncryption,
-    label: "587 — STARTTLS",
+    label: "587 - STARTTLS",
     hint: "Submission port. The connection starts in the clear and is upgraded to TLS.",
   },
   {
     port: 465,
     encryption: "tls" as SmtpEncryption,
-    label: "465 — TLS",
+    label: "465 - TLS",
     hint: "TLS from the first byte.",
   },
 ] as const;

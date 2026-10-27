@@ -28,7 +28,7 @@ import type { VulnReportService } from "../vulnerabilities/vuln-report.service.j
  * report.
  *
  * Most sections are counts and set comparisons over SBOM contents the platform
- * received, and rank nothing by risk — topProjects measures size and fragmentation
+ * received, and rank nothing by risk - topProjects measures size and fragmentation
  * measures version spread, and both say so where a reader might assume otherwise.
  *
  * The vulnerability sections are the exception: they report what Grype found when
@@ -75,7 +75,7 @@ export class AnalyticsService {
     /**
      * Narrows the vulnerability sections only. Severity has no meaning for churn,
      * coverage or platform mix, so the inventory sections describe the whole estate under
-     * every filter — and the page states that rather than leaving it to be inferred.
+     * every filter - and the page states that rather than leaving it to be inferred.
      */
     vulnFilter?: VulnFilterState;
     /** Every section below describes one estate. There is no all-environments report. */
@@ -87,7 +87,7 @@ export class AnalyticsService {
       The group is the one part of the filter that reaches the inventory sections.
 
       Severity and scope describe findings, which is why they narrow only the vulnerability
-      half — the note on `vulnFilter` above says so. A group describes *applications*, and
+      half - the note on `vulnFilter` above says so. A group describes *applications*, and
       every section here is an aggregate over applications, so leaving churn, coverage and
       the platform mix estate-wide while the vulnerability cards showed one product would
       put two different populations on one page under one heading.
@@ -364,7 +364,7 @@ export class AnalyticsService {
         count(DISTINCT cc.application_id)::int AS applications,
         /*
          * A sample of the versions, so the row names the actual spread without a
-         * drill-down. Sorted as text, which is not semver order — these are
+         * drill-down. Sorted as text, which is not semver order - these are
          * illustrative, and the count above is the figure that ranks the row.
          */
         (array_agg(DISTINCT c.version ORDER BY c.version) FILTER (WHERE c.version IS NOT NULL))[1:6]
@@ -535,7 +535,7 @@ export class AnalyticsService {
         /*
          * The third bucket: newest build predates the window, so the baseline is
          * the current build and nothing changed. Counted here rather than derived
-         * downstream so all three come from one population — subtracting the
+         * downstream so all three come from one population - subtracting the
          * other two from an application total computed with a different status
          * filter gives a plausible-looking wrong answer.
          */
@@ -578,7 +578,7 @@ export class AnalyticsService {
     const inGroup = applicationScopePredicate(groupId, scope);
     // Daily for windows a reader can still take in as bars, weekly beyond that.
     // Interpolated into the SQL rather than bound, because `date_trunc` and
-    // `generate_series` need literals — hence the fixed strings, not the input.
+    // `generate_series` need literals - hence the fixed strings, not the input.
     const unit = periodDays <= 45 ? "day" : "week";
     const step = sql.raw(`interval '1 ${unit}'`);
     const truncUnit = sql.raw(`'${unit}'`);
@@ -601,7 +601,7 @@ export class AnalyticsService {
          * The lower bound is clamped to the window start, not just to the
          * bucket's own start. date_trunc rounds the first bucket back to
          * midnight (or to Monday), which reaches behind the window and would
-         * pull in scans that no other section counts — so the bars would sum to
+         * pull in scans that no other section counts - so the bars would sum to
          * more than the reported scans-in-window, and anyone adding them up
          * would find a discrepancy. The first bar is therefore a partial
          * day or week, which is what it honestly is.

@@ -24,7 +24,7 @@ export function useUrlState<T extends Record<string, unknown>>(spec: UrlStateSpe
   /**
    * Merges a patch into the current state.
    *
-   * Any change other than an explicit page change resets to page 1 — landing on
+   * Any change other than an explicit page change resets to page 1 - landing on
    * page 7 of a freshly narrowed result set is almost never what was meant.
    */
   const setState = useCallback(

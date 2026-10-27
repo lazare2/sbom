@@ -21,6 +21,8 @@ import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
 import { SquadsService } from "./modules/squads/squads.service.js";
+import { TeamAttributes } from "./modules/squads/team-attributes.js";
+import { TribesService } from "./modules/squads/tribes.service.js";
 import { ScansAdminService } from "./modules/scans/scans.admin.service.js";
 import { ExportService } from "./modules/exports/export.service.js";
 import { MaliciousService } from "./modules/malicious/malicious.service.js";
@@ -97,7 +99,7 @@ export interface AppContext {
    *
    * Present in the graph whether or not scanning is enabled. The feature flag is a
    * runtime setting rather than a wiring decision, so these are always constructed and
-   * simply report "disabled" — which is what lets the admin panel explain the state
+   * simply report "disabled" - which is what lets the admin panel explain the state
    * instead of the routes disappearing.
    */
   settings: SettingsService;
@@ -144,6 +146,7 @@ export interface AppContext {
   adminApplications: AdminApplicationsService;
   adminGroups: GroupsAdminService;
   squads: SquadsService;
+  tribes: TribesService;
   adminScans: ScansAdminService;
   adminMalicious: MaliciousAdminService;
   attributeDefinitions: AttributeDefinitionsService;
@@ -292,7 +295,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   /*
     These two guard each other: a database may not be replaced while a sweep holds it
     open, and a sweep may not start while it is being replaced. The references are
-    mutual, so they are passed as thunks rather than as the objects — each body runs long
+    mutual, so they are passed as thunks rather than as the objects - each body runs long
     after both constructors have returned, which is what keeps the cycle harmless.
   */
   const vulnDb = new VulnDbService({
@@ -364,9 +367,13 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   // Write side. (`audit` is built above, with the auth service that also writes to it.)
   const apiErrors = new ApiErrorService({ db });
   const adminUsers = new AdminUsersService({ db, sessions, audit, environments });
-  const adminApplications = new AdminApplicationsService({ db, audit, applications });
+  // Keeps each application's squad and tribe attributes in step with the assignment tables,
+  // from whichever side changes them.
+  const teams = new TeamAttributes({ db });
+  const adminApplications = new AdminApplicationsService({ db, audit, applications, teams });
   const adminGroups = new GroupsAdminService({ db, audit, groups });
-  const squads = new SquadsService({ db, audit });
+  const squads = new SquadsService({ db, audit, teams, settings });
+  const tribes = new TribesService({ db, audit, teams });
   const adminMalicious = new MaliciousAdminService({
     db,
     audit,
@@ -423,6 +430,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     adminApplications,
     adminGroups,
     squads,
+    tribes,
     adminScans,
     adminMalicious,
     attributeDefinitions,

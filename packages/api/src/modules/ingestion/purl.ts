@@ -25,7 +25,7 @@ export function purlType(purl: string): string | null {
  * Qualifier order is not semantically meaningful in a purl, but Syft has changed
  * its emission order between versions. Without sorting, a Syft upgrade would
  * fork every OS package in the component table into a second row that looks like
- * a different package — inflating storage and, worse, making "which apps use
+ * a different package - inflating storage and, worse, making "which apps use
  * libc6 2.36" quietly return half the answer.
  *
  * Lowercases the scheme and type only. The namespace, name, and version are

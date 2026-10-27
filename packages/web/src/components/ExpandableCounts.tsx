@@ -9,7 +9,7 @@ import { Td } from "./ui.tsx";
  * A count alone was the honest answer for as long as the detail was not on the row: one
  * advisory reaches many packages and many applications, so there is no single value to put
  * in the cell. Now that the lists travel with the row there is something to open, and
- * opening it is the point — "8 packages" and "eight versions of openssl" are very different
+ * opening it is the point - "8 packages" and "eight versions of openssl" are very different
  * findings, and only the second says it is one upgrade.
  *
  * Every list here is produced by the same aggregate, under the same WHERE clause and the
@@ -37,8 +37,8 @@ export function ExpandableCountCell({
 }) {
   /*
     Derived rather than carried as a flag, so it cannot disagree with the list it describes.
-    Over-reports in one rare case — two entries identical after formatting collapse into one
-    but count as two — and never under-reports, which is the safe direction: a partial list
+    Over-reports in one rare case - two entries identical after formatting collapse into one
+    but count as two - and never under-reports, which is the safe direction: a partial list
     that looks complete is the failure worth avoiding.
   */
   const hidden = count - items.length;

@@ -5,7 +5,7 @@ import { ValidationError } from "../../lib/errors.js";
 /**
  * Validate a set of attribute values against the admin-managed definitions.
  *
- * The definitions are runtime data, so this cannot be a static Zod schema — it
+ * The definitions are runtime data, so this cannot be a static Zod schema - it
  * is the reason `attribute_definition` exists as a table rather than as fixed
  * columns. Adding "tier" or "cost_centre" is an admin action, not a migration.
  *
@@ -31,7 +31,7 @@ export function validateAttributes(
     }
 
     // An explicit null clears the key. Distinct from omitting it, which leaves
-    // the stored value untouched — that difference is what lets the edit form
+    // the stored value untouched - that difference is what lets the edit form
     // send a partial patch.
     if (raw === null || raw === "") {
       cleaned[key] = null;
@@ -82,6 +82,34 @@ export function validateAttributes(
   }
 
   return cleaned;
+}
+
+/**
+ * Refuses a save that leaves a required attribute empty.
+ *
+ * `values` is what the application will hold after the save. `onlyKeys`, when given, limits the
+ * check to the keys the request actually touched: an edit that changes the owner is not refused
+ * because some other required attribute was never filled on an application created by CI. Create
+ * and confirm check everything, since those are the moments an administrator vouches for the
+ * record as a whole.
+ */
+export function assertRequiredPresent(
+  definitions: readonly AttributeDefinitionRow[],
+  values: Attributes,
+  onlyKeys?: readonly string[],
+): void {
+  const errors: Record<string, string[]> = {};
+  for (const def of definitions) {
+    if (!def.isRequired || !def.isActive) continue;
+    if (onlyKeys && !onlyKeys.includes(def.key)) continue;
+    const value = values[def.key];
+    if (value === null || value === undefined || String(value).trim() === "") {
+      errors[def.key] = [`"${def.label}" is required`];
+    }
+  }
+  if (Object.keys(errors).length > 0) {
+    throw new ValidationError("Some required attributes are empty", errors);
+  }
 }
 
 /**

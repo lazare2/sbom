@@ -17,7 +17,7 @@ function rejected(line: string) {
   return summary.problems[0]!;
 }
 
-describe("parseBulkInput — the documented format", () => {
+describe("parseBulkInput - the documented format", () => {
   it("reads the exact list from the feature request", () => {
     const { entries, summary } = parseBulkInput(
       ["logaas", "@wb-track/shared-front", "cnapp-ui", "keyv@6.0.0"].join("\n"),
@@ -76,7 +76,7 @@ describe("parseBulkInput — the documented format", () => {
   });
 });
 
-describe("parseBulkInput — ecosystem-native formats", () => {
+describe("parseBulkInput - ecosystem-native formats", () => {
   it("reads a pip pin as an exact version", () => {
     expect(one("django==4.2.1")).toMatchObject({
       name: "django",
@@ -129,7 +129,7 @@ describe("parseBulkInput — ecosystem-native formats", () => {
   it("reads a maven coordinate under its artifact id", () => {
     // Syft catalogues maven components by artifact, which is what `component` holds.
     //
-    // The ecosystem must be `maven`, the purl type — not `java-archive`, which is
+    // The ecosystem must be `maven`, the purl type - not `java-archive`, which is
     // Syft's package-type property and matches no `component.ecosystem` value.
     // Getting this wrong made every maven coordinate silently return nothing.
     expect(one("com.fasterxml.jackson.core:jackson-databind:2.17.2")).toMatchObject({
@@ -151,7 +151,7 @@ describe("parseBulkInput — ecosystem-native formats", () => {
   });
 });
 
-describe("parseBulkInput — version specifiers that are not a version", () => {
+describe("parseBulkInput - version specifiers that are not a version", () => {
   it("drops a range and matches the name across all versions", () => {
     // The safe direction: matching 4.2 exactly would be silently wrong, and
     // dropping the line would hide a real hit.
@@ -207,7 +207,7 @@ describe("parseBulkInput — version specifiers that are not a version", () => {
   });
 });
 
-describe("parseBulkInput — rejections", () => {
+describe("parseBulkInput - rejections", () => {
   it("rejects a line with more than two fields", () => {
     expect(rejected("express 4.19.2 extra").reason).toContain("one package on each line");
   });
@@ -237,7 +237,7 @@ describe("parseBulkInput — rejections", () => {
   });
 });
 
-describe("parseBulkInput — deduplication", () => {
+describe("parseBulkInput - deduplication", () => {
   it("collapses case-insensitive duplicates", () => {
     // Matching is case-insensitive, so running both would produce two identical
     // rows.
@@ -252,7 +252,7 @@ describe("parseBulkInput — deduplication", () => {
   });
 
   it("collapses a dropped-specifier entry into the bare name", () => {
-    // Both ask the database the same question — every version of express — so
+    // Both ask the database the same question - every version of express - so
     // keeping both would duplicate a row for no reason.
     const { entries, summary } = parseBulkInput(["express", "express@^4"].join("\n"));
     expect(entries).toHaveLength(1);
@@ -265,7 +265,7 @@ describe("parseBulkInput — deduplication", () => {
   });
 });
 
-describe("parseBulkInput — limits", () => {
+describe("parseBulkInput - limits", () => {
   it("caps the list and says so", () => {
     const input = Array.from({ length: BULK_SEARCH_MAX_ENTRIES + 50 }, (_v, i) => `pkg-${i}`).join("\n");
     const { entries, summary } = parseBulkInput(input);

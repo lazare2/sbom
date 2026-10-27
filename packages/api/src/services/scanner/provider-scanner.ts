@@ -24,7 +24,7 @@ import type {
  * a screen: the process would keep talking to the database it was born with until somebody
  * restarted it, and nothing on the admin panel would say so.
  *
- * Resolving per call keeps every existing call site — fourteen of them — unchanged, and
+ * Resolving per call keeps every existing call site - fourteen of them - unchanged, and
  * means the switch takes effect on the next question anybody asks.
  *
  * ## What happens when Xray is selected but not usable
@@ -93,7 +93,7 @@ export class ProviderScanner implements VulnerabilityScanner {
  *
  * Every method answers the way an unusable scanner should: unavailable, no database, no
  * watermark. The sweep's own guards then stop it, so nothing is assessed and nothing is
- * stamped — which is what keeps "the connection is broken" from rendering as "the estate is
+ * stamped - which is what keeps "the connection is broken" from rendering as "the estate is
  * clean".
  */
 export class UnavailableScanner implements VulnerabilityScanner {
@@ -157,7 +157,7 @@ export class UnavailableScanner implements VulnerabilityScanner {
   /**
    * Submits nothing and reports nothing assessed.
    *
-   * Never reached in practice — the sweep stops at `availability` — but a `match` that threw
+   * Never reached in practice - the sweep stops at `availability` - but a `match` that threw
    * would turn a configuration problem into a crashed background job, and one that returned
    * component ids would mark them assessed by a scanner that does not exist.
    */

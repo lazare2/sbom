@@ -10,7 +10,7 @@ import {
 /**
  * Rewriting packages into Xray's coordinate form.
  *
- * The failure this guards against is not a crash — it is a coordinate that is *plausible and
+ * The failure this guards against is not a crash - it is a coordinate that is *plausible and
  * wrong*. Xray answers an unrecognised identifier the same way it answers a clean package:
  * with no findings. So a mistake here does not surface as an error, it surfaces as an estate
  * that looks safe.
@@ -158,7 +158,7 @@ describe("mapping a package to an Xray coordinate", () => {
   });
 
   it("refuses a package with no version", () => {
-    // Legal in CycloneDX, and Xray matches coordinates against version ranges — so a
+    // Legal in CycloneDX, and Xray matches coordinates against version ranges - so a
     // versionless one matches nothing rather than matching everything.
     expect(toXrayCoordinate(pkg({ version: null }))).toBeNull();
     expect(toXrayCoordinate(pkg({ version: "   " }))).toBeNull();
@@ -256,7 +256,7 @@ describe("Alpine packages, against identifiers a real Xray produced", () => {
   it("refuses a package whose release cannot be read", () => {
     /*
       Null, not a best guess. A rolling release has no number to submit, and a package with no
-      distro qualifier gives nothing to derive one from — in both cases the coordinate would
+      distro qualifier gives nothing to derive one from - in both cases the coordinate would
       match nothing while reporting as assessed.
     */
     expect(
@@ -323,7 +323,7 @@ describe("the coverage canaries", () => {
       }),
     };
 
-    /** How many colon-separated fields follow the scheme — the part that differs per shape. */
+    /** How many colon-separated fields follow the scheme - the part that differs per shape. */
     const fields = (coordinate: string) =>
       coordinate.slice(coordinate.indexOf("://") + 3).split(":").length;
 

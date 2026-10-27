@@ -44,7 +44,7 @@ const TIMEOUT_MS = 15_000;
  *
  * Everything that goes wrong with SMTP arrives as an `Error` carrying a short code and a
  * message written for whoever wrote the network stack. Left alone it reached the API's error
- * handler as an unrecognised exception and came back as **500 Internal server error** — the
+ * handler as an unrecognised exception and came back as **500 Internal server error** - the
  * one answer that is both alarming and useless, because it says the platform is broken when
  * the platform is working and the relay is not.
  *
@@ -83,12 +83,12 @@ interface NodeMailerError {
  *   TLS to a plain port code ESOCKET, syscall connect,     message "connect ECONNREFUSED …"
  *
  * So `ESOCKET` is a catch-all for socket-level trouble, not the encryption failure it looks
- * like — mapping it to "encryption mismatch" reported a closed port as a TLS problem and sent
+ * like - mapping it to "encryption mismatch" reported a closed port as a TLS problem and sent
  * the reader to change a dropdown that was already right. A vague answer wastes time; a
  * confident wrong one wastes more.
  *
  * The underlying errno is therefore matched first, and nodemailer's own code is consulted
- * only for the states that have no syscall behind them — authentication and envelope
+ * only for the states that have no syscall behind them - authentication and envelope
  * rejection, which are SMTP-level answers rather than network ones.
  */
 export function diagnose(error: unknown, connection: SmtpConnection): SmtpDiagnosis {
@@ -118,7 +118,7 @@ export function diagnose(error: unknown, connection: SmtpConnection): SmtpDiagno
     return say(
       "connection_refused",
       `Nothing is listening on ${where}.`,
-      `The host was reached, so the address is right and the port is probably wrong — or the mail service is not running. Port 25 is the usual one for an internal relay.`,
+      `The host was reached, so the address is right and the port is probably wrong - or the mail service is not running. Port 25 is the usual one for an internal relay.`,
     );
   }
 
@@ -127,7 +127,7 @@ export function diagnose(error: unknown, connection: SmtpConnection): SmtpDiagno
       "timed_out",
       `No answer from ${where} within ${TIMEOUT_MS / 1000} seconds.`,
       connection.smtpEncryption === "tls"
-        ? 'A firewall may be dropping the connection — or the relay expects plain text and is waiting for a command it cannot read. Try Encryption "Plain".'
+        ? 'A firewall may be dropping the connection - or the relay expects plain text and is waiting for a command it cannot read. Try Encryption "Plain".'
         : "A firewall dropping the connection silently looks exactly like this, as does a host that is up but not running a mail service.",
     );
   }
@@ -175,7 +175,7 @@ export function diagnose(error: unknown, connection: SmtpConnection): SmtpDiagno
     return say(
       "relay_refused",
       `The relay answered ${err.responseCode} and refused the request.`,
-      "The message below is the relay's own — whoever administers it will recognise the code.",
+      "The message below is the relay's own - whoever administers it will recognise the code.",
     );
   }
 
@@ -214,7 +214,7 @@ export class Mailer {
    *
    * Offered to the admin page so a misconfiguration is found when someone is looking at the
    * screen, rather than at 09:00 on the first working day of next month. It opens the
-   * session, greets, negotiates encryption and stops — which is where all but one of the
+   * session, greets, negotiates encryption and stops - which is where all but one of the
    * failures above happen, so it answers "will this work" without putting a test message in
    * somebody's inbox.
    *

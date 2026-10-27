@@ -134,7 +134,7 @@ export function toQueryString(params: Record<string, unknown>): string {
  *
  * Otherwise it reuses `request`'s error handling by going through the same status
  * and envelope logic, so an ApiError from an upload carries `code` and `details`
- * exactly like every other call — which the duplicate-SBOM 409 relies on.
+ * exactly like every other call - which the duplicate-SBOM 409 relies on.
  */
 async function upload<T>(path: string, form: FormData): Promise<T> {
   const response = await fetch(`${BASE}${withEnvironment(path)}`, {

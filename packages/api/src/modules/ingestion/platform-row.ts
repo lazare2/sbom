@@ -33,7 +33,7 @@ export function toScanPlatform(row: PlatformRow): ScanPlatform {
  * Defensively normalises the jsonb column.
  *
  * jsonb is schemaless from Postgres's point of view, and these rows can predate
- * the current shape — a scan ingested before this feature existed has SQL NULL,
+ * the current shape - a scan ingested before this feature existed has SQL NULL,
  * and a hand-edited row could hold anything. Validating here keeps a malformed
  * value from reaching the UI as a crash on `.map`.
  */

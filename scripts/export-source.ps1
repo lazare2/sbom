@@ -54,7 +54,7 @@ if (Test-Path $dest) {
 $excludeDirs = @(
     "node_modules", "var", "dist", ".git", ".vscode", ".turbo", "playwright-report",
     # Output of build-offline-bundle.ps1. A previously built bundle left here is 330 MB of
-    # images.tar — a hundred times the size of the source it sits next to, and the target
+    # images.tar - a hundred times the size of the source it sits next to, and the target
     # rebuilds from source anyway.
     "dist-offline"
 )
@@ -65,13 +65,13 @@ Write-Host "`nCopying source" -ForegroundColor Cyan
 Write-Host "    excluding: $($excludeDirs -join ', ')" -ForegroundColor DarkGray
 
 <#
-  /E all subdirectories including empty, and the /N* switches silence per-file logging —
+  /E all subdirectories including empty, and the /N* switches silence per-file logging -
   without them this prints thousands of lines. robocopy's exit codes below 8 are success
   (1 = files copied, 2 = extra files, 3 = both), so $LASTEXITCODE is checked against 8
   rather than 0.
 
   /XJ is not optional here. npm workspaces puts symlinks in node_modules pointing back at
-  packages/ — node_modules\@sbom\api is packages\api. Without /XJ, robocopy follows them
+  packages/ - node_modules\@sbom\api is packages\api. Without /XJ, robocopy follows them
   and copies the tree a second time through the link, which includes var\grype-db and its
   1.9 GB vulnerability database. That fills the disk rather than failing cleanly, and the
   error it reports ("There is not enough space on the disk") says nothing about the cause.

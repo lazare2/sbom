@@ -4,7 +4,7 @@ import { uuidSchema } from "./common.js";
 /**
  * Environments: isolated estates within one deployment.
  *
- * The same service commonly exists in more than one — a `test` copy carrying changes that
+ * The same service commonly exists in more than one - a `test` copy carrying changes that
  * have not shipped, and a `production` copy that is what customers actually run. They are
  * **two applications**, not one application in two states, because their component lists
  * genuinely differ and neither is a version of the other at any given moment.
@@ -32,7 +32,7 @@ import { uuidSchema } from "./common.js";
  * ## Names are an ingest identifier
  *
  * A pipeline names its environment in the upload, so this string lives in CI configuration.
- * Renaming one is therefore a change to a published interface, not a cosmetic edit — which
+ * Renaming one is therefore a change to a published interface, not a cosmetic edit - which
  * is why the admin screen warns rather than treating it as a relabel.
  */
 
@@ -111,7 +111,7 @@ export interface EnvironmentAccess {
 
 export const setUserEnvironmentsRequestSchema = z.object({
   /**
-   * The complete set, not a delta — the admin screen edits a checklist, so the whole set is
+   * The complete set, not a delta - the admin screen edits a checklist, so the whole set is
    * what it knows, and two admins editing at once would otherwise each apply their delta to
    * a set the other had already changed.
    *
@@ -143,7 +143,7 @@ export const environmentQuerySchema = z.object({
  * and the moment such a field exists somebody will render it. The comparison exists so the
  * two can be read against each other, not combined.
  *
- * `vulnerabilities` is null when scanning is off or nothing has been assessed — never a
+ * `vulnerabilities` is null when scanning is off or nothing has been assessed - never a
  * block of zeros, which would read as "this estate is clean".
  */
 export interface EnvironmentComparisonRow {
@@ -168,7 +168,7 @@ export interface EnvironmentComparison {
   environments: EnvironmentComparisonRow[];
   /**
    * False when vulnerability scanning is off platform-wide. The rows still carry every
-   * other figure, and every `vulnerabilities` block is null — so the page can say "not
+   * other figure, and every `vulnerabilities` block is null - so the page can say "not
    * assessed" once, rather than repeating it per estate.
    */
   vulnerabilityScanningEnabled: boolean;

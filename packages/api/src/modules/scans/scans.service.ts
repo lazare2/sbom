@@ -1,5 +1,12 @@
 import { sql, type SQL } from "drizzle-orm";
-import type { ListScansQuery, Paginated, ScanSource, ScanSummary, SortDirection } from "@sbom/shared";
+import type {
+  ListScansQuery,
+  Paginated,
+  ScanSeverityCounts,
+  ScanSource,
+  ScanSummary,
+  SortDirection,
+} from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import type { EnvironmentAccess } from "@sbom/shared";
 import { applicationInScope, applicationReadableBy, type ReadAccess, type ReadScope } from "../environments/environment.service.js";
@@ -17,7 +24,7 @@ import { rowsOf, toIso, type Row } from "../applications/applications.service.js
  * same commit can share a timestamp to the millisecond, and CI running two pipelines
  * concurrently makes that ordinary rather than rare.
  *
- * Build numbers sort with `NULLS LAST` because a manually uploaded SBOM has none — that is
+ * Build numbers sort with `NULLS LAST` because a manually uploaded SBOM has none - that is
  * a scan with no build, not build zero.
  */
 function scanHistoryOrderBy(sortBy: ListScansQuery["sortBy"], dir: SortDirection): SQL {
@@ -64,6 +71,10 @@ interface ScanQueryRow extends PlatformRow {
   uploaded_by_email: string | null;
   locations_extracted_at: Date | string | null;
   dependencies_extracted_at: Date | string | null;
+  /** Only selected by the history list; absent elsewhere. */
+  vuln_counts?: ScanSeverityCounts | null;
+  superseded_counts?: ScanSeverityCounts | null;
+  superseded_at?: Date | string | null;
   total?: number | string;
 }
 
@@ -116,9 +127,11 @@ export class ScansService {
         s.os_name, s.os_version, s.os_pretty, s.runtimes,
         s.source, s.uploaded_by_email, s.locations_extracted_at, s.dependencies_extracted_at,
         (s.id = a.latest_scan_id) AS is_latest,
+        vs.counts AS vuln_counts, vs.superseded_counts, vs.superseded_at,
         count(*) OVER () AS total
       FROM scan s
       JOIN application a ON a.id = s.application_id
+      LEFT JOIN scan_vuln_summary vs ON vs.scan_id = s.id
       ${where}
       ${scanHistoryOrderBy(query.sortBy, query.sortDir)}
       LIMIT ${query.pageSize} OFFSET ${offsetOf(query)}
@@ -212,7 +225,7 @@ export class ScansService {
     const row = rowsOf(rows)[0];
     if (!row) throw new NotFoundError("Scan");
 
-    // Throws NotFoundError if the blob is gone — e.g. trimmed by a raw-SBOM
+    // Throws NotFoundError if the blob is gone - e.g. trimmed by a raw-SBOM
     // retention sweep while the scan row itself was retained.
     const body = await this.deps.blobStore.get(row.sbom_blob_key);
 
@@ -274,5 +287,12 @@ function toScanSummary(row: ScanQueryRow): ScanSummary {
     uploadedByEmail: row.uploaded_by_email ?? null,
     locationsExtractedAt: toIso(row.locations_extracted_at ?? null),
     dependenciesExtractedAt: toIso(row.dependencies_extracted_at ?? null),
+    vulnerabilities: row.vuln_counts
+      ? {
+          today: row.vuln_counts,
+          whenReplaced: row.superseded_counts ?? null,
+          replacedAt: toIso(row.superseded_at ?? null),
+        }
+      : null,
   };
 }

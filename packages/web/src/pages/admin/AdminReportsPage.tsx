@@ -60,7 +60,7 @@ function GenerateCard() {
             before pressing this, because it is invisible afterwards.
           */}
           This produces a report to look at. It is not emailed, and it does not become the
-          comparison point for next month — the scheduled monthly report keeps that role, so
+          comparison point for next month - the scheduled monthly report keeps that role, so
           pressing this cannot shorten the period the next report covers.
         </p>
         <div className="flex items-center gap-3">
@@ -146,7 +146,7 @@ function ScheduleCard() {
           onChange={(enabled) => update.mutate({ ...settings, enabled })}
           label={
             settings.enabled
-              ? "On — sent on the first working day of each month"
+              ? "On - sent on the first working day of each month"
               : "Send the report automatically each month"
           }
           disabled={!configured || update.isPending}

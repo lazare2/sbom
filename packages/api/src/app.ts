@@ -66,7 +66,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       ...(config.isProduction ? {} : { transport: undefined }),
     },
     // Sits behind nginx in the compose deployment, so trust the proxy's
-    // X-Forwarded-* headers — otherwise every client IP logs as the proxy's and
+    // X-Forwarded-* headers - otherwise every client IP logs as the proxy's and
     // rate limiting buckets the whole organisation together.
     trustProxy: true,
     // Ingest SBOMs are large; the multipart plugin enforces the real limit per
@@ -91,7 +91,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   // --- security & parsing ---------------------------------------------------
   await app.register(helmet, {
-    // The API serves JSON only — the SPA is served by nginx (or Vite in dev),
+    // The API serves JSON only - the SPA is served by nginx (or Vite in dev),
     // which owns its own CSP. Enabling one here would only apply to error pages.
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: "same-site" },
@@ -100,7 +100,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(cors, {
     // In the compose deployment the SPA is same-origin behind nginx and CORS is
     // unused. In development the Vite dev server is on another port, so the
-    // public URL has to be allowed explicitly — with credentials, since auth is
+    // public URL has to be allowed explicitly - with credentials, since auth is
     // a cookie.
     origin: [config.PUBLIC_URL, ...config.CORS_ORIGINS],
     credentials: true,

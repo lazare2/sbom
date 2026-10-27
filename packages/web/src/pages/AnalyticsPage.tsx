@@ -48,7 +48,7 @@ import {
  * are load-bearing:
  *
  *   1. Every count that can be filtered for is a link. A metric you cannot drill
- *      into is trivia — "9 stale applications" only becomes work once you can see
+ *      into is trivia - "9 stale applications" only becomes work once you can see
  *      which nine.
  *   2. The window is in the URL, and the PDF link carries the same window. What
  *      you print is what you are looking at.
@@ -58,7 +58,7 @@ import {
  * rather than leaving the reader to assume.
  *
  * The vulnerability sections are the exception and come from Grype. When scanning is
- * disabled they are replaced by an explicit notice, never by zeros — an unassessed estate
+ * disabled they are replaced by an explicit notice, never by zeros - an unassessed estate
  * rendered as a clean one is the worst failure this page could have.
  */
 
@@ -153,7 +153,7 @@ export function AnalyticsPage() {
 
       {/*
         Vulnerability sections, immediately after the totals.
-        `null` means scanning is disabled — rendered as an explicit notice rather than
+        `null` means scanning is disabled - rendered as an explicit notice rather than
         omitted, so a reader cannot mistake a report with no findings section for an estate
         with no findings.
       */}
@@ -235,7 +235,7 @@ export function AnalyticsPage() {
             report.platforms.unknown > 0
               ? `${formatNumber(report.platforms.unknown)} application${
                   report.platforms.unknown === 1 ? "" : "s"
-                } reported neither an OS nor a runtime — expected for scratch and distroless images.`
+                } reported neither an OS nor a runtime - expected for scratch and distroless images.`
               : undefined
           }
         />
@@ -333,7 +333,7 @@ function CoverageBanner({ report }: { report: AnalyticsReport }) {
       }`}
     >
       <p className={`text-sm font-medium ${complete ? "text-ok" : "text-warn"}`}>
-        {coverage.coveragePct}% scan coverage — {formatNumber(coverage.covered)} of{" "}
+        {coverage.coveragePct}% scan coverage - {formatNumber(coverage.covered)} of{" "}
         {formatNumber(coverage.eligible)} active applications reported a build in the last{" "}
         {meta.staleThresholdDays} days
       </p>
@@ -421,7 +421,7 @@ function TopPackagesCard({ report }: { report: AnalyticsReport }) {
   /*
     Reduced over every row, not read off rows[0]. The bars are relative to the largest
     value, and taking it from the first row silently assumed the array was still in the
-    server's descending order — which stopped being true the moment these headers became
+    server's descending order - which stopped being true the moment these headers became
     sortable. Sorting by name would then scale every bar to whatever package happened to
     sort first.
   */
@@ -438,7 +438,7 @@ function TopPackagesCard({ report }: { report: AnalyticsReport }) {
     <Card>
       <CardHeader
         title={`Top ${rows.length} most widely deployed packages`}
-        subtitle="Present in the most applications' current builds — the blast radius if one turns out to be a problem. Operating systems and runtimes are excluded and shown separately."
+        subtitle="Present in the most applications' current builds - the blast radius if one turns out to be a problem. Operating systems and runtimes are excluded and shown separately."
       />
       {rows.length === 0 ? (
         <EmptyState title="No package data yet" hint="Counts appear once the first SBOM is ingested." />
@@ -473,7 +473,7 @@ function TopPackagesCard({ report }: { report: AnalyticsReport }) {
                     <EcosystemBadge ecosystem={c.ecosystem} />
                   </Td>
                   <Td>
-                    <Mono>{c.version ?? "—"}</Mono>
+                    <Mono>{c.version ?? " - "}</Mono>
                   </Td>
                   <ApplicationsCell
                     count={c.applications}
@@ -509,7 +509,7 @@ function TopProjectsCard({ report }: { report: AnalyticsReport }) {
     <Card>
       <CardHeader
         title={`Top ${rows.length} applications by package count`}
-        subtitle="Largest current builds. A size ranking, not a risk ranking — a big image costs more to review and patch, but is not automatically in worse shape."
+        subtitle="Largest current builds. A size ranking, not a risk ranking - a big image costs more to review and patch, but is not automatically in worse shape."
       />
       {rows.length === 0 ? (
         <EmptyState title="No builds yet" hint="Applications appear here once they report an SBOM." />
@@ -580,7 +580,7 @@ function ChurnCard({ report }: { report: AnalyticsReport }) {
       />
 
       {/*
-        With nothing to compare against, the three package figures are all zero —
+        With nothing to compare against, the three package figures are all zero -
         and zero reads as "nothing changed" rather than "nothing was measured".
         Those mean opposite things to someone judging whether churn is under
         control, so the tiles are replaced rather than shown.
@@ -666,7 +666,7 @@ function ChurnCard({ report }: { report: AnalyticsReport }) {
             <>
               {" "}
               {formatNumber(v.applicationsWithoutBaseline)} were scanned for the first time during it and are
-              excluded — every package in a first build would otherwise register as an addition.
+              excluded - every package in a first build would otherwise register as an addition.
             </>
           ) : null}
           {v.applicationsUnchanged > 0 ? (
@@ -674,7 +674,7 @@ function ChurnCard({ report }: { report: AnalyticsReport }) {
               {" "}
               A further {formatNumber(v.applicationsUnchanged)} application
               {v.applicationsUnchanged === 1 ? " has" : "s have"} not built inside the window at all and{" "}
-              {v.applicationsUnchanged === 1 ? "is" : "are"} unchanged by definition —{" "}
+              {v.applicationsUnchanged === 1 ? "is" : "are"} unchanged by definition -{" "}
               <Link to="/applications?staleOnly=true" className="text-accent hover:underline">
                 see coverage gaps
               </Link>
@@ -700,7 +700,7 @@ function FragmentationCard({ report }: { report: AnalyticsReport }) {
     <Card>
       <CardHeader
         title="Version fragmentation"
-        subtitle="Packages the estate runs several versions of at once. Each extra version multiplies the cost of the next upgrade — the section that names work that can actually be finished."
+        subtitle="Packages the estate runs several versions of at once. Each extra version multiplies the cost of the next upgrade - the section that names work that can actually be finished."
       />
       {rows.length === 0 ? (
         <EmptyState
@@ -812,7 +812,7 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
                     <EcosystemBadge ecosystem={p.ecosystem} />
                   </Td>
                   <Td>
-                    <Mono>{p.version ?? "—"}</Mono>
+                    <Mono>{p.version ?? " - "}</Mono>
                   </Td>
                   <Td title={p.firstSeenAt}>{formatDate(p.firstSeenAt)}</Td>
                   <Td align="right" className="nums">
@@ -905,28 +905,28 @@ function Methodology({ report }: { report: AnalyticsReport }) {
   const items: Array<[string, ReactNode]> = [
     /*
      * Conditional, because the flat claim below is correct with scanning off and false
-     * with it on — and a methodology note contradicting the tables above it discredits
+     * with it on - and a methodology note contradicting the tables above it discredits
      * both.
      */
     report.vulnerabilities === null
       ? ([
           "No vulnerability data",
-          "Vulnerability scanning is disabled, so nothing here has been matched against a vulnerability database. Nothing on this page ranks anything by vulnerability — a package near the top of a list is widely deployed, not known-bad.",
+          "Vulnerability scanning is disabled, so nothing here has been matched against a vulnerability database. Nothing on this page ranks anything by vulnerability - a package near the top of a list is widely deployed, not known-bad.",
         ] as [string, ReactNode])
       : ([
           "Vulnerability data",
-          "Findings come from Grype matching this estate's packages against its database. Severity, CVSS, EPSS and known-exploited status are reported as the upstream feeds state them — the platform computes no risk score of its own. Accepted risks are excluded from every figure.",
+          "Findings come from Grype matching this estate's packages against its database. Severity, CVSS, EPSS and known-exploited status are reported as the upstream feeds state them - the platform computes no risk score of its own. Accepted risks are excluded from every figure.",
         ] as [string, ReactNode]),
     ...(report.vulnerabilities === null
       ? []
       : ([
           [
             "App dependencies vs base image",
-            "Totalled separately as well as together, but every ranking is computed on one of them rather than the sum — application dependencies, unless the filter excludes them. On a typical image, distribution packages and runtimes are around 99% of all findings, so a ranking on the combined figure would order applications by base-image age and hide everything a team chose.",
+            "Totalled separately as well as together, but every ranking is computed on one of them rather than the sum - application dependencies, unless the filter excludes them. On a typical image, distribution packages and runtimes are around 99% of all findings, so a ranking on the combined figure would order applications by base-image age and hide everything a team chose.",
           ],
           [
             "Severity buckets",
-            "Grype reports six severities. The four named ones are shown individually and “Other” folds negligible together with advisories no upstream feed has rated, so the buckets always sum to the total. Unrated is a real answer rather than a gap — promoting those to low would invent an assessment nobody made.",
+            "Grype reports six severities. The four named ones are shown individually and “Other” folds negligible together with advisories no upstream feed has rated, so the buckets always sum to the total. Unrated is a real answer rather than a gap - promoting those to low would invent an assessment nobody made.",
           ],
           [
             "What the filter reaches",

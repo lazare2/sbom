@@ -43,7 +43,7 @@ const COMPONENT_LOOKUP_CHUNK = 5000;
 /**
  * Namespace for the per-application advisory lock taken by manual uploads, so the
  * key cannot collide with one taken anywhere else. `0x53424F4D` is "SBOM" in
- * ASCII, and fits int4 — the type both keys of `pg_advisory_xact_lock` take.
+ * ASCII, and fits int4 - the type both keys of `pg_advisory_xact_lock` take.
  */
 const MANUAL_UPLOAD_LOCK_NAMESPACE = 0x53424f4d;
 
@@ -84,7 +84,7 @@ interface ResolvedApplication {
  *
  * CI submits a name and the platform resolves it (matching, aliasing, or
  * auto-creating). A manual upload names the application by id, so there is nothing
- * to resolve and nothing to auto-create — the target already exists because the
+ * to resolve and nothing to auto-create - the target already exists because the
  * user navigated to it.
  */
 type IngestTarget =
@@ -184,7 +184,7 @@ export class IngestionService {
    * Goes through exactly the same `store()` as the CI path, which is the whole
    * requirement: the resulting scan is a normal scan. It is searchable, it appears
    * in diffs and analytics, and it becomes the application's current build. The
-   * only differences are at the edges — the application is identified by id rather
+   * only differences are at the edges - the application is identified by id rather
    * than resolved from a name, nothing is ever auto-created, and a byte-identical
    * re-upload is refused rather than silently duplicated.
    */
@@ -225,13 +225,13 @@ export class IngestionService {
    * Parse, store and link one SBOM. The single path both entry points take.
    *
    * Ordering is deliberate and load-bearing:
-   *   1. Parse first — a document that isn't CycloneDX is rejected before we
+   *   1. Parse first - a document that isn't CycloneDX is rejected before we
    *      write anything anywhere.
    *   2. Store the raw blob second, OUTSIDE the transaction. The write is
    *      content-addressed and idempotent, so a retry is free. If the
    *      transaction then fails we leak an unreferenced blob, which the retention
    *      sweep collects. The opposite order would risk a committed `scan` row
-   *      pointing at a blob that was never written — an unrecoverable hole in the
+   *      pointing at a blob that was never written - an unrecoverable hole in the
    *      audit trail.
    *   3. Do all relational work in one transaction, so a scan is never visible
    *      without its components, and `latest_scan_id` never points at a
@@ -302,7 +302,7 @@ export class IngestionService {
           buildNumber: metadata.buildNumber,
           pipelineId: metadata.pipelineId,
           // Fall back to the image the SBOM says it describes when the submitter
-          // did not pass one explicitly — Syft records it in metadata.component.
+          // did not pass one explicitly - Syft records it in metadata.component.
           imageRef: metadata.imageRef ?? parsed.subjectName ?? null,
           branch: metadata.branch,
           ingestTokenName: provenance.ingestTokenName,
@@ -402,8 +402,8 @@ export class IngestionService {
    * An earlier scan of this application carrying byte-identical SBOM content.
    *
    * Scoped to the one application on purpose. The same SBOM appearing under two
-   * applications is normal — a shared base image, or a monorepo publishing the
-   * same artifact twice — and is not something to warn about. The blob store
+   * applications is normal - a shared base image, or a monorepo publishing the
+   * same artifact twice - and is not something to warn about. The blob store
    * already deduplicates the payload itself, so this is about not recording the
    * same build twice, not about storage.
    */
@@ -445,7 +445,7 @@ export class IngestionService {
    *
    * The two kinds are genuinely different operations, not two spellings of one:
    * a name may match nothing and be auto-created, whereas an id either exists or
-   * the request is a 404. A manual upload must never auto-create an application —
+   * the request is a 404. A manual upload must never auto-create an application -
    * the user reached the upload form by navigating to an application that already
    * exists, so an id that resolves to nothing means the record was deleted
    * underneath them, and inventing a replacement would be the wrong answer.
@@ -515,7 +515,7 @@ export class IngestionService {
      * what this used to do and which did not work: Postgres aborts the entire
      * transaction on a failed statement, so the recovering `findByName` below
      * errored with 25P02 and the loser got a 500. Verified with a probe posting two
-     * concurrent scans for an unseen app_name — one 201, one 500. DO NOTHING never
+     * concurrent scans for an unseen app_name - one 201, one 500. DO NOTHING never
      * raises, so the transaction stays usable; under READ COMMITTED it blocks until
      * the competing insert resolves, then returns zero rows if that insert
      * committed, or inserts normally if it rolled back.
@@ -638,6 +638,12 @@ export class IngestionService {
     tx: Database,
     args: { applicationId: string; scanId: string; scanCreatedAt: Date },
   ): Promise<boolean> {
+    // Locked, so two builds ingesting at once agree on which one they replaced.
+    const previous = await tx.execute<Row<{ latest_scan_id: string | null }>>(sql`
+      SELECT latest_scan_id FROM application WHERE id = ${args.applicationId}::uuid FOR UPDATE
+    `);
+    const replaced = rowsOf(previous)[0]?.latest_scan_id ?? null;
+
     const result = await tx.execute<Row<{ became_latest: boolean }>>(sql`
       UPDATE ${application}
       SET scan_count = ${application.scanCount} + 1,
@@ -657,8 +663,25 @@ export class IngestionService {
     `);
 
     // RETURNING sees the post-update row, so this reads the outcome of the CASE
-    // above rather than re-deriving it in JS — the one place that cannot disagree
+    // above rather than re-deriving it in JS - the one place that cannot disagree
     // with what was actually written.
-    return rowsOf(result)[0]?.became_latest === true;
+    const becameLatest = rowsOf(result)[0]?.became_latest === true;
+
+    /*
+      The build this one replaced keeps its counts as they stood right now, beside the live
+      ones that go on moving with every database update. Only the first replacement counts:
+      "when it was replaced" is one moment. A build that was never matched has no counts to
+      keep, and its history shows the figure as not recorded.
+    */
+    if (becameLatest && replaced !== null && replaced !== args.scanId) {
+      await tx.execute(sql`
+        UPDATE scan_vuln_summary
+           SET superseded_at = now(), superseded_counts = counts
+         WHERE scan_id = ${replaced}::uuid
+           AND superseded_at IS NULL
+           AND counts IS NOT NULL
+      `);
+    }
+    return becameLatest;
   }
 }

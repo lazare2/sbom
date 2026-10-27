@@ -11,7 +11,7 @@ import { rowsOf, toIso, type Row } from "../applications/applications.service.js
  *
  * Every branch keeps `al.created_at DESC` as its secondary key so that within one actor or
  * one action the entries still read newest-first, which is the only order an audit trail
- * is useful in. `al.id` is the unique tail — bulk operations write many rows inside one
+ * is useful in. `al.id` is the unique tail - bulk operations write many rows inside one
  * transaction and they share a timestamp exactly.
  */
 function auditOrderBy(sortBy: ListAuditLogQuery["sortBy"], dir: SortDirection): SQL {

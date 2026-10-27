@@ -17,7 +17,7 @@ import {
  *
  * Pure functions, tested here rather than through the API, because every one of them is a
  * place where a filter could silently mean something other than what the chips on screen
- * say — and a figure read under a misunderstood filter is worse than no figure.
+ * say - and a figure read under a misunderstood filter is worse than no figure.
  *
  * The properties that matter:
  *   1. "Everything selected" and "nothing selected" have to collapse to one representation,
@@ -57,7 +57,7 @@ describe("severity buckets", () => {
   });
 
   it("folds negligible and unrated into one bucket", () => {
-    // Unrated is a real answer, not missing data — it has to be counted somewhere, and
+    // Unrated is a real answer, not missing data - it has to be counted somewhere, and
     // promoting it to low would invent an assessment nobody made.
     expect(bucketize(counts).other).toBe(7);
   });
@@ -84,7 +84,7 @@ describe("normalizeVulnFilter", () => {
     /*
      * Selecting all five buckets and selecting none describe the same set. Without this
      * they would produce different `active` values, and the service would take the slow
-     * exact path — and report a filter on the page and the PDF cover — for a filter that
+     * exact path - and report a filter on the page and the PDF cover - for a filter that
      * excludes nothing.
      */
     const filter = normalizeVulnFilter(
@@ -175,11 +175,11 @@ describe("scopeIncludes", () => {
  * the inventory panels, and why the banner has to say which of the two is in force.
  *
  * The name is resolved by the caller because this function is pure and shared with the client.
- * The interesting case is therefore an id with no name behind it — a bookmark pointing at a
- * deleted group — where a label that silently omitted the narrowing would present figures for
+ * The interesting case is therefore an id with no name behind it - a bookmark pointing at a
+ * deleted group - where a label that silently omitted the narrowing would present figures for
  * a subset of the estate as though they covered all of it.
  */
-describe("normalizeVulnFilter — group", () => {
+describe("normalizeVulnFilter - group", () => {
   const GROUP = "3f1c2b4a-5d6e-4f70-8192-a3b4c5d6e7f8";
 
   it("is active on a group alone, with no other narrowing", () => {

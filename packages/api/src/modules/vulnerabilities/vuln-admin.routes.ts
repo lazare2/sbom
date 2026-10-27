@@ -46,7 +46,7 @@ function actorOf(request: FastifyRequest): Actor {
  * What is deliberately NOT here: any way to set the grype binary path, or any other
  * value that decides what the server executes. Those live in the environment, where
  * changing them requires deployment access. This panel shows where the binary was
- * looked for and what was found, and offers actions — update, import, enable — but
+ * looked for and what was found, and offers actions - update, import, enable - but
  * never an arbitrary path. A published project whose admin UI can point the server at
  * any executable on disk ships a remote-code-execution primitive to everyone who
  * deploys it.
@@ -101,7 +101,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    *
    * Enabling kicks off a backfill: everything already ingested needs matching, and
    * without it the feature would appear to do nothing until the next build arrived.
-   * That runs detached so this request returns immediately — progress shows up in the
+   * That runs detached so this request returns immediately - progress shows up in the
    * coverage figures.
    */
   fastify.patch("/settings", async (request, reply) => {
@@ -156,7 +156,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   /**
-   * Installs a database from an uploaded archive — the air-gapped path.
+   * Installs a database from an uploaded archive - the air-gapped path.
    *
    * Streamed to a temp file and handed to `grype db import`, which verifies the archive
    * itself. The temp file is removed in a `finally`: these are ~141 MB and leaking one
@@ -205,8 +205,8 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
             filename = part.filename;
             /*
               Streamed to disk rather than buffered. `toBuffer()` would hold the whole
-              archive in memory — 145 MB today, and up to GRYPE_DB_MAX_UPLOAD_BYTES if
-              someone uploads the wrong file — on a container whose normal working set is
+              archive in memory - 145 MB today, and up to GRYPE_DB_MAX_UPLOAD_BYTES if
+              someone uploads the wrong file - on a container whose normal working set is
               a few tens of MB. `pipeline` also propagates the multipart plugin's
               file-size error instead of silently truncating.
             */
@@ -402,7 +402,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    *
    * Nothing is deleted and nothing is migrated. Every component carries the provider that
    * assessed it, and the sweep's queue treats "assessed by someone else" as needing
-   * re-assessment — so the estate re-scans itself and switching back undoes it.
+   * re-assessment - so the estate re-scans itself and switching back undoes it.
    *
    * The figures read as not assessed in the meantime, which is the honest state: the
    * existing findings were produced by a database that is no longer the authority here.
@@ -461,7 +461,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    * Saves the Xray connection.
    *
    * Saving anything advances the assessment epoch, because different credentials may reach a
-   * different Xray holding different data — so every existing finding becomes of unknown
+   * different Xray holding different data - so every existing finding becomes of unknown
    * provenance and the estate is re-assessed rather than trusted.
    *
    * The token is encrypted before storage and never returned. It is also absent from the

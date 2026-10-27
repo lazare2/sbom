@@ -31,7 +31,7 @@ import {
  * Environment administration, and the one screen that shows more than one estate at once.
  *
  * Two halves, in this order on purpose. The comparison comes first because it is the reason
- * an administrator opens this page — "are the numbers actually separate" is the question the
+ * an administrator opens this page - "are the numbers actually separate" is the question the
  * whole feature has to answer, and it is answered by seeing the estates side by side. The
  * table below it is where they are created, renamed and destroyed, which is rare.
  *
@@ -232,7 +232,7 @@ function EnvironmentModal({
             Pipelines that name <strong>{environment.name}</strong> in their upload will start
             failing when this is saved. Update their configuration to{" "}
             <strong>{name.trim()}</strong> at the same time. Tokens bound to this environment
-            are unaffected — they carry the estate, not its name.
+            are unaffected - they carry the estate, not its name.
           </div>
         ) : null}
 
@@ -300,8 +300,8 @@ function DeleteEnvironmentModal({
  * Every estate's figures, side by side.
  *
  * Columns are estates and rows are measures, rather than the other way round. With two to
- * five environments that keeps the comparison horizontal — the eye moves along a row to
- * compare the same measure — and it means adding an estate widens the table instead of
+ * five environments that keeps the comparison horizontal - the eye moves along a row to
+ * compare the same measure - and it means adding an estate widens the table instead of
  * changing what every row means.
  */
 function ComparisonCard() {
@@ -330,7 +330,7 @@ function ComparisonCard() {
     <Card>
       <CardHeader
         title="Side by side"
-        subtitle="Each column is one estate, complete in itself. Nothing here is added across environments — a combined total would describe none of them."
+        subtitle="Each column is one estate, complete in itself. Nothing here is added across environments - a combined total would describe none of them."
       />
       <TableWrap>
         <Table>
@@ -369,7 +369,7 @@ function ComparisonCard() {
 
             {/*
               Vulnerability rows render an em dash rather than a zero whenever the block is
-              null — scanning switched off, or on but nothing in that estate assessed yet. A
+              null - scanning switched off, or on but nothing in that estate assessed yet. A
               zero beside another estate's real numbers would read as a clean bill of health,
               which is a stronger claim than the truth and the one nobody questions.
             */}
@@ -447,8 +447,8 @@ function VulnRow({
       {rows.map((row) => (
         <Td key={row.id} align="right" className="nums">
           {row.vulnerabilities === null ? (
-            <span className="text-text-faint" title="Not assessed — this is not a count of zero.">
-              —
+            <span className="text-text-faint" title="Not assessed - this is not a count of zero.">
+              -
             </span>
           ) : (
             formatNumber(value(row.vulnerabilities))

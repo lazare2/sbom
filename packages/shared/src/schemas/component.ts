@@ -8,7 +8,7 @@ import { defineSortTable } from "./sort.js";
  * `exact` is a case-insensitive equality against `component_name_lower_idx`; `contains`
  * is a substring match served by the pg_trgm GIN index. They are genuinely different
  * queries, not one with a stricter filter, which is why this is a mode rather than a
- * post-filter — and why the UI states which one is in effect.
+ * post-filter - and why the UI states which one is in effect.
  */
 export const nameMatchModes = ["exact", "contains"] as const;
 export const nameMatchSchema = z.enum(nameMatchModes);

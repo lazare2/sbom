@@ -230,7 +230,7 @@ export interface AccessRequestQueryRow {
  * Narrows the two free-text columns back to their unions.
  *
  * `reason` and `status` are `text` in the database rather than enums, so that adding a value
- * is a code change and not a migration — but that means a row written by a future version, or
+ * is a code change and not a migration - but that means a row written by a future version, or
  * by hand, can hold something this build has never heard of. Falling back keeps the screen
  * rendering instead of throwing on one bad row, which matters because this is the screen an
  * administrator opens to find out who is locked out.

@@ -15,7 +15,7 @@ import type { SeverityCounts, VulnFilterState } from "./vulnerability.js";
  * one payload rather than two query paths that happen to be written similarly.
  *
  * Most figures here are counts and comparisons over SBOM contents, and make no claim
- * about risk — where a section could be mistaken for a risk judgement, its doc comment
+ * about risk - where a section could be mistaken for a risk judgement, its doc comment
  * says what it actually measures.
  *
  * The exception is `vulnerabilities`, which is populated by matching those contents
@@ -87,7 +87,7 @@ export interface EstateTotals {
  * number in the report.
  */
 export interface CoverageReport {
-  /** Active applications — the denominator. */
+  /** Active applications - the denominator. */
   eligible: number;
   /** Active applications with a build inside the stale threshold. */
   covered: number;
@@ -97,7 +97,7 @@ export interface CoverageReport {
   pendingConfirmation: number;
   /**
    * The longest-silent applications, oldest first. Never-scanned applications
-   * sort first with a null `lastScanAt` — they are the worst case, not a missing
+   * sort first with a null `lastScanAt` - they are the worst case, not a missing
    * value.
    */
   worstOffenders: Array<{
@@ -176,7 +176,7 @@ export interface VelocitySummary {
   /** Applications that had a build both before and inside the window. */
   applicationsCompared: number;
   /**
-   * Applications with no build before the window — onboarded during it, or
+   * Applications with no build before the window - onboarded during it, or
    * scanned for the first time. Excluded from the counts below: every package in
    * a newly onboarded application would otherwise register as an addition and
    * swamp the real churn.
@@ -211,7 +211,7 @@ export interface ActivityBucket {
  * One entry in "Top 10 vulnerable applications".
  *
  * Ranked on one half of the split, never on the sum. Application dependencies by
- * default, and base-image findings only when the filter asks for base image alone —
+ * default, and base-image findings only when the filter asks for base image alone -
  * measured on a realistic container SBOM, base-image packages account for 99% of
  * findings, so a combined ranking is a base-image-age ranking regardless of what its
  * title claims. The other half is carried alongside for context.
@@ -229,7 +229,7 @@ export interface TopVulnerableApplication {
   /** Base-image findings for the same build, or null when the scope filter excludes them. */
   baseImageFindings: number | null;
   /**
-   * Which half the row was ranked on — `app` unless the filter asks for base image only.
+   * Which half the row was ranked on - `app` unless the filter asks for base image only.
    *
    * The counts below describe that same half, so every number on a row belongs to one
    * set. Ranking never combines the two: on a typical image base-image packages are
@@ -239,7 +239,7 @@ export interface TopVulnerableApplication {
   rankedBy: "app" | "os";
   critical: number;
   high: number;
-  /** Findings with a fix available — the actionable subset. */
+  /** Findings with a fix available - the actionable subset. */
   fixable: number;
   knownExploited: number;
   affectedPackages: number;
@@ -295,7 +295,7 @@ export interface TopVulnerablePackage {
  */
 export interface VulnScopeTotals {
   counts: SeverityCounts;
-  /** Findings with a fix available — the actionable subset. */
+  /** Findings with a fix available - the actionable subset. */
   fixable: number;
   knownExploited: number;
   /** Distinct affected package versions across the estate, counted once each. */
@@ -358,7 +358,7 @@ export interface VulnerabilityReport {
    * Unfiltered severity totals, present only when a filter is active.
    *
    * The reference point. A filtered report that circulates without one is read as the
-   * whole picture, and the reader has no way to tell what was left out — so when a filter
+   * whole picture, and the reader has no way to tell what was left out - so when a filter
    * narrows the figures, the report also carries what it narrowed them from.
    */
   unfiltered: { app: SeverityCounts; baseImage: SeverityCounts } | null;

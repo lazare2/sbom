@@ -354,7 +354,7 @@ describe("SPDX", () => {
   it("declares the spec version and the fixed document licence", () => {
     const doc = renderSpdx(harness()) as Record<string, unknown>;
     expect(doc.spdxVersion).toBe(SPDX_SPEC_VERSION);
-    // Fixed by the spec — it licenses the document, not the software it describes.
+    // Fixed by the spec - it licenses the document, not the software it describes.
     expect(doc.dataLicense).toBe("CC0-1.0");
   });
 

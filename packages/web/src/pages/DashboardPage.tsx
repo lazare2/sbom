@@ -40,7 +40,7 @@ import {
 /**
  * A tile whose whole surface is a link into a pre-filtered list.
  *
- * The number is not the point — "14 stale applications" is only useful if the
+ * The number is not the point - "14 stale applications" is only useful if the
  * next click shows you which fourteen. Every counter here that can be filtered
  * for is a link, and the ones that cannot be are rendered plainly rather than
  * as dead links that look clickable.
@@ -219,14 +219,14 @@ export function DashboardPage() {
 
       {/*
         Vulnerability strip, above the inventory panels because it is the part of this page
-        that prompts action. Rendered only when scanning is on — an empty version of it
+        that prompts action. Rendered only when scanning is on - an empty version of it
         would read as "no vulnerabilities" for an estate nobody has assessed.
       */}
       {vulnEnabled && vulns.data ? (
         <section className="mt-5">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-text-base">Vulnerabilities</h2>
-            {/* Scoped to this section, matching the analytics page — see VulnFilter.tsx. */}
+            {/* Scoped to this section, matching the analytics page - see VulnFilter.tsx. */}
             <VulnFilterControl
               filter={vulnFilter}
               onChange={(next) => setState(fromVulnFilter(next))}
@@ -324,7 +324,7 @@ export function DashboardPage() {
                       </Link>
                     </Td>
                     <Td>
-                      <Mono>{scan.branch ?? "—"}</Mono>
+                      <Mono>{scan.branch ?? " - "}</Mono>
                     </Td>
                     <Td align="right" className="nums">
                       {formatNumber(scan.componentCount)}
@@ -346,7 +346,7 @@ export function DashboardPage() {
  *
  * Deliberately the only non-vulnerability table on this page. Every other figure here is
  * computed from applications that *do* report, so an application that stopped reporting
- * silently improves them — this is the row that says the numbers above are incomplete.
+ * silently improves them - this is the row that says the numbers above are incomplete.
  */
 function NeedsAttentionCard() {
   const { user } = useAuth();
@@ -402,7 +402,7 @@ function NeedsAttentionCard() {
                     {a.lastScanAt ? formatDate(a.lastScanAt) : <Badge tone="danger">never</Badge>}
                   </Td>
                   <Td align="right" className="nums">
-                    {a.daysSinceScan === null ? "—" : `${formatNumber(a.daysSinceScan)}d`}
+                    {a.daysSinceScan === null ? " - " : `${formatNumber(a.daysSinceScan)}d`}
                   </Td>
                 </Tr>
               ))}
@@ -418,7 +418,7 @@ function NeedsAttentionCard() {
       */}
       {pending > 0 ? (
         <div className="border-t border-border-base px-4 py-3 text-xs text-text-muted">
-          {formatNumber(pending)} application{pending === 1 ? "" : "s"} awaiting confirmation —
+          {formatNumber(pending)} application{pending === 1 ? "" : "s"} awaiting confirmation -
           registered by a build under a name nobody has matched to an application yet.
           {user?.role === "admin" ? (
             <>

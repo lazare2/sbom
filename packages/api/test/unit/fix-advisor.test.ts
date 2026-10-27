@@ -14,7 +14,7 @@ import {
  * Fix recommendations.
  *
  * The question these answer is the one the findings table leaves to the reader: a package has
- * several advisories, each with its own "fixed in", so which single version clears them all —
+ * several advisories, each with its own "fixed in", so which single version clears them all -
  * and is that version itself clean? The worked example throughout is the one this feature was
  * asked for: three log4j advisories fixed in 1.2, 2.3 and 1.8 resolve to "at least 2.3", and if
  * 2.3 is itself affected by something fixed in 2.8, the answer is 2.8.

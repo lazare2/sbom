@@ -21,7 +21,7 @@ import { normalizePurl, purlType } from "./purl.js";
  * Design constraints that shaped this:
  *
  *  1. NEVER DROP A SCAN. CI calls this with `curl -f`. A malformed *component*
- *     must not fail the whole upload — it is recorded as skipped and the rest is
+ *     must not fail the whole upload - it is recorded as skipped and the rest is
  *     ingested. Only a document that isn't a CycloneDX SBOM at all is rejected.
  *
  *  2. Hand-rolled iteration, not a Zod schema over `components[]`. A single
@@ -31,7 +31,7 @@ import { normalizePurl, purlType } from "./purl.js";
  *
  *  3. Dedupe within the document. `scan_component` is keyed on
  *     (scan_id, component_id), so the same package appearing twice in one SBOM
- *     would abort the insert. Syft does emit duplicates — the same library found
+ *     would abort the insert. Syft does emit duplicates - the same library found
  *     in two image layers, or via two catalogers.
  */
 
@@ -54,7 +54,7 @@ export interface ParsedComponent {
    * Where the package was found, capped at `COMPONENT_LOCATION_PATH_CAP` and sorted.
    *
    * Null for OS-package ecosystems, whose recorded paths locate the package manager's
-   * database rather than the package — see `ecosystemHasMeaningfulPaths`. Also null when the
+   * database rather than the package - see `ecosystemHasMeaningfulPaths`. Also null when the
    * SBOM carried no location properties at all, which a non-Syft tool may well not emit.
    */
   paths: string[] | null;
@@ -189,7 +189,7 @@ function readProperty(properties: unknown, key: string): string | null {
 /**
  * Reads every `syft:location:N:path` / `syft:location:N:layerID` pair out of a component.
  *
- * Indices are not assumed contiguous or ordered — the properties array is walked once and
+ * Indices are not assumed contiguous or ordered - the properties array is walked once and
  * grouped by the index in the key, because nothing in the CycloneDX spec promises the encoder
  * emits them in order and a missed location is a package the reader cannot find.
  *
@@ -231,7 +231,7 @@ function readLocations(properties: unknown): { paths: string[]; layerId: string 
 /**
  * Determines the ecosystem, preferring the purl because it is the
  * spec-standard, tool-independent source. Syft properties are a fallback, and
- * `unknown` is stored rather than dropping the component — an unrecognised
+ * `unknown` is stored rather than dropping the component - an unrecognised
  * ecosystem is still a dependency someone may need to search for.
  */
 function resolveEcosystem(purl: string | null, properties: unknown): string {
@@ -355,7 +355,7 @@ export function computeIdentityHash(input: {
  *
  * Uses the same signals as platform detection and the same closed runtime list,
  * so a component labelled `runtime` here is exactly one that appears in the
- * scan's platform summary. Deriving them separately would let the two disagree —
+ * scan's platform summary. Deriving them separately would let the two disagree -
  * a package could be excluded from the dependency aggregates while never
  * appearing as a runtime either, which is the one outcome that loses data.
  */
@@ -428,8 +428,8 @@ function readCpe(raw: RawComponent): string | null {
  *
  * `JSON.parse` throws on a leading BOM, but RFC 8259 §8.1 explicitly permits a
  * parser to ignore one. Syft does not emit a BOM, but anything that
- * post-processes an SBOM on Windows easily can — PowerShell's `Set-Content
- * -Encoding utf8` adds one — and rejecting a scan over an invisible three-byte
+ * post-processes an SBOM on Windows easily can - PowerShell's `Set-Content
+ * -Encoding utf8` adds one - and rejecting a scan over an invisible three-byte
  * prefix contradicts the whole point of never dropping a build's data.
  *
  * UTF-16 is handled too: a UTF-16 encoded SBOM would otherwise produce a
@@ -462,7 +462,7 @@ function decodeSbomText(raw: Buffer | string): string {
 /**
  * Parse a CycloneDX JSON document.
  *
- * @throws {UnprocessableError} only when the payload is not a CycloneDX SBOM —
+ * @throws {UnprocessableError} only when the payload is not a CycloneDX SBOM -
  *   invalid JSON, or a JSON document without the CycloneDX markers. This is the
  *   one case where CI should see a 4xx, because retrying will not help.
  */
@@ -499,7 +499,7 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
   if (bomFormat === null && specVersion === null) {
     throw new UnprocessableError(
       "SBOM does not look like CycloneDX: both `bomFormat` and `specVersion` are missing. " +
-        "Only CycloneDX JSON is supported — generate it with `syft <image> -o cyclonedx-json`.",
+        "Only CycloneDX JSON is supported - generate it with `syft <image> -o cyclonedx-json`.",
     );
   }
   if (bomFormat !== null && bomFormat.toLowerCase() !== "cyclonedx") {
@@ -519,8 +519,8 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
    * An index rather than a bare presence set, because a duplicate entry has to be *merged*
    * into the one already kept rather than discarded. Syft emits the same package twice when it
    * finds it in two image layers or via two catalogers, and those duplicates are precisely the
-   * entries carrying a location the first one did not have. Dropping them outright — which is
-   * what this did before locations were recorded — would silently throw away most of the
+   * entries carrying a location the first one did not have. Dropping them outright - which is
+   * what this did before locations were recorded - would silently throw away most of the
    * multi-location data on exactly the packages installed in more than one place.
    */
   const indexByHash = new Map<string, number>();
@@ -542,7 +542,7 @@ export function parseCycloneDx(raw: Buffer | string): ParsedSbom {
   // second pass over the document.
   const platformCandidates: PlatformCandidate[] = [];
 
-  // An SBOM with no components is legitimate — a scratch or distroless image may
+  // An SBOM with no components is legitimate - a scratch or distroless image may
   // genuinely contain no catalogued packages. It is stored as an empty scan, not
   // rejected, so the history still records that the build was scanned.
   const rawComponents = Array.isArray(root.components) ? root.components : [];

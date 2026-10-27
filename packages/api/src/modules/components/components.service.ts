@@ -40,8 +40,8 @@ export class ComponentsService {
    * The query is a two-stage CTE, and the shape is deliberate:
    *
    *  1. `matched` narrows `component` by name first. That is the only stage that
-   *     touches the text indexes — `component_name_lower_idx` for exact matches,
-   *     the `pg_trgm` GIN index for substring matches — and it collapses the
+   *     touches the text indexes - `component_name_lower_idx` for exact matches,
+   *     the `pg_trgm` GIN index for substring matches - and it collapses the
    *     search space from millions of rows to at most MATCH_CAP.
    *
    *  2. `usage` finds, for each (component, application) pair, the most recent
@@ -159,7 +159,7 @@ export class ComponentsService {
   /**
    * Typeahead for the search box.
    *
-   * Groups by name and ecosystem only, and never joins `scan_component` — a
+   * Groups by name and ecosystem only, and never joins `scan_component` - a
    * suggestion list does not need usage counts, and keeping the query inside the
    * `component` table is what makes it fast enough to fire on every keystroke.
    */

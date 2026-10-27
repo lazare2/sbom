@@ -11,7 +11,7 @@ import { Badge, Checkbox, ErrorBanner, LoadingBlock, TextInput } from "../../com
  * The three panels the access dialog is built from.
  *
  * Lifted out of AdminUsersPage because that file had grown past fifteen hundred lines and
- * these are the parts most likely to be read on their own — the question "why does this
+ * these are the parts most likely to be read on their own - the question "why does this
  * person see that application" is answered by the last of them.
  */
 
@@ -94,7 +94,7 @@ export function ApplicationPicker({
       {/*
         Stated rather than silently trimmed. A list that stops at the cap without saying so
         lets an administrator conclude an application does not exist because they could not
-        find it — which is also why the search is served rather than filtered here.
+        find it - which is also why the search is served rather than filtered here.
       */}
       {truncated ? (
         <p className="text-[11px] text-warn">
@@ -104,7 +104,7 @@ export function ApplicationPicker({
       ) : null}
 
       <p className="text-[11px] text-text-faint">
-        For a service that is in no group — which is how every application starts, since CI
+        For a service that is in no group - which is how every application starts, since CI
         registers it before anyone files it.
       </p>
     </div>
@@ -196,8 +196,8 @@ export function GroupPicker({
 /**
  * What the ticked boxes actually come to.
  *
- * The question an administrator opens this dialog to answer is not "which boxes are ticked" —
- * that is visible on the left — but "what will this person see when they sign in". That is the
+ * The question an administrator opens this dialog to answer is not "which boxes are ticked" -
+ * that is visible on the left - but "what will this person see when they sign in". That is the
  * intersection of two axes, drawn partly from groups whose membership changes without anybody
  * opening this screen, so it cannot be read off the checkboxes.
  *
@@ -280,6 +280,15 @@ export function ReachablePanel({
                   {row.viaSquads.map((squad) => (
                     <Badge key={`squad-${squad}`} tone="info" title={`Reached through the squad ${squad}`}>
                       squad: {squad}
+                    </Badge>
+                  ))}
+                  {row.viaTribes.map((tribe) => (
+                    <Badge
+                      key={`tribe-${tribe}`}
+                      tone="info"
+                      title={`Assigned to the tribe ${tribe}, which one of this account's squads is under`}
+                    >
+                      tribe: {tribe}
                     </Badge>
                   ))}
                 </span>

@@ -59,7 +59,7 @@ const urlSpec = {
  *
  * The column reads **advisories**, not findings, and the difference is the reason this page
  * can be compared across rows at all. A group's members almost always share a base image, so
- * summing their findings would count that image once per member — a sixteen-image group would
+ * summing their findings would count that image once per member - a sixteen-image group would
  * outrank an eight-image one running identical software, and the ranking would be a member
  * count wearing a risk label. Counting each advisory once removes that.
  *
@@ -102,7 +102,7 @@ export function GroupsPage() {
     <>
       <PageHeader
         title="Groups"
-        subtitle="Sets of applications that answer a question together — one product built from several images, or a trait that cuts across unrelated services."
+        subtitle="Sets of applications that answer a question together - one product built from several images, or a trait that cuts across unrelated services."
       />
 
       <Card>
@@ -135,7 +135,7 @@ export function GroupsPage() {
             hint={
               state.search
                 ? "Try a shorter search term."
-                : "An admin can create groups under Admin → Groups, then add applications to them."
+                : "An admin can create groups under Admin → Access → Groups, then add applications to them."
             }
           />
         ) : (

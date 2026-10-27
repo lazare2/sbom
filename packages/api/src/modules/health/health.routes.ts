@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 /**
  * Liveness and readiness, kept separate on purpose.
  *
- * `/health` answers "is this process up" and must never touch the database — a
+ * `/health` answers "is this process up" and must never touch the database - a
  * DB blip should not make an orchestrator kill an otherwise healthy container.
  * `/health/ready` answers "can this instance serve traffic" and does check.
  */

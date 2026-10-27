@@ -8,7 +8,7 @@ import { parseOrThrow } from "../../lib/validate.js";
  *
  * Behind `requireAuth` but not `requireAdmin`, matching the applications module: any signed-in
  * user can read every group and its membership. There is deliberately no per-group visibility
- * — groups describe the estate rather than partition access to it, and a group nobody outside
+ * - groups describe the estate rather than partition access to it, and a group nobody outside
  * its members can see would make "which of our applications are public facing" unanswerable
  * by the person most likely to ask.
  */

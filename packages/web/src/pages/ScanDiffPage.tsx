@@ -8,7 +8,7 @@ import { Card, EmptyState, ErrorBanner, LoadingBlock, PageHeader, Select } from 
  * Compare any two builds of one application.
  *
  * The scan pair lives in the URL rather than in component state, so a specific
- * comparison — "here is exactly what changed between build 41 and build 47" —
+ * comparison - "here is exactly what changed between build 41 and build 47" -
  * can be pasted into a ticket and open the same for the next reader.
  */
 export function ScanDiffPage() {
@@ -43,7 +43,7 @@ export function ScanDiffPage() {
 
   const options = (scans.data?.items ?? []).map((s) => ({
     value: s.id,
-    label: `${s.buildNumber ? `build ${s.buildNumber}` : "build"} — ${formatDateTime(s.createdAt)}${
+    label: `${s.buildNumber ? `build ${s.buildNumber}` : "build"} - ${formatDateTime(s.createdAt)}${
       s.isLatest ? " (current)" : ""
     }`,
   }));
@@ -73,7 +73,7 @@ export function ScanDiffPage() {
               id="diff-from"
               value={from}
               onChange={(v) => setPair({ from: v })}
-              options={[{ value: "", label: "Automatic — the build before 'to'" }, ...options]}
+              options={[{ value: "", label: "Automatic - the build before 'to'" }, ...options]}
             />
           </div>
           <div>
@@ -84,7 +84,7 @@ export function ScanDiffPage() {
               id="diff-to"
               value={to}
               onChange={(v) => setPair({ to: v })}
-              options={[{ value: "", label: "Automatic — the current build" }, ...options]}
+              options={[{ value: "", label: "Automatic - the current build" }, ...options]}
             />
           </div>
         </div>

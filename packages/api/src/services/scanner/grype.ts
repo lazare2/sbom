@@ -26,7 +26,7 @@ import type {
  *     and 1.8 seconds with it off, because Grype silently downloaded a 141 MB
  *     database first. On the ingest path that would turn a CI request into a
  *     multi-minute stall, and on an air-gapped host into a failure. The platform owns
- *     database updates explicitly — through the admin panel and the schedule — so
+ *     database updates explicitly - through the admin panel and the schedule - so
  *     that a download only ever happens when somebody asked for one.
  *
  *   GRYPE_DB_VALIDATE_AGE=false
@@ -242,7 +242,7 @@ export class GrypeScanner implements VulnerabilityScanner {
 
     // Resolution proved a file exists; running it is what proves it works. A binary
     // for the wrong architecture, or one truncated by a failed download, resolves
-    // fine and fails here — which is the honest place to discover it.
+    // fine and fails here - which is the honest place to discover it.
     const result = await this.run(["version", "-o", "json"], { timeoutMs: 30_000 });
     if (result.code !== 0) {
       // Drop the cache so a replaced binary is picked up without a restart.
@@ -344,7 +344,7 @@ export class GrypeScanner implements VulnerabilityScanner {
 
       return {
         // A database is "present" when it has a build date and a schema, regardless of
-        // whether grype considers it valid — an out-of-date database is installed and
+        // whether grype considers it valid - an out-of-date database is installed and
         // usable, and the age is reported separately.
         present: builtAt !== null && schemaVersion !== null,
         builtAt,
@@ -460,7 +460,7 @@ export class GrypeScanner implements VulnerabilityScanner {
    *
    * Checks reachability first so an offline deployment gets a precise, immediate
    * answer instead of a slow generic failure. On any failure the previously installed
-   * database is left exactly as it was — a failed update never costs an administrator
+   * database is left exactly as it was - a failed update never costs an administrator
    * the working database they already had.
    */
   async updateDb(): Promise<DbUpdateResult> {

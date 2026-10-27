@@ -11,7 +11,7 @@ import type { OidcDiagnosis, OidcDiagnosisCode } from "@sbom/shared";
  *
  * Endpoints and signing keys come from `<issuer>/.well-known/openid-configuration`. Writing
  * Entra ID's URLs in here would have worked for exactly one deployment and made the second
- * organisation a code change — and this platform is already shipped as an offline bundle to
+ * organisation a code change - and this platform is already shipped as an offline bundle to
  * organisations that configure it themselves.
  *
  * ## Two things that break against corporate infrastructure
@@ -33,7 +33,7 @@ import type { OidcDiagnosis, OidcDiagnosisCode } from "@sbom/shared";
 const REQUEST_TIMEOUT_MS = 10_000;
 
 /** One hour. Providers rotate signing keys on the order of weeks, and a stale document costs
- *  a failed sign-in that a refresh fixes — so this trades a negligible request for not
+ *  a failed sign-in that a refresh fixes - so this trades a negligible request for not
  *  pinning a key set that has already been retired. */
 const METADATA_TTL_MS = 60 * 60 * 1000;
 
@@ -110,7 +110,7 @@ export class OidcClient {
    * The `issuer` in the document is compared against the configured URL and a disagreement is
    * fatal here rather than later. Every token this platform will ever accept carries an `iss`
    * claim that must equal the document's issuer, so a mismatch means no sign-in can ever
-   * succeed — and the failure would otherwise surface as "token rejected" on somebody's first
+   * succeed - and the failure would otherwise surface as "token rejected" on somebody's first
    * attempt, which points at the wrong thing entirely.
    */
   async discover(force = false): Promise<OidcProviderMetadata> {
@@ -428,12 +428,12 @@ const HINTS: Partial<Record<OidcDiagnosisCode, string>> = {
   issuer_unreachable:
     "The server itself has to reach the provider, not just the browser. Check that outbound " +
     "443 to the issuer's host is open from this machine. Note that an outbound proxy set " +
-    "through HTTP_PROXY or HTTPS_PROXY does not apply to this request — those reach Grype " +
+    "through HTTP_PROXY or HTTPS_PROXY does not apply to this request - those reach Grype " +
     "only. If a provider address has been pinned in docker-compose.override.yml, that address " +
     "may have been withdrawn.",
   issuer_not_oidc:
     "Something answered but it was not a provider. The issuer URL should be the one the " +
-    "provider publishes, with no trailing slash — for Entra ID, " +
+    "provider publishes, with no trailing slash - for Entra ID, " +
     "https://login.microsoftonline.com/<tenant-id>/v2.0",
   issuer_mismatch:
     "Use the URL the provider states as its own issuer. Every token carries that value and " +

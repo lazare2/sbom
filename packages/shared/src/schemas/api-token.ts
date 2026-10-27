@@ -4,7 +4,7 @@ import { z } from "zod";
  * Personal API tokens: the same API the web app uses, authenticated without a browser.
  *
  * There is no second API. Every screen in this platform is drawn by calling `/api/v1`, so a
- * token does not open a new surface — it opens the existing one to a script. That framing
+ * token does not open a new surface - it opens the existing one to a script. That framing
  * matters for what follows: nothing here grants reach the UI did not already have, and the only
  * genuinely new risk is the credential itself, which unlike a session cookie is long-lived,
  * copy-pasteable, and ends up in shell history.
@@ -13,7 +13,7 @@ import { z } from "zod";
  *
  * A token carries no permissions of its own. It names a user; the role, environment and group
  * machinery then runs exactly as it does for a session. Narrowing somebody's access, or
- * deactivating them, therefore takes effect on their tokens immediately — which is true by
+ * deactivating them, therefore takes effect on their tokens immediately - which is true by
  * construction only because the answer is never copied into the token.
  */
 
@@ -21,8 +21,8 @@ import { z } from "zod";
  * How much of the account's reach this particular string may use.
  *
  * Not a permission system. A `write` token can do no more than its owner can; a `read` token
- * can do less. The split exists because the common reason to want a token — pulling the
- * inventory into a spreadsheet — needs no write access at all, while an administrator's write
+ * can do less. The split exists because the common reason to want a token - pulling the
+ * inventory into a spreadsheet - needs no write access at all, while an administrator's write
  * token is total control of the platform if it leaks. Defaulting to `read` makes the dangerous
  * capability a deliberate choice per token.
  */
@@ -52,7 +52,7 @@ export const createApiTokenSchema = z.object({
    * Days until it expires, or null for never.
    *
    * Null is permitted rather than forbidden, because a build agent that nobody can reach at
-   * three in the morning to rotate a credential is a real situation — but it is never the
+   * three in the morning to rotate a credential is a real situation - but it is never the
    * default, and the screen says plainly what it means.
    */
   expiresInDays: z.number().int().min(1).max(API_TOKEN_MAX_DAYS).nullable().default(90),
@@ -73,8 +73,8 @@ export interface ApiTokenSummary {
   /**
    * Whether it would authenticate a request right now.
    *
-   * Computed rather than stored, because it is the conjunction of three independent facts —
-   * not revoked, not expired, and the owning account still active — and a stored flag would
+   * Computed rather than stored, because it is the conjunction of three independent facts -
+   * not revoked, not expired, and the owning account still active - and a stored flag would
    * be a fourth that can disagree with all of them.
    */
   active: boolean;
@@ -87,7 +87,7 @@ export interface ApiTokenSummary {
  *
  * The plaintext is never stored and cannot be recovered; losing it means minting another. Kept
  * a distinct type from `ApiTokenSummary` so that no endpoint can return the secret by
- * accident — a function typed to return a summary cannot carry one.
+ * accident - a function typed to return a summary cannot carry one.
  */
 export interface ApiTokenCreated {
   token: ApiTokenSummary;
@@ -106,7 +106,7 @@ export interface ApiTokenWithOwner extends ApiTokenSummary {
  * What the API access screen tells a developer.
  *
  * `baseUrl` is derived from the deployment's `PUBLIC_URL` rather than from the browser, because
- * it is the address a script on another machine has to use — which is not necessarily the one
+ * it is the address a script on another machine has to use - which is not necessarily the one
  * the person reading the page arrived on, and quietly handing them `localhost` is how an
  * afternoon disappears.
  */
@@ -128,7 +128,7 @@ export const API_TOKEN_PREFIX = "Bearer ";
 /**
  * The fixed prefix every personal token starts with.
  *
- * Makes a leaked credential identifiable on sight — in a log, a paste, or a secret scanner —
+ * Makes a leaked credential identifiable on sight - in a log, a paste, or a secret scanner -
  * and lets the server reject an obviously-wrong string before it costs a database round trip.
  * `sbp` for "SBOM platform"; the `_` keeps it from running into the random part.
  */

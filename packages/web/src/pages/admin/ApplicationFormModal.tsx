@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ApplicationDetail, ApplicationSummary, Attributes } from "@sbom/shared";
-import { AttributeFields } from "../../components/AttributeFields.tsx";
+import { AttributeFields, missingRequiredAttributes } from "../../components/AttributeFields.tsx";
 import { useCreateApplication, useUpdateApplication } from "../../lib/mutations.ts";
 import { useAttributeDefinitions } from "../../lib/queries.ts";
 import { Button, FormError, FormRow, Modal, Select, TextInput } from "../../components/ui.tsx";
@@ -48,6 +48,7 @@ export function ApplicationFormModal({
 
   const pending = createApp.isPending || updateApp.isPending;
   const error = createApp.error ?? updateApp.error;
+  const missing = missingRequiredAttributes(definitions.data ?? [], attributes);
   const renaming = isEdit && existing !== undefined && existing !== null && name !== existing.name;
 
   async function submit(e: React.FormEvent) {
@@ -85,7 +86,12 @@ export function ApplicationFormModal({
           <Button onClick={onClose} disabled={pending}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" form="application-form" disabled={!name.trim() || pending}>
+          <Button
+            variant="primary"
+            type="submit"
+            form="application-form"
+            disabled={!name.trim() || pending || missing.length > 0}
+          >
             {pending ? "Saving…" : isEdit ? "Save changes" : "Create application"}
           </Button>
         </>
@@ -110,7 +116,7 @@ export function ApplicationFormModal({
           <div className="rounded-md border border-warn bg-warn-subtle px-3 py-2 text-xs text-warn">
             Renaming frees the old name. If CI still posts{" "}
             <code className="font-mono">{existing?.name}</code>, the next build will create a new
-            unconfirmed application instead of landing here — add it as an alias afterwards to avoid that.
+            unconfirmed application instead of landing here - add it as an alias afterwards to avoid that.
           </div>
         ) : null}
 
@@ -139,6 +145,11 @@ export function ApplicationFormModal({
             values={attributes}
             onChange={setAttributes}
           />
+          {missing.length > 0 ? (
+            <p className="mt-2 text-xs text-warn">
+              Required before saving: {missing.join(", ")}.
+            </p>
+          ) : null}
         </div>
       </form>
     </Modal>

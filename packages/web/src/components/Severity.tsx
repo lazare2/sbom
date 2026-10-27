@@ -11,7 +11,7 @@ import { Badge } from "./ui.tsx";
  * page.
  *
  * `unknown` is grey rather than being hidden or promoted to low. Plenty of advisories
- * carry no severity rating, and both alternatives misrepresent that — hiding loses a real
+ * carry no severity rating, and both alternatives misrepresent that - hiding loses a real
  * finding, and colouring it as low invents an assessment nobody made.
  */
 
@@ -33,7 +33,7 @@ const SEVERITY_LABEL: Record<VulnSeverity, string> = {
   unknown: "Unknown",
 };
 
-/** Highest first — the order every list and legend here is read in. */
+/** Highest first - the order every list and legend here is read in. */
 export const SEVERITY_ORDER: VulnSeverity[] = [
   "critical",
   "high",
@@ -49,7 +49,7 @@ export function SeverityBadge({ severity }: { severity: VulnSeverity }) {
       tone={SEVERITY_TONE[severity]}
       title={
         severity === "unknown"
-          ? "The advisory carries no severity rating. Not an absence of risk — an absence of assessment."
+          ? "The advisory carries no severity rating. Not an absence of risk - an absence of assessment."
           : undefined
       }
     >
@@ -61,8 +61,8 @@ export function SeverityBadge({ severity }: { severity: VulnSeverity }) {
 /**
  * A severity distribution as a single stacked bar.
  *
- * Compact enough to sit in a table row, which matters because the alternative — six
- * numbers per row — is unreadable at a glance across twenty applications. Zero-width
+ * Compact enough to sit in a table row, which matters because the alternative - six
+ * numbers per row - is unreadable at a glance across twenty applications. Zero-width
  * segments are omitted rather than rendered as slivers.
  */
 export function SeverityBar({
@@ -114,7 +114,7 @@ export function SeverityBar({
 /**
  * Just the critical and high counts, for places too narrow for a full breakdown.
  *
- * Lives here rather than at the call site so the tones stay governed by `SEVERITY_TONE` —
+ * Lives here rather than at the call site so the tones stay governed by `SEVERITY_TONE` -
  * both are `danger`, which is deliberate: a reader scanning a column by colour should see one
  * signal for "act on this", and the letter distinguishes which. Splitting them into two
  * colours here would quietly contradict every other severity display in the app.
@@ -181,13 +181,13 @@ export function ScanningDisabledNotice({
       <p className="mx-auto mt-1 max-w-xl text-xs text-text-muted">
         Vulnerability scanning is switched off, so no package here has been matched against a
         vulnerability database.{" "}
-        <strong className="font-semibold">This is not a clean result — nothing has been checked.</strong>
+        <strong className="font-semibold">This is not a clean result - nothing has been checked.</strong>
       </p>
       {isAdmin ? (
         <p className="mt-3 text-xs text-text-muted">
           Enable it under{" "}
-          <a href="/admin/vulnerabilities" className="text-accent hover:underline">
-            Admin → Vulnerability scanning
+          <a href="/admin/scanners/vulnerabilities" className="text-accent hover:underline">
+            Admin → Scanners → Vulnerabilities
           </a>
           .
         </p>

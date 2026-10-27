@@ -33,7 +33,7 @@ import {
  *
  * ## Where each figure comes from
  *
- * Two sources, and each figure has exactly one of them — never a fast estimate and a slow
+ * Two sources, and each figure has exactly one of them - never a fast estimate and a slow
  * exact version of the same number, because the first time those disagreed nobody would
  * be able to say which was right.
  *
@@ -46,7 +46,7 @@ import {
  *   fixable, knownExploited, affectedPackages
  *     From the findings tables, because the snapshot stores them as flat scalars that are
  *     not severity-split. Under a severity filter a snapshot value would describe all
- *     severities while the count beside it described four — two numbers on one row that
+ *     severities while the count beside it described four - two numbers on one row that
  *     do not belong to each other. This query runs unconditionally, filter or not: the
  *     estate has always needed it for `affectedPackages` (a package in forty services is
  *     one affected package, not forty, so it cannot be summed from per-scan rows), and
@@ -57,7 +57,7 @@ import {
  * It never changes the rule that rankings are computed on one half of the split rather
  * than the sum. Measured on a realistic container SBOM, base-image packages were 2,817 of
  * 2,845 findings; a combined ranking is a base-image-age ranking whatever its heading
- * says. So the rankings follow `rankedScope` — application dependencies, unless the
+ * says. So the rankings follow `rankedScope` - application dependencies, unless the
  * filter asks for base image alone, in which case there is no application half left to
  * rank. Every per-row count describes that same half.
  *
@@ -67,7 +67,7 @@ import {
  * the sweep only writes once every component in that scan has been matched. Without that
  * restriction the findings-side figures would include half-matched builds while the
  * snapshot-side ones did not, and the two would drift apart on exactly the estates where
- * it matters — the ones in the middle of a sweep.
+ * it matters - the ones in the middle of a sweep.
  */
 
 /** Every severity, for the unfiltered reference figures. */
@@ -143,7 +143,7 @@ export class VulnReportService {
   ): Promise<VulnerabilityReport> {
     /*
      * With base image selected alone there is no application half to rank, so the
-     * rankings switch to it. With anything else — including "all packages" — they stay on
+     * rankings switch to it. With anything else - including "all packages" - they stay on
      * application dependencies, for the reason in the class comment.
      */
     const rankedScope: "app" | "os" = filter.scope === "os" ? "os" : "app";
@@ -334,7 +334,7 @@ export class VulnReportService {
    * Fix availability, known-exploited status and distinct affected packages.
    *
    * From the findings tables, for the reason in the class comment. Both halves come back
-   * regardless of the scope filter — the extra `FILTER` clauses are free once the join has
+   * regardless of the scope filter - the extra `FILTER` clauses are free once the join has
    * been paid for, and computing them together means the two halves are always counted
    * over one population.
    */
@@ -388,8 +388,8 @@ export class VulnReportService {
    *
    * Two paths producing identical row shapes. With no severity filter the per-scan
    * snapshot already holds every figure a row needs, which is one indexed row per
-   * application. With a severity filter it does not — the snapshot's `fixable` and
-   * `known_exploited` are not severity-split — so the ranking is computed over the
+   * application. With a severity filter it does not - the snapshot's `fixable` and
+   * `known_exploited` are not severity-split - so the ranking is computed over the
    * findings themselves. Slower, and correct: a row where the findings count is filtered
    * and the fixable count beside it is not would be worse than a slow page.
    */
@@ -524,7 +524,7 @@ export class VulnReportService {
    *
    * "In use now" is what makes the list actionable: a package version no application
    * still ships is history, not work. Restricted to the ranked half rather than the
-   * filter's full scope — with both halves in one list, distribution packages would take
+   * filter's full scope - with both halves in one list, distribution packages would take
    * every row and the ranking would stop naming anything a team can act on.
    */
   private async topPackages(
@@ -605,7 +605,7 @@ export class VulnReportService {
    * on Debian 11 are one base-image upgrade, not twelve pieces of work.
    *
    * Read from the jsonb breakdown rather than the snapshot's integer columns so it can
-   * follow a severity filter — the integer columns only carry critical and high.
+   * follow a severity filter - the integer columns only carry critical and high.
    */
   private async baseImageExposure(
     filter: VulnFilterState,

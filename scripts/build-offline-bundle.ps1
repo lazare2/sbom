@@ -8,7 +8,7 @@
     the nginx-served frontend) plus the compose file and start scripts. Copy the
     folder to the offline machine and run start.ps1 or start.sh there.
 
-    The target needs Docker and nothing else — no Node, no npm registry access,
+    The target needs Docker and nothing else - no Node, no npm registry access,
     no PostgreSQL install, and no compiler for the argon2 native module.
 
     Run this on a machine WITH internet, since building pulls base images and
@@ -46,7 +46,7 @@ function Write-Note { param([string]$Text) Write-Host "    $Text" -ForegroundCol
       1. docker writes its build progress to stderr even on a completely
          successful build. With $ErrorActionPreference = "Stop", PowerShell
          wraps each of those lines in a NativeCommandError and terminates the
-         script — so a working build looks like a crash. The preference is
+         script - so a working build looks like a crash. The preference is
          lowered for the duration of the call and restored afterwards.
 
       2. Arguments are taken as one explicit array rather than via
@@ -72,7 +72,7 @@ function Invoke-Docker {
     }
 }
 
-<# True when an image is present locally. Never throws — it is a probe. #>
+<# True when an image is present locally. Never throws - it is a probe. #>
 function Test-DockerImage {
     param([Parameter(Mandatory)][string]$Image)
     $previous = $ErrorActionPreference
@@ -107,7 +107,7 @@ $webImage = "sbom-platform/web:$Version"
 $platform = "linux/amd64"
 
 Write-Host ""
-Write-Host "SBOM Platform — offline bundle" -ForegroundColor Cyan
+Write-Host "SBOM Platform - offline bundle" -ForegroundColor Cyan
 Write-Host ("=" * 66) -ForegroundColor DarkGray
 Write-Note "version   $Version"
 Write-Note "platform  $platform"
@@ -228,7 +228,7 @@ $archive = Join-Path $bundleDir "images.tar"
 Invoke-Docker @("save", "--output", $archive, $postgresImage, $apiImage, $webImage) "docker save failed."
 
 $archiveSize = (Get-Item $archive).Length / 1MB
-Write-Note ("images.tar — {0:N0} MB" -f $archiveSize)
+Write-Note ("images.tar - {0:N0} MB" -f $archiveSize)
 
 # --- 4. optional single-file archive ---------------------------------------
 if ($Compress) {
@@ -240,7 +240,7 @@ if ($Compress) {
     # file on a USB stick or a slow share.
     Compress-Archive -Path "$bundleDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
     $zipSize = (Get-Item $zipPath).Length / 1MB
-    Write-Note ("{0} — {1:N0} MB" -f (Split-Path $zipPath -Leaf), $zipSize)
+    Write-Note ("{0} - {1:N0} MB" -f (Split-Path $zipPath -Leaf), $zipSize)
 }
 
 # --- done -------------------------------------------------------------------

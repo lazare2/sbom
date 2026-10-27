@@ -15,15 +15,15 @@ const dateFormat = new Intl.DateTimeFormat(undefined, {
 });
 
 export function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return " - ";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : dateTimeFormat.format(d);
+  return Number.isNaN(d.getTime()) ? " - " : dateTimeFormat.format(d);
 }
 
 export function formatDate(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return " - ";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : dateFormat.format(d);
+  return Number.isNaN(d.getTime()) ? " - " : dateFormat.format(d);
 }
 
 /**
@@ -35,7 +35,7 @@ export function formatDate(iso: string | null): string {
 export function formatRelative(iso: string | null): string {
   if (!iso) return "never";
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "—";
+  if (Number.isNaN(then)) return " - ";
 
   const seconds = Math.round((Date.now() - then) / 1000);
   if (seconds < 0) return "just now";
@@ -57,7 +57,7 @@ export function formatRelative(iso: string | null): string {
 }
 
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (!Number.isFinite(bytes) || bytes < 0) return " - ";
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];
   let value = bytes / 1024;
@@ -70,13 +70,13 @@ export function formatBytes(bytes: number): string {
 }
 
 export function formatNumber(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return " - ";
   return value.toLocaleString();
 }
 
 /** Short commit SHA, the form people actually recognise. */
 export function shortSha(sha: string | null): string {
-  if (!sha) return "—";
+  if (!sha) return " - ";
   return sha.length > 10 ? sha.slice(0, 10) : sha;
 }
 
@@ -87,7 +87,7 @@ export function shortSha(sha: string | null): string {
  * image name and tag at the end are what identifies the build.
  */
 export function shortImageRef(ref: string | null, maxLength = 46): string {
-  if (!ref) return "—";
+  if (!ref) return " - ";
   if (ref.length <= maxLength) return ref;
   return `…${ref.slice(-(maxLength - 1))}`;
 }

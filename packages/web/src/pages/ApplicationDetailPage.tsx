@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { ScanSummary, SortDirection } from "@sbom/shared";
+import type { ScanSummary, SeverityCounts, SortDirection } from "@sbom/shared";
 import { componentListSort, removedComponentSort, scanHistorySort } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
@@ -133,7 +133,7 @@ export function ApplicationDetailPage() {
             {app.name}
             <StatusBadge status={app.status} />
             {app.isStale ? (
-              <Badge tone="warn" title="No scan received recently — the component list may be out of date.">
+              <Badge tone="warn" title="No scan received recently - the component list may be out of date.">
                 Stale
               </Badge>
             ) : null}
@@ -220,7 +220,7 @@ export function ApplicationDetailPage() {
               {/*
                 Chips link into the filtered applications list, so "Alpine 3.20"
                 answers "what else runs this" in one click. Derived from the
-                current build only — a historical build's platform belongs on
+                current build only - a historical build's platform belongs on
                 that scan's own page.
               */}
               <Field label="Runs on">
@@ -471,7 +471,7 @@ function ComponentsTab({
                         />
                       </Td>
                       <Td className="max-w-[380px] truncate" title={c.purl ?? undefined}>
-                        {c.purl ? <Mono>{c.purl}</Mono> : <span className="text-text-faint">—</span>}
+                        {c.purl ? <Mono>{c.purl}</Mono> : <span className="text-text-faint">-</span>}
                       </Td>
                     </Tr>
                   ))}
@@ -505,8 +505,8 @@ function ChangesTab({ applicationId }: { applicationId: string }) {
 
   if (isLoading) return <LoadingBlock label="Comparing builds" />;
 
-  // A 400 here is expected and informative — an application with a single scan
-  // has nothing to compare against — so it is rendered as an explanation rather
+  // A 400 here is expected and informative - an application with a single scan
+  // has nothing to compare against - so it is rendered as an explanation rather
   // than as a failure with a retry button.
   if (error) {
     return (
@@ -602,7 +602,7 @@ function RemovedTab({
 
         <div className="border-b border-border-base px-4 py-2 text-xs text-text-muted">
           {state.ignoreVersion
-            ? "Showing only packages with no remaining version — a package that was merely upgraded is hidden."
+            ? "Showing only packages with no remaining version - a package that was merely upgraded is hidden."
             : "Showing every package-and-version that has left, including versions replaced by an upgrade. Useful when tracking one known-bad release."}
         </div>
 
@@ -658,7 +658,7 @@ function RemovedTab({
                         />
                       </Td>
                       <Td className="max-w-[420px] truncate" title={c.purl ?? undefined}>
-                        {c.purl ? <Mono>{c.purl}</Mono> : <span className="text-text-faint">—</span>}
+                        {c.purl ? <Mono>{c.purl}</Mono> : <span className="text-text-faint">-</span>}
                       </Td>
                     </Tr>
                   ))}
@@ -759,7 +759,7 @@ function VulnerabilitiesTab({
       {error ? <ErrorBanner error={error} onRetry={() => void refetch()} /> : null}
       <FindingsCard
         title="Vulnerabilities in the current build"
-        subtitle="Matched against the installed vulnerability database. Application dependencies and base-image packages are counted separately — the base image usually contributes far more findings, and it is fixed by a rebuild rather than a dependency change."
+        subtitle="Matched against the installed vulnerability database. Application dependencies and base-image packages are counted separately - the base image usually contributes far more findings, and it is fixed by a rebuild rather than a dependency change."
         filters={filters}
         onChange={(patch) => setFilters((prev) => ({ ...prev, ...patch }))}
       >
@@ -774,6 +774,78 @@ function VulnerabilitiesTab({
         />
       </FindingsCard>
     </>
+  );
+}
+
+/**
+ * One build's findings on one side (its own dependencies, or its base image), as Critical /
+ * High / Medium / Low.
+ *
+ * Two lines for a replaced build: today's figure, which moves with every database update, and
+ * the figure saved when a newer build took over, which never does. Read together they separate
+ * "this build got worse because new CVEs were published" from "this build was already this bad
+ * when it shipped". The current build has only today's.
+ */
+function BuildVulnCell({ scan, side }: { scan: ScanSummary; side: "app" | "os" }) {
+  const vulns = scan.vulnerabilities;
+  if (!vulns) {
+    return (
+      <span className="text-xs text-text-faint" title="Not matched against a vulnerability database yet.">
+        -
+      </span>
+    );
+  }
+  return (
+    <div className="space-y-0.5">
+      <SeverityQuad label="Today" counts={vulns.today[side]} />
+      {scan.isLatest ? null : vulns.whenReplaced ? (
+        <SeverityQuad
+          label="Replaced"
+          counts={vulns.whenReplaced[side]}
+          title={vulns.replacedAt ? `Saved ${formatDateTime(vulns.replacedAt)}` : undefined}
+          muted
+        />
+      ) : (
+        <div
+          className="text-[10px] text-text-faint"
+          title="This build was replaced before these figures were recorded."
+        >
+          Replaced: -
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SeverityQuad({
+  label,
+  counts,
+  title,
+  muted = false,
+}: {
+  label: string;
+  counts: SeverityCounts;
+  title?: string;
+  muted?: boolean;
+}) {
+  const cells: Array<[string, number, string]> = [
+    ["C", counts.critical, "text-danger"],
+    ["H", counts.high, "text-danger"],
+    ["M", counts.medium, "text-warn"],
+    ["L", counts.low, "text-info"],
+  ];
+  return (
+    <div
+      className={`nums flex items-center gap-2 whitespace-nowrap text-[11px] ${muted ? "opacity-70" : ""}`}
+      title={title ?? `${label}: ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low`}
+    >
+      <span className="w-14 text-[10px] uppercase tracking-wide text-text-faint">{label}</span>
+      {cells.map(([letter, n, tone]) => (
+        <span key={letter} className={n > 0 ? `font-medium ${tone}` : "text-text-faint"}>
+          {letter} {n}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -800,8 +872,8 @@ function HistoryTab({
   /*
     The build queued for deletion, held as the whole row rather than its id.
 
-    The confirmation has to name what it is about to destroy — the date, the build
-    number, how many components it recorded — and after the delete succeeds that row
+    The confirmation has to name what it is about to destroy - the date, the build
+    number, how many components it recorded - and after the delete succeeds that row
     is gone from the refetched list. Keeping a copy is what lets the dialog describe
     the build rather than say "this scan".
   */
@@ -823,7 +895,7 @@ function HistoryTab({
       <Card>
         <CardHeader
           title="Scan history"
-          subtitle="Every build that submitted an SBOM. Nothing is trimmed automatically — select a build to see the components it shipped."
+          subtitle="Every build that submitted an SBOM. Nothing is trimmed automatically; select a build to see the components it shipped. Vulnerabilities are Critical / High / Medium / Low: Today is against the current database, When replaced is the count saved when a newer build took over."
           actions={
             <Button size="sm" variant="primary" onClick={() => setUploading(true)}>
               Upload SBOM
@@ -863,6 +935,9 @@ function HistoryTab({
                     >
                       Components
                     </Th>
+                    {/* Two figures per build each; neither is a single orderable value. */}
+                    <Th width="170px">Application vulns</Th>
+                    <Th width="170px">Image vulns</Th>
                     <Th onSort={() => sort.toggle("imageRef")} sorted={sort.stateOf("imageRef")}>
                       Image
                     </Th>
@@ -882,8 +957,8 @@ function HistoryTab({
                       <Td title={formatDateTime(scan.createdAt)}>
                         {/*
                           Timestamp and badges on separate lines. Inline, the date
-                          wrapped mid-string to make room for them — "Aug 12, 2026,
-                          11:51" / "AM current manual" — and a second badge made
+                          wrapped mid-string to make room for them - "Aug 12, 2026,
+                          11:51" / "AM current manual" - and a second badge made
                           that worse rather than rarer.
                         */}
                         <Link
@@ -913,27 +988,33 @@ function HistoryTab({
                           </span>
                         ) : null}
                       </Td>
-                      <Td className="nums text-text-muted">{scan.buildNumber ?? "—"}</Td>
+                      <Td className="nums text-text-muted">{scan.buildNumber ?? " - "}</Td>
                       <Td>
                         <Mono title={scan.commitSha ?? undefined}>{shortSha(scan.commitSha)}</Mono>
                       </Td>
                       <Td className="truncate text-text-muted" title={scan.branch ?? undefined}>
-                        {scan.branch ?? "—"}
+                        {scan.branch ?? " - "}
                       </Td>
                       <Td align="right" className="nums text-text-muted">
                         {formatNumber(scan.componentCount)}
                       </Td>
+                      <Td>
+                        <BuildVulnCell scan={scan} side="app" />
+                      </Td>
+                      <Td>
+                        <BuildVulnCell scan={scan} side="os" />
+                      </Td>
                       <Td className="max-w-[360px] truncate" title={scan.imageRef ?? undefined}>
                         <Mono>{shortImageRef(scan.imageRef)}</Mono>
                       </Td>
-                      <Td className="text-text-muted">{scan.toolVersion ?? "—"}</Td>
+                      <Td className="text-text-muted">{scan.toolVersion ?? " - "}</Td>
                       {/*
                         The size doubles as the download rather than earning its own column:
                         the cell already exists to describe the artifact, so making it the
                         handle for it adds an action without adding width.
 
                         Deliberately not beside Delete. That column is admin-only, and anyone
-                        who can see a build should be able to take its SBOM — putting the two
+                        who can see a build should be able to take its SBOM - putting the two
                         together would either hide this from non-admins or give the column
                         different contents per role. It also keeps the destructive button
                         alone, instead of one click away from a harmless one.

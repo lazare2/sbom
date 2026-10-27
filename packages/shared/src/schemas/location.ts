@@ -36,7 +36,7 @@ import { osPackageEcosystems } from "./vulnerability.js";
  * which is both more correct and very much cheaper: OS packages are the overwhelming majority
  * of components in a container image, so skipping them removes almost all of the storage.
  *
- * Language-ecosystem packages are the opposite — the path is a genuine location:
+ * Language-ecosystem packages are the opposite - the path is a genuine location:
  *
  *   npm      /usr/local/lib/node_modules/npm/node_modules/@isaacs/cliui/package.json
  *   binary   /usr/local/lib/python3.12/site-packages/pip/_vendor/distlib/t64.exe
@@ -45,8 +45,8 @@ import { osPackageEcosystems } from "./vulnerability.js";
 /**
  * How a package came to be in the artifact.
  *
- * Deliberately *not* derived from image layers. The obvious rule — "a layer that contains
- * distro packages is the base image" — was tested against real images and does not work:
+ * Deliberately *not* derived from image layers. The obvious rule - "a layer that contains
+ * distro packages is the base image" - was tested against real images and does not work:
  *
  *   node:20-alpine     layer A {npm: 203, binary: 1}   layer B {apk: 18, npm: 1}
  *   python:3.12-slim   every one of its three layers contains deb packages
@@ -64,7 +64,7 @@ export const componentOrigins = [
    */
   "os_package",
   /**
-   * Present in the image but outside the application's own tree — a language runtime's global
+   * Present in the image but outside the application's own tree - a language runtime's global
    * packages, something unpacked into `/opt`. Usually inherited from the base image, so the
    * fix belongs to whoever owns the Dockerfile's `FROM` line.
    */
@@ -81,7 +81,7 @@ export type ComponentOrigin = (typeof componentOrigins)[number];
  *
  * A heuristic, and the only one in this feature. Two things make it acceptable:
  *
- *  1. It is small, closed and auditable — it is this list, and nothing else.
+ *  1. It is small, closed and auditable - it is this list, and nothing else.
  *  2. **The label is never shown without the path beside it.** If the classification is wrong
  *     the reader sees `/usr/local/lib/node_modules/evil-pkg` and corrects it immediately. A
  *     heuristic that hides the evidence it was derived from would not be acceptable; one that
@@ -116,7 +116,7 @@ const IMAGE_PATH_PREFIXES = [
 /**
  * Whether this ecosystem's recorded paths locate the package or merely its metadata.
  *
- * False for OS package managers — see the module comment. The caller skips storing paths
+ * False for OS package managers - see the module comment. The caller skips storing paths
  * entirely in that case, so the absence is by design rather than missing data.
  *
  * Note this is not `isBaseImagePackage`: that folds in `kind === "runtime"`, and a runtime's
@@ -130,7 +130,7 @@ export function ecosystemHasMeaningfulPaths(ecosystem: string): boolean {
  * Classify one component's origin from its ecosystem and its recorded paths.
  *
  * Derived at read time rather than stored, so the prefix list above can be corrected without a
- * migration and without a backfill. It is cheap — a handful of string comparisons per row.
+ * migration and without a backfill. It is cheap - a handful of string comparisons per row.
  *
  * When a component sits at several paths and they disagree, **`application` wins**. A package
  * that appears in the application's own tree is a dependency the application has, whatever
@@ -142,7 +142,7 @@ export function classifyComponentOrigin(args: {
   /**
    * `os` short-circuits to `os_package`. This is the distro marker component, whose ecosystem
    * is recorded as `unknown` rather than as `deb`/`apk` and which would otherwise fall through
-   * to `unknown` — technically true, but it is the one component whose origin is never in
+   * to `unknown` - technically true, but it is the one component whose origin is never in
    * doubt. `runtime` is deliberately not included: `/usr/local/bin/node` is a real location
    * and classifying it through the prefix list gives the better answer.
    */
@@ -186,7 +186,7 @@ export function normalizeLocationPath(raw: string): string | null {
  *
  * `paths` is capped at {@link COMPONENT_LOCATION_PATH_CAP} while `pathCount` is the true
  * total, so a truncated list can say "3 of 81" rather than silently implying it is complete.
- * Null `paths` with a non-`os_package` origin means the SBOM carried no location — a
+ * Null `paths` with a non-`os_package` origin means the SBOM carried no location - a
  * hand-written document, a non-Syft tool, or a scan ingested before this was recorded.
  */
 export interface ComponentLocation {
@@ -289,6 +289,6 @@ export const COMPONENT_ORIGIN_HINTS: Record<ComponentOrigin, string> = {
   image:
     "Found outside the application's own directory tree, so it was almost certainly inherited from the base image rather than declared by this application.",
   application:
-    "Found inside the application's own directory tree — a dependency this application pulled in.",
+    "Found inside the application's own directory tree - a dependency this application pulled in.",
   unknown: "This SBOM recorded no location for the package, so no claim is made either way.",
 };

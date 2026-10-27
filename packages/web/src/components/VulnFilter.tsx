@@ -33,7 +33,7 @@ export interface VulnFilterUrlState {
    * Reaches further than the other two, and that difference is the reason it is rendered as a
    * dropdown rather than a chip row. Scope and severity describe *findings*, so they narrow
    * only the vulnerability panels. A group describes *applications*, and every panel on these
-   * pages is an aggregate over applications — so it narrows coverage, churn and the platform
+   * pages is an aggregate over applications - so it narrows coverage, churn and the platform
    * mix as well. `VulnFilterBanner` says which of the two is in force.
    */
   group: string;
@@ -44,13 +44,13 @@ export interface VulnFilterUrlState {
  *
  * Severity is one comma-separated parameter rather than a repeated key, so a filtered
  * dashboard link stays short enough to paste into a ticket. Kept as a string at this layer
- * because `useUrlState` writes values through `String()` — an array there would produce
+ * because `useUrlState` writes values through `String()` - an array there would produce
  * repeated keys and quietly break the round trip.
  */
 /*
  * A type alias rather than an interface, deliberately. `useUrlState` is generic over
  * `Record<string, unknown>`, and TypeScript grants an implicit index signature to object
- * type aliases but not to interfaces — an interface here fails to satisfy the constraint
+ * type aliases but not to interfaces - an interface here fails to satisfy the constraint
  * for a reason that has nothing to do with this filter.
  */
 export type VulnFilterParams = {
@@ -107,7 +107,7 @@ export function vulnFilterQuery(filter: VulnFilterUrlState): Record<string, stri
   return params;
 }
 
-/** True when the filter narrows anything — drives the "clear" affordance. */
+/** True when the filter narrows anything - drives the "clear" affordance. */
 export function isVulnFilterActive(filter: VulnFilterUrlState): boolean {
   return filter.scope !== "all" || filter.severity.length > 0 || filter.group !== "";
 }
@@ -265,7 +265,7 @@ export function VulnFilterBanner({
    *
    * Changes what the banner claims, and the claim is the point of the banner. Without a group,
    * inventory and coverage really are estate-wide while only the vulnerability panels narrow.
-   * With one, everything on the page narrows — and leaving the old sentence up would be an
+   * With one, everything on the page narrows - and leaving the old sentence up would be an
    * explicit, on-screen assurance that the coverage figure covers the whole estate when it
    * covers four applications.
    */
@@ -280,7 +280,7 @@ export function VulnFilterBanner({
       <p className="text-xs font-medium text-warn">Filtered: {label}</p>
       <p className="mt-0.5 text-[11px] text-text-muted">
         {groupScoped
-          ? "Every figure on this page — inventory, coverage, platform mix and vulnerabilities — describes only this group's applications."
+          ? "Every figure on this page - inventory, coverage, platform mix and vulnerabilities - describes only this group's applications."
           : "Every vulnerability figure below counts only matching findings. Inventory, coverage and platform figures are unfiltered and describe the whole estate."}
       </p>
     </div>

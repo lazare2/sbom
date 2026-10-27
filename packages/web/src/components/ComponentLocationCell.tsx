@@ -12,7 +12,7 @@ import type { BadgeTone } from "./ui.tsx";
  *
  * ## The label never appears without the path
  *
- * `origin` is a heuristic — a prefix list, checked against real images but still a guess about
+ * `origin` is a heuristic - a prefix list, checked against real images but still a guess about
  * somebody else's filesystem layout. That is only acceptable because this component always
  * shows the evidence underneath it. A reader who sees "Image" above
  * `/usr/src/app/node_modules/evil` knows instantly that the label is wrong and the path is
@@ -43,8 +43,8 @@ import type { BadgeTone } from "./ui.tsx";
  */
 
 const ORIGIN_TONES: Record<ComponentOrigin, BadgeTone> = {
-  // Neither of the two real origins is a problem in itself — a package being in the base image
-  // is not worse than being in the app, only differently owned — so neither gets a warning
+  // Neither of the two real origins is a problem in itself - a package being in the base image
+  // is not worse than being in the app, only differently owned - so neither gets a warning
   // tone. `unknown` does, because it is the one that means the platform cannot answer.
   application: "info",
   image: "neutral",
@@ -127,7 +127,7 @@ export function ComponentLocationCell({
 }
 
 /**
- * "Pulled in by fastify, avvio" — the actionable half of a finding.
+ * "Pulled in by fastify, avvio" - the actionable half of a finding.
  *
  * A finding against a package nobody installed is unactionable on its own: nothing names
  * @fastify/error in any manifest, so a developer reading that row has nothing to change.
@@ -142,7 +142,7 @@ export function ComponentLocationCell({
  * on this" is a state that cannot reach here.
  *
  * The alternative was tried on paper and rejected. Syft reads dependency edges from a
- * lockfile, so a container-image scan has none for its application packages at all —
+ * lockfile, so a container-image scan has none for its application packages at all -
  * measured at 0 of 193 npm packages in node:20-alpine. A sentence explaining the absence
  * would therefore appear on every row of such a build, which is not information, it is a
  * wall of identical grey text that teaches people to skip the cell.
@@ -186,7 +186,7 @@ function absentReason(origin: ComponentOrigin, extracted: boolean): string {
     return "Tracked by the distribution's package manager, not at a single path.";
   }
   if (!extracted) {
-    return "Not extracted yet — this build predates location recording.";
+    return "Not extracted yet - this build predates location recording.";
   }
   return "This SBOM recorded no location for the package.";
 }

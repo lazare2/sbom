@@ -131,7 +131,7 @@ export function ExportMenu({
           <div className="space-y-2">
             <h3 className="text-sm font-medium text-text">Assessments (VEX)</h3>
             <p className="text-xs text-text-muted">
-              What has been decided about the findings in this {kind === "groups" ? "group" : kind === "scans" ? "build" : "application"} — accepted risks,
+              What has been decided about the findings in this {kind === "groups" ? "group" : kind === "scans" ? "build" : "application"} - accepted risks,
               false positives and findings judged not to apply. Published beside the SBOM so a
               recipient can tell which findings you have already looked at.
             </p>

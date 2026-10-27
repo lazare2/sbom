@@ -411,7 +411,7 @@ export class MaliciousService {
     /*
      * Locations are unioned across every build that carried the package, not taken from the
      * latest one. A package that moved between builds was in both places, and the reader is
-     * about to go looking for it — the union is what they need, and the alternative (reading
+     * about to go looking for it - the union is what they need, and the alternative (reading
      * only the newest scan's row) would hide a second install directory precisely when a
      * partially-completed cleanup makes it most dangerous to miss.
      *

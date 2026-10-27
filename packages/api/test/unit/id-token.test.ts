@@ -7,7 +7,7 @@ import { IdTokenError, splitDisplayName, verifyIdToken } from "../../src/service
  *
  * Everything before this point narrows *who can reach it*; nothing before it establishes *who
  * they are*. That is decided here, from a signature, and the failure that matters is not a
- * rejected sign-in — it is an accepted one by the wrong person, which looks exactly like an
+ * rejected sign-in - it is an accepted one by the wrong person, which looks exactly like an
  * ordinary login in every log this platform keeps.
  *
  * So the cases below are mostly forgeries, and they are signed with real keys rather than

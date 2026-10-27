@@ -42,12 +42,12 @@ const envSchema = z
     SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
 
     /**
-     * Encrypts the one credential the platform has to be able to read back — the JFrog Xray
+     * Encrypts the one credential the platform has to be able to read back - the JFrog Xray
      * API token, which is presented to Xray on every scan.
      *
      * Optional, and deliberately not defaulted. A deployment that never connects Xray needs
      * no key, and inventing one silently would mean a token encrypted under a value nobody
-     * recorded — recoverable only by whoever still has that container. Saving a token
+     * recorded - recoverable only by whoever still has that container. Saving a token
      * without this set is refused, naming this variable.
      *
      * Separate from SESSION_SECRET rather than derived from it. Rotating the session secret
@@ -96,7 +96,7 @@ const envSchema = z
           .filter(Boolean),
       ),
 
-    /** Identifier, not an address — see `emailSchema` in @sbom/shared. */
+    /** Identifier, not an address - see `emailSchema` in @sbom/shared. */
     BOOTSTRAP_ADMIN_EMAIL: z
       .string()
       .trim()
@@ -112,7 +112,7 @@ const envSchema = z
     /*
      * Vulnerability scanning (Grype).
      *
-     * Whether scanning is *on* is not here — it is an admin-controlled row in the
+     * Whether scanning is *on* is not here - it is an admin-controlled row in the
      * `setting` table, because it is a runtime decision an administrator makes from
      * the UI. What lives here is everything the deployment operator owns: where the
      * binary is, where the database goes, and what it may talk to.
@@ -185,7 +185,7 @@ const envSchema = z
     /** Per-invocation match timeout. A batch that hangs must not stall the sweep forever. */
     GRYPE_SCAN_TIMEOUT_MS: z.coerce.number().int().min(10_000).default(10 * 60 * 1000),
 
-    /** Database download timeout — 141 MB, which on a slow link genuinely takes a while. */
+    /** Database download timeout - 141 MB, which on a slow link genuinely takes a while. */
     GRYPE_DB_UPDATE_TIMEOUT_MS: z.coerce.number().int().min(10_000).default(30 * 60 * 1000),
 
     /** Reachability probe timeout. Short: this only answers "is there a route at all". */
@@ -195,8 +195,8 @@ const envSchema = z
      * Upload ceiling for a hand-uploaded database archive.
      *
      * Deliberately separate from INGEST_MAX_SBOM_BYTES. These differ by more than an
-     * order of magnitude — an SBOM is a JSON document, this is a compressed database
-     * currently around 145 MB and growing with every year of published advisories — and
+     * order of magnitude - an SBOM is a JSON document, this is a compressed database
+     * currently around 145 MB and growing with every year of published advisories - and
      * sharing one limit means the air-gapped install path breaks the moment someone
      * tightens the ingest limit, in the one deployment that has no other way to get a
      * database. 1 GiB leaves years of upstream growth.

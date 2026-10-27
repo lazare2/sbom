@@ -28,7 +28,7 @@ function actorOf(request: FastifyRequest): Actor {
  * Behind `requireAuth` rather than `requireAdmin`, because this is what the header switcher
  * loads on every page: a read-only user has to be able to see the environments they were
  * granted or they cannot navigate at all. It returns exactly those, so the list is also the
- * answer to "which estates am I allowed to know about" — an environment the caller was not
+ * answer to "which estates am I allowed to know about" - an environment the caller was not
  * granted is absent rather than listed and locked, since a locked row confirms it exists.
  */
 export async function environmentRoutes(fastify: FastifyInstance): Promise<void> {

@@ -58,7 +58,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Accounts are created by admins only — there is no self-service signup, and no
+ * Accounts are created by admins only - there is no self-service signup, and no
  * invite email: the `email` column is a login identifier, not a mailbox, so
  * nothing can be delivered to it. An admin sets or generates a password and
  * hands it over out of band.
@@ -81,7 +81,7 @@ export const user = pgTable(
      * Recorded on the first successful sign-in and matched on from then on, rather than
      * matching on the email address every time. An email is an attribute a directory renames;
      * the subject claim is not. Matching on email forever means a rename upstream silently
-     * orphans the account and the next sign-in creates a second one — or, if the old address
+     * orphans the account and the next sign-in creates a second one - or, if the old address
      * was reassigned to somebody else, signs that person into this account.
      *
      * Null for a local account, and null for a directory account an administrator has created
@@ -97,8 +97,8 @@ export const user = pgTable(
     /**
      * Set whenever an admin issues a password, because at that moment a
      * credential for this account exists in someone else's hands (and possibly
-     * in a chat log). Login still succeeds — it has to, or the user could never
-     * clear the flag — but every other authenticated route is refused until the
+     * in a chat log). Login still succeeds - it has to, or the user could never
+     * clear the flag - but every other authenticated route is refused until the
      * password is changed.
      */
     mustChangePassword: boolean("must_change_password").notNull().default(false),
@@ -107,13 +107,13 @@ export const user = pgTable(
      *
      * A stored flag rather than "has rows in `user_group` or `user_application`", because
      * those two states are different and the difference is the whole feature. No rows with
-     * the flag off means *unrestricted* — every application in the environments they were
+     * the flag off means *unrestricted* - every application in the environments they were
      * granted, which is how every account behaved before this existed and how they must keep
      * behaving after it. No rows with the flag on means *nothing*, which is a real state: an
      * account can be restricted before anyone has decided what it should reach.
      *
      * Inferring it from row counts collapses those into one, and the collapse fails in the
-     * dangerous direction — removing somebody's last group would silently promote them to
+     * dangerous direction - removing somebody's last group would silently promote them to
      * seeing the entire estate.
      *
      * Ignored while the account is an admin, exactly like the environment grants.
@@ -174,8 +174,8 @@ export const session = pgTable(
  * There is deliberately no `user_token` table.
  *
  * An earlier revision had one for emailed password-reset and account-setup
- * links. Those links have no delivery channel — user emails are identifiers,
- * not mailboxes — so the only recovery path is an admin issuing a password
+ * links. Those links have no delivery channel - user emails are identifiers,
+ * not mailboxes - so the only recovery path is an admin issuing a password
  * directly. A token table with no way to send a token is a liability, not a
  * feature: it is a second credential store to keep expired and swept.
  */
@@ -258,13 +258,13 @@ export const userEnvironment = pgTable(
  * Narrowing an account to particular groups, within the environments it was granted.
  *
  * The second of two access dimensions, and they answer different questions. An environment
- * decides *which estate* — a hard partition, every application in exactly one. A group is an
+ * decides *which estate* - a hard partition, every application in exactly one. A group is an
  * annotation: an application belongs to none, one, or several, so this cannot be a partition
  * and is not treated as one. It narrows what an account sees inside estates it already has.
  *
  * Granting a group is granting its membership as it changes. An application added to the
  * group next month becomes visible without anybody revisiting this table, which is the reason
- * to grant a group rather than its members — and the reason a group's membership is an
+ * to grant a group rather than its members - and the reason a group's membership is an
  * access decision rather than only an organisational one.
  *
  * Rows are kept for administrators too. They are not consulted while the role is `admin`,
@@ -296,7 +296,7 @@ export const userGroup = pgTable(
 /**
  * Granting one application directly, for the cases a group does not fit.
  *
- * Groups are the unit that scales — membership is maintained once and every grant follows it.
+ * Groups are the unit that scales - membership is maintained once and every grant follows it.
  * This exists because CI registers a new application into no group at all, so without it the
  * only way to give somebody access to their own new service is to invent a group for one
  * member, and that pressure produces a group list nobody can read.
@@ -417,6 +417,70 @@ export const squadApplication = pgTable(
   ],
 );
 
+/**
+ * A group of squads: the level above the team in the organisation.
+ *
+ * Tribe -> squad -> user. A tribe has no members of its own; the people in it are the members
+ * of its squads. What a tribe adds is a place to put applications that belong to the tribe as a
+ * whole rather than to one team: every member of every squad in the tribe can see them.
+ *
+ * Platform-wide, like squads, and for the same reason.
+ */
+export const tribe = pgTable(
+  "tribe",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    email: text("email"),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("tribe_name_lower_uniq").on(sql`lower(${t.name})`)],
+);
+
+/**
+ * Which tribes a squad sits under. Many-to-many: a squad shared between two tribes is a real
+ * arrangement, and forcing one parent would make one of them lie about who works for it.
+ */
+export const squadTribe = pgTable(
+  "squad_tribe",
+  {
+    squadId: uuid("squad_id")
+      .notNull()
+      .references(() => squad.id, { onDelete: "cascade" }),
+    tribeId: uuid("tribe_id")
+      .notNull()
+      .references(() => tribe.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "squad_tribe_pkey", columns: [t.squadId, t.tribeId] }),
+    index("squad_tribe_tribe_idx").on(t.tribeId),
+  ],
+);
+
+/**
+ * An application assigned to a tribe directly. Visible to every member of every squad in the
+ * tribe, and the source of the application's "tribe" attribute.
+ */
+export const tribeApplication = pgTable(
+  "tribe_application",
+  {
+    tribeId: uuid("tribe_id")
+      .notNull()
+      .references(() => tribe.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => application.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "tribe_application_pkey", columns: [t.tribeId, t.applicationId] }),
+    index("tribe_application_application_idx").on(t.applicationId),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Applications
 // ---------------------------------------------------------------------------
@@ -462,7 +526,7 @@ export const application = pgTable(
      * NOTE for the query layer: a default jsonb GIN index serves the containment
      * operators (`@>`, `?`, `?|`, `?&`) but NOT `attributes->>'squad' = 'x'`.
      * Attribute filters must therefore be written as
-     * `attributes @> '{"squad":"payments"}'::jsonb` to be index-assisted — the
+     * `attributes @> '{"squad":"payments"}'::jsonb` to be index-assisted - the
      * `->>` form compiles to a sequential scan over every application.
      */
     index("application_attributes_gin").using("gin", t.attributes),
@@ -501,16 +565,16 @@ export const applicationAlias = pgTable(
  * Distinct from `application.attributes`, which is the other way to label an application
  * and cannot do this job: an attribute holds one value per key, so an application has one
  * squad and cannot have three. Membership here is many-to-many in both directions, which is
- * the whole point — an application belongs to its product *and* to "public facing" *and* to
+ * the whole point - an application belongs to its product *and* to "public facing" *and* to
  * "PCI scope" at the same time.
  *
  * Two quite different uses share this one table, deliberately:
  *
  *   - A label. "Public facing" is a trait many unrelated applications happen to have, and
- *     the question is which ones — the answer is a list.
+ *     the question is which ones - the answer is a list.
  *   - A composite. Eight images that together are one product, deployed as eight
  *     applications because that is how they are built. The question is how exposed the
- *     product is — the answer is one number.
+ *     product is - the answer is one number.
  *
  * Storing them separately would duplicate the table, the membership table, the admin screens
  * and the filter for no gain: the difference between the two is entirely in how a reader
@@ -544,7 +608,7 @@ export const applicationGroup = pgTable(
  * A CI pipeline could plausibly declare its own groups, and that was considered: it would be
  * self-maintaining, since the pipeline knows what product it belongs to. It is not done
  * because any holder of an ingest token could then create a group, and a typo would silently
- * become a real one — "checkuot" alongside "checkout", each with part of the membership and
+ * become a real one - "checkuot" alongside "checkout", each with part of the membership and
  * nothing on screen to say they are the same thing.
  */
 export const applicationGroupMember = pgTable(
@@ -589,10 +653,24 @@ export const attributeDefinition = pgTable(
     options: jsonb("options").$type<string[] | null>(),
     sortOrder: integer("sort_order").notNull().default(0),
     isActive: boolean("is_active").notNull().default(true),
+    /**
+     * Must have a value when an administrator creates, edits or confirms an application.
+     * Never enforced on CI ingest: refusing a build's SBOM over a missing label loses the one
+     * thing that cannot be recovered later.
+     */
+    isRequired: boolean("is_required").notNull().default(false),
+    /**
+     * Set on the two attributes that mirror access: "squad" and "tribe". Their value is the list
+     * of squads or tribes the application is assigned to directly, kept in step with
+     * `squad_application` and `tribe_application` in both directions. Null for every other
+     * attribute, which stays free data.
+     */
+    linkedTo: text("linked_to").$type<"squad" | "tribe">(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("attribute_definition_key_uniq").on(t.key),
+    uniqueIndex("attribute_definition_linked_uniq").on(t.linkedTo),
     index("attribute_definition_sort_idx").on(t.sortOrder),
   ],
 );
@@ -630,7 +708,7 @@ export const scan = pgTable(
      * `ci` for a pipeline posting to /api/v1/scans, `manual` for a signed-in user
      * uploading from the scan-history tab.
      *
-     * Provenance only. Every read path treats the two identically — a manual
+     * Provenance only. Every read path treats the two identically - a manual
      * upload is a real build of the application and becomes its current state, in
      * exactly the way a pipeline's would.
      */
@@ -645,7 +723,7 @@ export const scan = pgTable(
      */
     uploadedByUserId: uuid("uploaded_by_user_id").references(() => user.id, { onDelete: "set null" }),
     uploadedByEmail: text("uploaded_by_email"),
-    /** Optional free-text reason supplied at upload time — why this was done by hand. */
+    /** Optional free-text reason supplied at upload time - why this was done by hand. */
     uploadNote: text("upload_note"),
 
     /**
@@ -674,9 +752,9 @@ export const scan = pgTable(
      * When this scan's component locations were extracted from its SBOM.
      *
      * The column exists so that a missing path stays interpretable. Without it, a
-     * `scan_component` row with no paths has two completely different meanings — the SBOM
+     * `scan_component` row with no paths has two completely different meanings - the SBOM
      * carried no location for that package, or this scan predates the platform recording
-     * locations at all — and the screen would have to render the same blank for both.
+     * locations at all - and the screen would have to render the same blank for both.
      *
      * Set at ingest for anything parsed by the current code, and by the backfill job for
      * everything older. Null means nobody has looked yet, which is what the backfill selects
@@ -702,7 +780,7 @@ export const scan = pgTable(
     // --- SBOM document metadata ------------------------------------------
     specVersion: text("spec_version"),
     serialNumber: text("serial_number"),
-    /** From CycloneDX `metadata.tools` — normally syft and its version. */
+    /** From CycloneDX `metadata.tools` - normally syft and its version. */
     toolName: text("tool_name"),
     toolVersion: text("tool_version"),
 
@@ -716,7 +794,7 @@ export const scan = pgTable(
      * Stored as columns on `scan` rather than as `component` rows because this
      * describes the scan, not a dependency: it is read on every list and detail
      * page and must not require a join through `scan_component`. The OS package
-     * itself is still recorded as a component too — these are a denormalised
+     * itself is still recorded as a component too - these are a denormalised
      * summary, not a replacement.
      *
      * All nullable. A scratch or distroless image genuinely has no OS release
@@ -747,13 +825,13 @@ export const scan = pgTable(
     index("scan_os_idx").on(t.osName, t.osVersion),
     /**
      * Serves `runtimes @> '[{"name":"node"}]'::jsonb`, which is how the runtime
-     * filter has to be written — a `->>` comparison on an array element cannot
+     * filter has to be written - a `->>` comparison on an array element cannot
      * use an index at all.
      */
     index("scan_runtimes_gin").using("gin", t.runtimes),
     /**
      * Serves the manual upload's duplicate check: "has this application already
-     * received this exact SBOM". Scoped to one application on purpose — the same
+     * received this exact SBOM". Scoped to one application on purpose - the same
      * bytes legitimately appear under several applications, and the blob store
      * already deduplicates the payload itself.
      */
@@ -761,8 +839,8 @@ export const scan = pgTable(
     /**
      * Partial, like component_kind_idx: `ci` is the overwhelming majority, so a
      * full index on `source` would be almost entirely dead entries. This one
-     * answers "every scan that was uploaded by hand" — the question an auditor
-     * asks — while costing nothing on the ingest path.
+     * answers "every scan that was uploaded by hand" - the question an auditor
+     * asks - while costing nothing on the ingest path.
      */
     index("scan_source_idx").on(t.source, t.createdAt.desc()).where(sql`${t.source} <> 'ci'`),
   ],
@@ -806,7 +884,7 @@ export const component = pgTable(
      * found by Syft's binary classifier).
      *
      * All three are genuinely part of the inventory and all three stay
-     * searchable — "which images carry nginx" is a real question. The
+     * searchable - "which images carry nginx" is a real question. The
      * distinction exists because they answer different ones, and mixing them
      * silently distorts aggregates: without it, "most widely deployed packages"
      * ranks `alpine` alongside `log4j-core`, which makes a blast-radius list
@@ -835,9 +913,9 @@ export const component = pgTable(
      *
      * That is deliberate and load-bearing. A queue can be lost, double-consumed,
      * or drift out of sync with reality; derived state cannot. The same expression
-     * covers all four cases that need a scan — a brand-new package, the first time
+     * covers all four cases that need a scan - a brand-new package, the first time
      * scanning is enabled, a newly published database, and a sweep that was killed
-     * halfway — and a worker restarted mid-sweep resumes exactly where it stopped
+     * halfway - and a worker restarted mid-sweep resumes exactly where it stopped
      * without any recovery logic.
      */
     vulnScannedAt: timestamp("vuln_scanned_at", { withTimezone: true }),
@@ -849,7 +927,7 @@ export const component = pgTable(
      * The third term in the derived work queue, and the whole of what makes switching
      * providers safe. With it, the pending set becomes "never scanned, OR assessed by a
      * provider that is no longer the active one, OR assessed against an older database
-     * build" — so changing the setting re-queues the estate on its own. Nothing is wiped,
+     * build" - so changing the setting re-queues the estate on its own. Nothing is wiped,
      * nothing is migrated, and a switch made by accident is undone by switching back.
      *
      * Without it there is no honest option. Keeping the old findings blends two databases
@@ -881,7 +959,7 @@ export const component = pgTable(
     uniqueIndex("component_identity_hash_uniq").on(t.identityHash),
     /**
      * Serves the sweep's "what still needs scanning" claim query. Partial, because
-     * once the estate is caught up almost every row is excluded — indexing all of
+     * once the estate is caught up almost every row is excluded - indexing all of
      * them would be a large, almost entirely dead index on the platform's biggest
      * dimension table.
      */
@@ -891,7 +969,7 @@ export const component = pgTable(
     // Partial / fuzzy package-name search. Requires the pg_trgm extension,
     // installed by the first migration.
     index("component_name_trgm_idx").using("gin", sql`${t.name} gin_trgm_ops`),
-    // Exact, case-insensitive name lookup — the common search path.
+    // Exact, case-insensitive name lookup - the common search path.
     index("component_name_lower_idx").on(sql`lower(${t.name})`, t.version),
     index("component_ecosystem_idx").on(t.ecosystem),
     index("component_purl_idx").on(t.purl),
@@ -935,8 +1013,8 @@ export const scanComponent = pgTable(
      * Where this package sits inside this particular artifact.
      *
      * On the join row rather than on component, and that placement is the whole design. A
-     * component row is global and shared — one lodash@4.17.20 row that a hundred scans point
-     * at — while the path is different in every one of them. Hanging a path off component
+     * component row is global and shared - one lodash@4.17.20 row that a hundred scans point
+     * at - while the path is different in every one of them. Hanging a path off component
      * would make the last ingest overwrite every other application's answer.
      *
      * Null means no location was recorded: an OS package, whose paths locate the package
@@ -953,8 +1031,8 @@ export const scanComponent = pgTable(
     /**
      * Image layer digest, for image scans.
      *
-     * Kept as corroborating evidence rather than as a classifier. The tempting rule — a layer
-     * containing distro packages is the base image — was measured against real images and does
+     * Kept as corroborating evidence rather than as a classifier. The tempting rule - a layer
+     * containing distro packages is the base image - was measured against real images and does
      * not hold: every layer of python:3.12-slim contains deb packages, and node:20-alpine puts
      * its 203 global npm packages in a layer with none. It is recorded so that a reader who
      * distrusts the derived origin label has the ground truth to check against.
@@ -1010,7 +1088,7 @@ export const scanComponent = pgTable(
  * A submitted bulk package list, kept so its results have a shareable URL.
  *
  * Bulk search takes a pasted list, which can be hundreds of lines and therefore
- * has to travel in a request body — and a POST has no address to send someone.
+ * has to travel in a request body - and a POST has no address to send someone.
  * Persisting the list gives `/search/list/:id` a real link, which matters because
  * the output of one of these searches is normally pasted into a ticket that other
  * people then read.
@@ -1037,7 +1115,7 @@ export const packageQuery = pgTable(
     inputHash: text("input_hash").notNull(),
     /**
      * The text exactly as pasted, so reopening the link repopulates the box with
-     * what was typed — including the lines that failed to parse, which are the
+     * what was typed - including the lines that failed to parse, which are the
      * ones someone will want to fix.
      */
     rawInput: text("raw_input").notNull(),
@@ -1063,7 +1141,7 @@ export const packageQuery = pgTable(
 /**
  * Shared bearer tokens presented by CI/CD on `POST /api/v1/scans`.
  *
- * These identify "a trusted CI system", not an application — application
+ * These identify "a trusted CI system", not an application - application
  * identity comes entirely from the `app_name` form field. Multiple named tokens
  * are supported so Jenkins and GitLab (or per-environment runners) can be
  * rotated and revoked independently, even though only one may be in use today.
@@ -1263,7 +1341,7 @@ export const vulnerability = pgTable(
  *
  * Keyed on `component_id`, NOT on `scan_id`, and that is the single most
  * consequential decision in this feature. A vulnerability is a property of a
- * package version, not of a build that happened to contain it — so matching the
+ * package version, not of a build that happened to contain it - so matching the
  * platform's globally deduplicated component set covers every scan that has ever
  * contained those packages, including historical builds and applications nobody
  * has confirmed yet.
@@ -1289,7 +1367,7 @@ export const componentVulnerability = pgTable(
     fixState: text("fix_state").$type<FixState>().notNull().default("unknown"),
     /** Versions that resolve it. The actionable half of a finding. */
     fixVersions: text("fix_versions").array().notNull().default([]),
-    /** Grype's match type, e.g. `exact-direct-match` — why it believes this matches. */
+    /** Grype's match type, e.g. `exact-direct-match` - why it believes this matches. */
     matchType: text("match_type"),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
     /** Last sweep that still reported this pairing; lets a withdrawn advisory be pruned. */
@@ -1312,7 +1390,7 @@ export const componentVulnerability = pgTable(
  * Per-scan severity counts, frozen when the scan was matched.
  *
  * Serves two purposes that the live findings table cannot:
- *   1. An exposure trend — "how bad were we in June" — which a live join can only
+ *   1. An exposure trend - "how bad were we in June" - which a live join can only
  *      ever answer for today.
  *   2. Pre-aggregated ranking. "Top 10 vulnerable applications" reads one row per
  *      application here instead of joining millions of `scan_component` rows.
@@ -1320,8 +1398,8 @@ export const componentVulnerability = pgTable(
  * The split between application dependencies and base image is not cosmetic.
  * Measured on a realistic container SBOM: 2,845 findings, of which 2,817 came from
  * base-image OS packages. Ranked together, every "most vulnerable" list is really a
- * list of who has the oldest base image, and the application's own dependencies —
- * the part a squad can actually act on — are statistically invisible.
+ * list of who has the oldest base image, and the application's own dependencies -
+ * the part a squad can actually act on - are statistically invisible.
  */
 export const scanVulnSummary = pgTable(
   "scan_vuln_summary",
@@ -1348,7 +1426,7 @@ export const scanVulnSummary = pgTable(
     appHigh: integer("app_high").notNull().default(0),
     appFixable: integer("app_fixable").notNull().default(0),
     appKnownExploited: integer("app_known_exploited").notNull().default(0),
-    /** Distinct packages with at least one finding — a fairer size signal than raw findings. */
+    /** Distinct packages with at least one finding - a fairer size signal than raw findings. */
     appAffectedPackages: integer("app_affected_packages").notNull().default(0),
 
     osFindings: integer("os_findings").notNull().default(0),
@@ -1365,6 +1443,17 @@ export const scanVulnSummary = pgTable(
 
     /** Full severity breakdown for both groups, including negligible and unknown. */
     counts: jsonb("counts").$type<{ app: SeverityCounts; os: SeverityCounts }>(),
+
+    /*
+      The counts as they stood when a newer build replaced this one as the application's
+      current state, copied from `counts` at that moment and never recomputed afterwards.
+      `counts` above keeps moving with every database update; this is what the history shows
+      beside it, so a build can be read both as "what we knew when it was replaced" and as
+      "what we know about it today". Null for the current build, and for builds replaced before
+      this column existed.
+    */
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    supersededCounts: jsonb("superseded_counts").$type<{ app: SeverityCounts; os: SeverityCounts }>(),
   },
   (t) => [
     index("scan_vuln_summary_application_idx").on(t.applicationId, t.computedAt.desc()),
@@ -1376,7 +1465,7 @@ export const scanVulnSummary = pgTable(
 /**
  * What the vulnerability database says about a version nobody ships yet.
  *
- * Fix recommendations name versions that are, by definition, not in the estate — the version an
+ * Fix recommendations name versions that are, by definition, not in the estate - the version an
  * application should move *to*. Whether that version is itself affected can only be answered by
  * asking the scanner about it, and that costs a scanner run, so the answer is kept here keyed on
  * the exact package URL.
@@ -1477,7 +1566,7 @@ export const vulnerabilitySuppression = pgTable(
  *
  * Distinct from `config.ts`, which reads the environment once at boot and is the
  * deployment operator's domain. This table is for the handful of values an
- * administrator changes from the UI while the service runs — whether vulnerability
+ * administrator changes from the UI while the service runs - whether vulnerability
  * scanning is on, and how often the database is checked.
  *
  * Deliberately not used for anything that decides what code runs or what the
@@ -2051,4 +2140,5 @@ export type MaliciousFeedUpdateRow = typeof maliciousFeedUpdate.$inferSelect;
 export type AccessRequestRow = typeof accessRequest.$inferSelect;
 export type ApiTokenRow = typeof apiToken.$inferSelect;
 export type SquadRow = typeof squad.$inferSelect;
+export type TribeRow = typeof tribe.$inferSelect;
 export type FixCandidateCheckRow = typeof fixCandidateCheck.$inferSelect;

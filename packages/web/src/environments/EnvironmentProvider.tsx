@@ -146,7 +146,7 @@ export function EnvironmentProvider({ children }: { children: ReactNode }) {
           */}
           <EmptyState
             title="You're signed in, but have no access yet"
-            hint="Your account exists, but it has not been given access to any applications. An administrator grants access from Admin → Users, or by adding you to your team's squad. Once they have, reload this page."
+            hint="Your account exists, but it has not been given access to any applications. An administrator grants access from Admin → Access → Users, or by adding you to your team's squad. Once they have, reload this page."
           />
         </Card>
       </div>

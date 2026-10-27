@@ -3,8 +3,8 @@
 
   The counterpart to build-offline-bundle.ps1: that one produces a folder you carry to an
   isolated machine, this one publishes to a registry so any machine with Docker and
-  network access can run the platform from two small text files — a compose file and a
-  .env — instead of a copy of the repository.
+  network access can run the platform from two small text files - a compose file and a
+  .env - instead of a copy of the repository.
 
   Postgres is deliberately not pushed. It is an unmodified upstream image and the target
   pulls `postgres:16-alpine` itself; re-hosting someone else's image under your account
@@ -34,7 +34,7 @@ param(
     [switch]$SkipBuild,
 
     # Target CPU architecture. Overriding matters when the build host and the server
-    # differ — an ARM image on an x86 server fails with "exec format error", which reads
+    # differ - an ARM image on an x86 server fails with "exec format error", which reads
     # like a corrupt download rather than the architecture mismatch it is.
     [string]$Platform = "linux/amd64"
 )

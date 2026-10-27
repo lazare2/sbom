@@ -11,7 +11,7 @@ export interface PutResult {
  *
  * The parsed relational data is the queryable copy; this holds the original
  * CycloneDX JSON for audit and for re-parsing when the parser improves. Keys are
- * opaque to callers — the layout is the driver's business.
+ * opaque to callers - the layout is the driver's business.
  */
 export interface BlobStore {
   readonly name: string;

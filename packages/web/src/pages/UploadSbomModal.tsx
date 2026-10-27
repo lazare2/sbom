@@ -11,7 +11,7 @@ import { Button, FormError, FormRow, Modal, Mono, TextInput, Textarea } from "..
  *
  * The modal has three states, and separating them is the point: the form, the
  * duplicate warning, and the receipt. Collapsing the last two into a toast would
- * lose the two things a person actually needs after uploading — a link to the scan
+ * lose the two things a person actually needs after uploading - a link to the scan
  * they just created, and the component count to sanity-check against what they
  * expected.
  */
@@ -110,7 +110,7 @@ export function UploadSbomModal({
         <p className="text-xs text-text-muted">
           The file is stored and processed exactly as one posted by a CI pipeline: its packages become
           searchable across the estate, it appears in this application's build history and diffs, and{" "}
-          <strong className="font-semibold text-text-base">it becomes the current build</strong> — the
+          <strong className="font-semibold text-text-base">it becomes the current build</strong> - the
           state every other view reports for {applicationName}.
         </p>
 
@@ -172,7 +172,7 @@ export function UploadSbomModal({
         <FormRow
           label="Why is this being uploaded by hand?"
           htmlFor="up-note"
-          hint="Optional, but worth filling in — it is the only record of why this build did not come from a pipeline."
+          hint="Optional, but worth filling in - it is the only record of why this build did not come from a pipeline."
         >
           <Textarea
             id="up-note"
@@ -211,7 +211,7 @@ function DuplicateWarning({ duplicate }: { duplicate: DuplicateSbomDetails }) {
         </Link>
         {duplicate.existingBuildNumber ? ` (build ${duplicate.existingBuildNumber})` : ""}
         {duplicate.existingIsLatest ? ", which is the current build" : ""}. Uploading again records a
-        second identical build in the history — useful only if you mean to.
+        second identical build in the history - useful only if you mean to.
       </p>
     </div>
   );
@@ -230,7 +230,7 @@ function UploadReceipt({ result, onClose }: { result: ManualUploadResponse; onCl
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border-base bg-bg-subtle px-3 py-2.5 text-xs">
         <dt className="text-text-muted">Current build</dt>
-        <dd className="text-text-base">{result.becameLatest ? "Yes — this scan" : "No"}</dd>
+        <dd className="text-text-base">{result.becameLatest ? "Yes - this scan" : "No"}</dd>
         {result.skippedComponents > 0 ? (
           <>
             <dt className="text-text-muted">Entries skipped</dt>

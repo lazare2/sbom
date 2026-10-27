@@ -6,7 +6,7 @@ import type { XrayVulnerability } from "./xray-client.js";
  * Turning an Xray graph-scan result into this platform's findings.
  *
  * The counterpart of `grype-output.ts`, and deliberately the same shape out: everything
- * downstream — the sweep, the per-scan summaries, every dashboard figure — is written against
+ * downstream - the sweep, the per-scan summaries, every dashboard figure - is written against
  * `ParsedFinding` and must not learn which provider produced it.
  *
  * ## Recovering which component a finding belongs to
@@ -17,8 +17,8 @@ import type { XrayVulnerability } from "./xray-client.js";
  * are matched back through that.
  *
  * The map is one-to-many on purpose. Two components with different identity hashes can
- * produce the same Xray coordinate — the same package recorded once with a distro qualifier
- * and once without — and a finding has to reach both of them or one silently reads as clean.
+ * produce the same Xray coordinate - the same package recorded once with a distro qualifier
+ * and once without - and a finding has to reach both of them or one silently reads as clean.
  */
 
 /**
@@ -26,7 +26,7 @@ import type { XrayVulnerability } from "./xray-client.js";
  *
  * `Unknown` stays unknown rather than becoming `low`: a missing rating is a real answer from
  * the feeds and promoting it would overstate what is known. `Information` maps to
- * `negligible`, which is a rating rather than an absence — the two are not the same and this
+ * `negligible`, which is a rating rather than an absence - the two are not the same and this
  * platform has a bucket for each.
  */
 const SEVERITIES: Record<string, VulnSeverity> = {
@@ -55,7 +55,7 @@ function toNumber(value: number | string | undefined): number | null {
  * The advisory's primary identity, and the aliases that point at it.
  *
  * A CVE is preferred when there is one, because it is what a reader recognises and what they
- * search for. Xray's own `XRAY-nnnnn` id becomes an alias rather than the key — it is
+ * search for. Xray's own `XRAY-nnnnn` id becomes an alias rather than the key - it is
  * meaningful only inside JFrog, and keying on it would make the same advisory unrecognisable
  * against anything else the platform stores.
  *

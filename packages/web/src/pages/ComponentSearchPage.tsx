@@ -95,7 +95,7 @@ const SCOPE_LABELS: Record<(typeof SCOPES)[number], string> = {
 const SCOPE_HINTS: Record<(typeof SCOPES)[number], string> = {
   current: "Applications whose latest scan contains this package.",
   historical:
-    "Applications that shipped this package in an earlier build but not in their current one — it was removed or upgraded away.",
+    "Applications that shipped this package in an earlier build but not in their current one - it was removed or upgraded away.",
   all: "Every application that has ever shipped this package, labelled by whether it still does.",
 };
 
@@ -126,7 +126,7 @@ export function ComponentSearchPage({ mode }: { mode?: SearchMode } = {}) {
         subtitle={
           active === "single"
             ? "Find every application that uses a package, now or at any point in its retained history."
-            : "Check a whole list of packages against the estate at once — which are deployed, which were removed, and which were never here."
+            : "Check a whole list of packages against the estate at once - which are deployed, which were removed, and which were never here."
         }
         actions={
           <div role="group" aria-label="Search mode" className="flex overflow-hidden rounded-md border border-border-strong">
@@ -317,7 +317,7 @@ function SinglePackageSearch() {
           {/*
             A checkbox rather than the Contains/Exact dropdown this replaced. Both modes
             existed and worked, but as a two-value select in a row of other selects it read
-            as one more filter and went unnoticed — people searched "react", got
+            as one more filter and went unnoticed - people searched "react", got
             reactive-element and reactor, and concluded the search was fuzzy with no way to
             narrow it. A checkbox states the mode instead of hiding it behind a click.
           */}
@@ -430,7 +430,7 @@ function SinglePackageSearch() {
         <Card>
           <EmptyState
             title="Search for a package"
-            hint="Type a package name above. Switch to “Previously used, not now” to find applications that dropped a dependency — that view is powered by full scan history, not just the latest build."
+            hint="Type a package name above. Switch to “Previously used, not now” to find applications that dropped a dependency - that view is powered by full scan history, not just the latest build."
           />
         </Card>
       ) : (
@@ -439,7 +439,7 @@ function SinglePackageSearch() {
             title="Results"
             subtitle={
               data
-                ? `${formatNumber(data.total)} application–package pair${data.total === 1 ? "" : "s"}` +
+                ? `${formatNumber(data.total)} application - package pair${data.total === 1 ? "" : "s"}` +
                   (data.matchedComponents > 0 ? ` · ${formatNumber(data.matchedComponents)} distinct packages matched` : "")
                 : undefined
             }

@@ -49,8 +49,8 @@ export type UpdateApplicationRequest = z.infer<typeof updateApplicationRequestSc
 /**
  * Sortable columns of the applications table.
  *
- * `platform` sorts on the OS of the current build — the "who is still on Debian 11"
- * column — and is text, so it reads A→Z. The two counts are numbers and open on the
+ * `platform` sorts on the OS of the current build - the "who is still on Debian 11"
+ * column - and is text, so it reads A→Z. The two counts are numbers and open on the
  * largest, which is the question they are usually asked in.
  */
 export const applicationSort = defineSortTable(
@@ -64,7 +64,7 @@ export const applicationSort = defineSortTable(
      *
      * Sorts on the total rather than on either half because the column displays the total.
      * Applications whose current build has not been matched against the database sort last
-     * in both directions — see `directionNullsLast` at the query site.
+     * in both directions - see `directionNullsLast` at the query site.
      */
     vulnFindings: "number",
     scanCount: "number",
@@ -74,7 +74,7 @@ export const applicationSort = defineSortTable(
      * Sorts on a custom attribute, named by `sortAttribute`.
      *
      * One field rather than one per attribute because the set is administrator-defined and
-     * changes at runtime — squad, owner, criticality today, something else next quarter —
+     * changes at runtime - squad, owner, criticality today, something else next quarter -
      * so a fixed enum could never cover it.
      *
      * This is the one sort whose target is not known at compile time, and it is safe for a
@@ -98,7 +98,10 @@ export const listApplicationsQuerySchema = paginationQuerySchema.extend({
     .union([applicationStatusSchema, z.array(applicationStatusSchema)])
     .transform((v) => (Array.isArray(v) ? v : [v]))
     .optional(),
+  /** Applications assigned directly to the squad with this name. */
   squad: z.string().trim().max(255).optional(),
+  /** Applications assigned directly to the tribe with this name. */
+  tribe: z.string().trim().max(255).optional(),
   owner: z.string().trim().max(255).optional(),
   severity: z.string().trim().max(255).optional(),
   /**
@@ -130,7 +133,7 @@ export type ListApplicationsQuery = z.infer<typeof listApplicationsQuerySchema>;
  *
  * Both halves are carried alongside the total because the ratio between them is the point.
  * Measured on a realistic container SBOM, 2,817 of 2,845 findings came from base-image OS
- * packages — so an application showing 2,829 with 12 from its own dependencies and one
+ * packages - so an application showing 2,829 with 12 from its own dependencies and one
  * showing 2,829 with 800 from its own dependencies are entirely different problems wearing
  * the same number, and only the split tells them apart.
  *
@@ -161,7 +164,7 @@ export interface ApplicationSummary {
    *
    * Null covers three situations that must never collapse into zero: vulnerability scanning
    * is switched off, the application has never been scanned, or its latest scan has not yet
-   * been matched against the database. Zero means matched and clean — a far stronger claim,
+   * been matched against the database. Zero means matched and clean - a far stronger claim,
    * and the one this field must never make by accident.
    *
    * Callers distinguish "never scanned" from "not assessed" through `latestScanId`, which is
@@ -171,7 +174,7 @@ export interface ApplicationSummary {
   /**
    * Every group this application belongs to, name-sorted.
    *
-   * An array because membership is many-to-many — this is exactly what the single-valued
+   * An array because membership is many-to-many - this is exactly what the single-valued
    * `attributes` cannot express, and the reason groups exist alongside them.
    */
   groups: GroupRef[];
@@ -235,6 +238,11 @@ export const attributeDefinitionSchema = z.object({
   options: z.array(z.string().min(1).max(128)).max(200).nullable().default(null),
   sortOrder: z.number().int().min(0).max(9999).default(0),
   isActive: z.boolean().default(true),
+  /**
+   * Must be filled when an administrator creates, edits or confirms an application. CI uploads
+   * are never refused over it.
+   */
+  isRequired: z.boolean().default(false),
 });
 export type AttributeDefinitionInput = z.infer<typeof attributeDefinitionSchema>;
 
@@ -243,5 +251,11 @@ export type UpdateAttributeDefinitionInput = z.infer<typeof updateAttributeDefin
 
 export interface AttributeDefinition extends AttributeDefinitionInput {
   id: string;
+  /**
+   * "squad" or "tribe" for the two attributes that mirror access, null for the rest. A linked
+   * attribute's value is the comma-separated list of squads or tribes the application is
+   * assigned to directly, and writing it assigns and unassigns. Its key and type are fixed.
+   */
+  linkedTo: "squad" | "tribe" | null;
   createdAt: string;
 }

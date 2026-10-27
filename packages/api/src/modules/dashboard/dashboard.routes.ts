@@ -34,7 +34,7 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
    * the dedicated vulnerability routes. The difference is intentional: the overview page
    * loads this on every visit and has to render *something* either way, so a null it can
    * branch on is more useful than an error it has to catch. What it must never do is
-   * render a zero — that is the client's obligation and the reason this is null-or-object
+   * render a zero - that is the client's obligation and the reason this is null-or-object
    * rather than a zero-filled struct.
    *
    * Delegates to the analytics service so the overview cards and the report's

@@ -92,7 +92,7 @@ export async function applicationRoutes(fastify: FastifyInstance): Promise<void>
 
   /**
    * Compare two builds. With no parameters, compares the latest scan against
-   * the one immediately before it — the "what changed in this build" default.
+   * the one immediately before it - the "what changed in this build" default.
    */
   fastify.get("/:id/diff", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");

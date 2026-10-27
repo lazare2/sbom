@@ -35,7 +35,7 @@ export function toSessionUser(row: UserRow): SessionUser {
  * about sessions. That is the seam LDAP plugs into later.
  *
  * There is no self-service password reset. User emails are login identifiers,
- * not mailboxes, so a reset link has nowhere to go — recovery is an admin
+ * not mailboxes, so a reset link has nowhere to go - recovery is an admin
  * issuing a new password (see AdminUsersService.resetPassword).
  */
 /**
@@ -375,7 +375,7 @@ export class AuthService {
    *
    * Keeps the caller's own session alive and revokes the rest, so changing a
    * password doesn't log you out of the tab you're using but does evict anyone
-   * else. Clears `mustChangePassword` — this is the only thing that does, which
+   * else. Clears `mustChangePassword` - this is the only thing that does, which
    * is what makes the forced-change gate un-skippable.
    */
   async changePassword(opts: {

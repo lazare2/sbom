@@ -11,7 +11,7 @@ import type { SeverityCounts } from "./vulnerability.js";
  *
  * A group counts **distinct advisories**. The dashboard counts **findings**, which are
  * per-package occurrences summed across applications. For a product built from eight images
- * that share a base layer, those two differ by roughly eight times, and both are correct —
+ * that share a base layer, those two differ by roughly eight times, and both are correct -
  * they answer different questions:
  *
  *   findings   how much remediation work exists. Eight vulnerable images are eight rebuilds.
@@ -86,7 +86,7 @@ export const listGroupsQuerySchema = paginationQuerySchema
   .merge(groupSort.querySchema);
 export type ListGroupsQuery = z.infer<typeof listGroupsQuerySchema>;
 
-/** A group as referenced from elsewhere — the chips on an application row. */
+/** A group as referenced from elsewhere - the chips on an application row. */
 export interface GroupRef {
   id: string;
   name: string;
@@ -101,7 +101,7 @@ export interface ApplicationGroupSummary extends GroupRef {
    *
    * Carried on the summary rather than fetched per row. The admin screen shows who is in each
    * group without opening it, and doing that from the detail endpoint would issue one request
-   * per row — two hundred of them on a full page. Capped at `EXPANDABLE_LIST_CAP`, with
+   * per row - two hundred of them on a full page. Capped at `EXPANDABLE_LIST_CAP`, with
    * `applicationCount` as the true total, so a preview can state its own overflow.
    */
   memberNames: string[];
@@ -110,7 +110,7 @@ export interface ApplicationGroupSummary extends GroupRef {
    * known.
    *
    * Null when vulnerability scanning is off, and null when no member has a build that has
-   * been matched against the database. Never zero for either — zero means every member was
+   * been matched against the database. Never zero for either - zero means every member was
    * assessed and nothing was found, which is a claim this platform must only make when it is
    * true. Same rule as an application's own findings.
    */

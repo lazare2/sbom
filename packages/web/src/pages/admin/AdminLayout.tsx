@@ -5,15 +5,13 @@ import { PageHeader } from "../../components/ui.tsx";
 const TABS = [
   { to: "/admin/applications", label: "Applications" },
   { to: "/admin/pending", label: "Awaiting confirmation", badge: "pending" as const },
-  { to: "/admin/groups", label: "Groups" },
-  { to: "/admin/users", label: "Users", badge: "accessRequests" as const },
-  { to: "/admin/squads", label: "Squads" },
+  // Users, tribes, squads and groups: one tab, since together they decide who sees what.
+  { to: "/admin/access", label: "Access", badge: "accessRequests" as const },
   { to: "/admin/authentication", label: "Authentication" },
   { to: "/admin/environments", label: "Environments" },
   { to: "/admin/attributes", label: "Attributes" },
   { to: "/admin/tokens", label: "CI tokens" },
-  { to: "/admin/vulnerabilities", label: "Vulnerability scanning" },
-  { to: "/admin/malicious", label: "Malicious packages" },
+  { to: "/admin/scanners", label: "Scanners" },
   { to: "/admin/reports", label: "Monthly report" },
   { to: "/admin/configuration", label: "Configuration" },
   { to: "/admin/audit", label: "Audit log" },
@@ -41,7 +39,7 @@ export function AdminLayout() {
     <>
       <PageHeader
         title="Administration"
-        subtitle="Manage applications, accounts, attributes, vulnerability scanning, the monthly report, and the CI credentials that submit SBOMs."
+        subtitle="Manage applications, access, attributes, scanners, the monthly report, and the CI credentials that submit SBOMs."
       />
 
       <nav

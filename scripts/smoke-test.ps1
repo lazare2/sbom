@@ -119,7 +119,7 @@ function New-JsonFile {
     $json = $Data | ConvertTo-Json -Depth 10
     # WriteAllText with UTF8Encoding($false) writes NO byte order mark.
     # `Set-Content -Encoding utf8` in PowerShell 5.1 always adds one, which is not
-    # what Syft produces — so the default here is BOM-free, and the BOM case gets
+    # what Syft produces - so the default here is BOM-free, and the BOM case gets
     # its own explicit test rather than silently contaminating every fixture.
     $encoding = New-Object System.Text.UTF8Encoding($WithBom.IsPresent)
     [System.IO.File]::WriteAllText($path, $json, $encoding)
@@ -547,7 +547,7 @@ try {
         $r.Status -eq 401
     }
 
-    Assert-That "rejects a CI ingest token — this route is session-only" {
+    Assert-That "rejects a CI ingest token - this route is session-only" {
         # The two auth mechanisms live in separate plugin scopes so they cannot
         # cross over. A token that could post to an arbitrary application id would
         # bypass app_name resolution, aliases and pending auto-creation entirely.
@@ -615,7 +615,7 @@ try {
 
     Assert-That "its packages are searchable across the estate" {
         # Indexed identically to a CI scan. If this fails, the upload stored bytes
-        # without linking components — the failure that would look fine in the UI
+        # without linking components - the failure that would look fine in the UI
         # and be invisible everywhere it matters.
         $r = Invoke-Api @("$BaseUrl/api/v1/components/search?name=smoke-manual-only-pkg&match=exact&scope=current", "-b", $script:platJar)
         if ($r.Status -ne 200) { return $false }
@@ -627,7 +627,7 @@ try {
         if ($r.Status -ne 200) { return $false }
         $row = $r.Json.items | Where-Object { $_.id -eq $script:manual.scanId } | Select-Object -First 1
         if ($null -eq $row) { return $false }
-        # And the CI scans in the same list are still labelled ci — a default that
+        # And the CI scans in the same list are still labelled ci - a default that
         # leaked onto every row would make the badge meaningless.
         $ciRow = $r.Json.items | Where-Object { $_.id -eq $script:ingest.scanId } | Select-Object -First 1
         return $row.source -eq "manual" -and $row.isLatest -eq $true -and $ciRow.source -eq "ci"
@@ -711,7 +711,7 @@ try {
         $r.Status -eq 401
     }
 
-    Assert-That "rejects a CI ingest token — a shared pipeline token must not erase history" {
+    Assert-That "rejects a CI ingest token - a shared pipeline token must not erase history" {
         # The token legitimately CREATES scans on /api/v1/scans. Accepting it here
         # would let every pipeline holding it delete any build in the estate.
         $r = Invoke-Api @("-X", "DELETE", "$delUrl/$($script:manual.scanId)", "-H", $auth)
@@ -1925,7 +1925,7 @@ try {
         $v = $script:report.velocity
         if ($v.applicationsCompared -eq 0) {
             # Nothing comparable means the figures must be zero rather than
-            # arbitrary — zero here reads as "not measured", which the UI says.
+            # arbitrary - zero here reads as "not measured", which the UI says.
             return $v.packagesAdded -eq 0 -and $v.packagesRemoved -eq 0 -and $v.packagesUpgraded -eq 0
         }
         return $v.packagesAdded -ge 0 -and $v.packagesRemoved -ge 0 -and $v.packagesUpgraded -ge 0
@@ -2029,7 +2029,7 @@ try {
             return $false
         }
 
-        # And exactly one application, holding both builds — the point of the race
+        # And exactly one application, holding both builds - the point of the race
         # handling, not merely the absence of a 500.
         $list = Invoke-Api @("$BaseUrl/api/v1/applications?search=$raceName&pageSize=50&status=active&status=inactive&status=pending_confirmation", "-b", $script:platJar)
         if ($list.Status -ne 200) { return $false }
@@ -2271,8 +2271,8 @@ try {
         $script:scanId = ($r.Json.items | Where-Object { -not $_.isLatest } | Select-Object -First 1).id
         if (-not $script:scanId) { $script:scanId = $r.Json.items[0].id }
         # The current-state pointer must identify one and only one scan.
-        # @() forced for the same reason: with exactly one latest scan — the
-        # correct answer — a bare .Count returns $null rather than 1.
+        # @() forced for the same reason: with exactly one latest scan - the
+        # correct answer - a bare .Count returns $null rather than 1.
         return (@($r.Json.items | Where-Object { $_.isLatest }).Count -eq 1)
     }
 
@@ -2523,7 +2523,7 @@ try {
     Assert-That "counts unchanged packages even when two builds are identical" {
         # Regression guard. The unchanged count used to be a scalar carried on the
         # first *changed* row, so two identical builds returned no rows and the
-        # count silently read as zero — telling the reader that two builds sharing
+        # count silently read as zero - telling the reader that two builds sharing
         # every package had nothing in common.
         $scans = Invoke-Api @("$BaseUrl/api/v1/applications/$($script:ingest.applicationId)/scans?pageSize=200", "-b", $readJar)
         # Builds 42 and 43 posted the identical document, so their diff is empty.
@@ -3258,7 +3258,7 @@ try {
     Write-Host "Table sorting" -ForegroundColor Cyan
 
     <#
-      The property worth testing here is not "does sorting work" — a wrong order is
+      The property worth testing here is not "does sorting work" - a wrong order is
       visible. It is that offset pagination over a sorted list neither duplicates nor
       loses rows.
 
@@ -3426,7 +3426,7 @@ try {
     Assert-That "list search treats LIKE metacharacters as literal text" {
         <#
           `%` inside an ILIKE pattern matches everything. Unescaped, an entry of "%" would
-          report the entire estate as a match while looking like an ordinary input line —
+          report the entire estate as a match while looking like an ordinary input line -
           a wrong answer that presents itself as a very successful one.
         #>
         $body = New-JsonFile -Name "bulk-wildcard.json" -Data @{
@@ -3877,7 +3877,7 @@ try {
       environment section above, it works by building *deliberately colliding* data: three
       applications in one estate, all ingested from the same SBOM, so every package, version
       and finding is identical across them. Nothing distinguishes them except which group
-      they are in — which is exactly the distinction under test.
+      they are in - which is exactly the distinction under test.
 
       Colliding on purpose is what makes it a test. Three applications with different
       packages would pass most of these assertions with the filtering removed entirely,

@@ -2,7 +2,7 @@
   What is allowed to reach the error log table.
 
   The log exists so an administrator can read why a request failed without developer tools.
-  That means it is durable, and readable by every administrator — which makes it the worst
+  That means it is durable, and readable by every administrator - which makes it the worst
   possible place for a credential to land. The guarantee is enforced here rather than at the
   call sites, because the call site is a single generic error handler that cannot know which
   of a hundred schemas produced the failure it is recording.
@@ -70,7 +70,7 @@ describe("redacting validation details", () => {
 
   it("returns null rather than an empty object when there is nothing to record", () => {
     // `details` is nullable in the column, and an empty object would render as an empty
-    // bullet list under the message — a visual claim that there was more to say.
+    // bullet list under the message - a visual claim that there was more to say.
     expect(redactDetails(undefined)).toBeNull();
     expect(redactDetails(null)).toBeNull();
     expect(redactDetails({})).toBeNull();
@@ -81,7 +81,7 @@ describe("redacting validation details", () => {
     /*
       Validation is not the only producer. The duplicate-SBOM refusal is a `ConflictError`
       carrying the existing scan's identity, and it is one of the more useful rows in the log
-      — "this build was rejected because you already sent it, here is the one you already
+      - "this build was rejected because you already sent it, here is the one you already
       have" is the whole answer to the question the reader arrived with.
     */
     expect(
@@ -104,7 +104,7 @@ describe("redacting validation details", () => {
       This was a real defect, found by reading the rendered page rather than the code: the
       boolean above was silently absent from every duplicate-refusal row, because the first
       version kept strings only. A field that quietly disappears is worse than one that is
-      obviously missing — the row looks complete and is not.
+      obviously missing - the row looks complete and is not.
     */
     expect(redactDetails({ attempts: 3, wasRetried: false })).toEqual({
       attempts: ["3"],
@@ -133,7 +133,7 @@ describe("redacting validation details", () => {
 
 describe("redacting the request path", () => {
   it("leaves an ordinary path and its query untouched", () => {
-    // The query is usually the diagnostic half — which filter, which page, which sort.
+    // The query is usually the diagnostic half - which filter, which page, which sort.
     expect(redactPath("/api/v1/applications?page=2&sortBy=name")).toBe(
       "/api/v1/applications?page=2&sortBy=name",
     );

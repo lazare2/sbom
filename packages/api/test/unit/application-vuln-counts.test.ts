@@ -5,7 +5,7 @@ import { toVulnCounts } from "../../src/modules/applications/applications.servic
  * The applications list reports findings per application, and the only failure that matters
  * here is silent: an unassessed application rendered as `0`.
  *
- * Zero means "matched against the database and nothing was found" — a clean bill of health. An
+ * Zero means "matched against the database and nothing was found" - a clean bill of health. An
  * application whose scan predates the feature being switched on, or which is waiting for the
  * next sweep, has no summary row at all, and every path that turns that absence into a number
  * makes a claim the platform never checked. There is no error, no empty state, and nothing on
@@ -64,7 +64,7 @@ describe("application vulnerability counts", () => {
 
   it("reports a genuine zero as zero", () => {
     // The one case that is allowed to be zero, and it has to remain distinguishable from the
-    // two nulls above — this is the whole point of the type being nullable.
+    // two nulls above - this is the whole point of the type being nullable.
     const counts = toVulnCounts(
       summaryRow({
         app_findings: "0",
@@ -82,7 +82,7 @@ describe("application vulnerability counts", () => {
   });
 
   it("treats a missing base-image half as zero rather than discarding the row", () => {
-    // An SBOM with no OS packages at all — a scratch or distroless image — is a real estate,
+    // An SBOM with no OS packages at all - a scratch or distroless image - is a real estate,
     // not missing data. The application half decides whether the row exists.
     const counts = toVulnCounts(
       summaryRow({ os_findings: null, os_critical: null, os_high: null }),

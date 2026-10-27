@@ -18,7 +18,7 @@ import {
  *   - membership arrives as a complete set, so a request that looked like a delta would
  *     replace the whole group with two applications instead of adding two;
  *   - an update that omits a field must leave it alone, while one that sends an empty
- *     description must clear it — collapsing those makes a description unremovable;
+ *     description must clear it - collapsing those makes a description unremovable;
  *   - a name is trimmed and rejected when blank, or the group list grows an unclickable row
  *     with no visible name.
  */
@@ -83,8 +83,8 @@ describe("updating a group", () => {
 describe("setting membership", () => {
   it("accepts an empty list, which empties the group", () => {
     /*
-      Deliberately legal. Removing the last member is a normal thing to do — a product
-      retired, a trait no longer tracked — and rejecting it would leave the only way to empty
+      Deliberately legal. Removing the last member is a normal thing to do - a product
+      retired, a trait no longer tracked - and rejecting it would leave the only way to empty
       a group being to delete and recreate it, losing its name and description.
     */
     expect(setGroupMembersRequestSchema.parse({ applicationIds: [] }).applicationIds).toEqual([]);

@@ -20,6 +20,7 @@ import {
   type XraySettings,
   type PlatformSettings,
   type ReportSettings,
+  type SquadSettings,
 } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
@@ -83,6 +84,8 @@ export const SETTING_KEYS = {
    * the other's configuration.
    */
   oidc: "auth.oidc",
+  /** Squad rules, stored as one JSON object: today only whether a squad needs a tribe. */
+  squads: "squads.settings",
 } as const;
 
 /**
@@ -525,7 +528,7 @@ export class SettingsService {
     }
   }
 
-  /** What the admin screen reads back. Never the token — only whether one is stored. */
+  /** What the admin screen reads back. Never the token - only whether one is stored. */
   async xraySettings(): Promise<XraySettings> {
     const stored = await this.getProviderSettings();
     const configured = stored.xray.baseUrl !== "" && stored.xray.username !== "";
@@ -546,7 +549,7 @@ export class SettingsService {
    * The data set the Xray scanner is matching against.
    *
    * Xray publishes no database build date, so one is kept here. It moves when the connection
-   * changes — new credentials may reach a different server with different data — and
+   * changes - new credentials may reach a different server with different data - and
    * otherwise only when `advanceAssessmentEpoch` is called on the configured interval.
    * Deriving it from the current time instead would make every component look stale on every
    * tick and re-scan the whole estate against a shared corporate server continuously.
@@ -823,6 +826,24 @@ export class SettingsService {
     this.providerCache = null;
   }
 
+  /** Squad rules. A tribe is optional until an administrator makes it required. */
+  async getSquadSettings(): Promise<SquadSettings> {
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${SETTING_KEYS.squads}
+    `);
+    const stored = rowsOf(rows)[0]?.value;
+    const raw = stored && typeof stored === "object" ? (stored as Record<string, unknown>) : {};
+    return { requireTribe: raw.requireTribe === true };
+  }
+
+  async updateSquadSettings(next: SquadSettings): Promise<SquadSettings> {
+    await this.deps.db
+      .insert(setting)
+      .values({ key: SETTING_KEYS.squads, value: next })
+      .onConflictDoUpdate({ target: setting.key, set: { value: next, updatedAt: new Date() } });
+    return next;
+  }
+
   async vulnScanningEnabled(): Promise<boolean> {
     try {
       return (await this.getVulnSettings()).enabled;
@@ -835,7 +856,7 @@ export class SettingsService {
    * Writes one or both vulnerability settings.
    *
    * Returns both the previous and the new value: the caller needs the transition to
-   * decide what to do next — switching scanning on is what triggers the initial
+   * decide what to do next - switching scanning on is what triggers the initial
    * sweep, and it is also what the audit entry has to record.
    */
   async updateVulnSettings(

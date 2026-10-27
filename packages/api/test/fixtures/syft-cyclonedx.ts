@@ -63,7 +63,7 @@ export const syftCycloneDxSbom = {
       properties: [{ name: "syft:package:type", value: "npm" }],
     },
     {
-      // Same purl, qualifiers in a different order — normalisation must make
+      // Same purl, qualifiers in a different order - normalisation must make
       // this identical to the libc6 entry above rather than a second package.
       "bom-ref": "pkg:deb/debian/libc6@2.36-reordered",
       type: "library",
@@ -89,7 +89,7 @@ export const syftCycloneDxSbom = {
       properties: [{ name: "syft:package:type", value: "java-archive" }],
     },
     {
-      // Versionless component — legal in CycloneDX, must be kept.
+      // Versionless component - legal in CycloneDX, must be kept.
       "bom-ref": "versionless",
       type: "library",
       name: "mystery-binary",
@@ -104,7 +104,7 @@ export const syftCycloneDxSbom = {
       properties: [{ name: "syft:distro:id", value: "debian" }],
     },
     {
-      // File entries are excluded — they are not dependencies and would add
+      // File entries are excluded - they are not dependencies and would add
       // thousands of rows per scan.
       "bom-ref": "file-entry",
       type: "file",

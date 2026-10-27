@@ -28,14 +28,15 @@ appear on the dashboards, in the report, and in a "who is affected by CVE-X" sea
 
 All ten phases are implemented. The two roles are `admin` (writes) and `user` (reads);
 a `user` is further narrowed by environment, by group and application grants, and by
-the squads they are on — see [Squads](#squads).
+the squads they are on and the tribes above them - see [Squads](#squads) and
+[Tribes](#tribes).
 
 ---
 
 ## Stack
 
 - **Postgres 16** with `pg_trgm` for partial package-name search
-- **Fastify 5** + TypeScript — streaming multipart handles multi-MB SBOM uploads
+- **Fastify 5** + TypeScript - streaming multipart handles multi-MB SBOM uploads
 - **Drizzle ORM** + drizzle-kit for typed queries and reviewable SQL migrations
 - **argon2id** password hashing, Postgres-backed session cookies
 - **React 19** + Vite + react-router + TanStack Query, Tailwind v4
@@ -52,7 +53,7 @@ packages/
   api/
     drizzle/              Generated SQL migrations (reviewed, checked in)
     src/
-      config.ts           Env validation — the only place process.env is read
+      config.ts           Env validation - the only place process.env is read
       context.ts          Dependency graph for the whole app
       db/schema.ts        Complete relational schema
       lib/                Errors, crypto, validation helpers
@@ -107,9 +108,9 @@ scripts/
 ## Running it locally
 
 Needs Node 22+ and a PostgreSQL 14+ server. Either a native install or the bundled
-`docker compose` will do — pick one.
+`docker compose` will do - pick one.
 
-### Option A — native PostgreSQL (Windows)
+### Option A - native PostgreSQL (Windows)
 
 The Windows installer does not add `psql` to `PATH` and creates only the
 `postgres` superuser, so one setup step is needed to create the app's role and
@@ -126,7 +127,7 @@ npm run dev               # API on http://127.0.0.1:3000
 `setup:db` creates a `sbom` role and a `sbom` database owned by it, grants the
 `public` schema (PostgreSQL 15+ no longer makes it world-writable), and installs
 `pg_trgm` and `pgcrypto`. It is idempotent, and it never stores the superuser
-password — the prompt is read into a `SecureString` and passed only to the child
+password - the prompt is read into a `SecureString` and passed only to the child
 `psql` process.
 
 The `sbom` role is intentionally **not** a superuser. Migrations still work
@@ -135,7 +136,7 @@ which lets a database owner install them. On a locked-down production server whe
 that is not true, have a DBA create both extensions once and the migration's
 `CREATE EXTENSION IF NOT EXISTS` becomes a no-op.
 
-### Option B — Docker, the whole stack
+### Option B - Docker, the whole stack
 
 Runs everything in containers. Needs a `.env` at the repo root: copy
 `.env.example` and set at minimum `SESSION_SECRET`, `BOOTSTRAP_ADMIN_EMAIL` and
@@ -149,14 +150,14 @@ That builds the API and web images, starts PostgreSQL, applies migrations, seeds
 the attribute definitions and the first admin, and serves the app on
 <http://localhost:8080>. nginx serves the built SPA and proxies `/api` to the
 API, so the browser sees one origin and the session cookie needs no CORS
-handling. Only port 8080 is published — PostgreSQL and the API are reachable
+handling. Only port 8080 is published - PostgreSQL and the API are reachable
 only inside the compose network.
 
 The API container migrates and seeds on every start. Migrations are
 transactional and idempotent, so restarts and a second replica starting
 concurrently are both safe.
 
-### Option C — Postgres in Docker, app on the host
+### Option C - Postgres in Docker, app on the host
 
 Useful when you want watch-reload on the app but do not want to install
 PostgreSQL:
@@ -210,15 +211,15 @@ Two things this deliberately does not claim:
 
 - **It is not the base image name.** An SBOM describes a flattened filesystem,
   not layer ancestry, so nothing here can report that the Dockerfile said
-  `FROM node:22-alpine` — only that Alpine and Node 22 files are present. Two
+  `FROM node:22-alpine` - only that Alpine and Node 22 files are present. Two
   images from different bases with identical contents produce identical SBOMs.
 - **Only a closed list of runtimes counts.** A container has dozens of binaries;
   reporting `busybox` and `bash` as "the runtime" would bury the one fact worth
-  surfacing. A library merely *named* `node` is not the interpreter either — only
+  surfacing. A library merely *named* `node` is not the interpreter either - only
   binary-cataloged components are considered.
 
 `component.kind` records whether a row is a `library`, the `os`, or a `runtime`.
-All three stay searchable — "which images carry nginx" is a real question — but
+All three stay searchable - "which images carry nginx" is a real question - but
 the OS and runtimes are excluded from the dependency aggregates, because ranking
 `alpine` alongside `log4j-core` would make the blast-radius list useless.
 
@@ -237,7 +238,7 @@ Both searches take an **Exact name match** checkbox, and they default the opposi
 purpose.
 
 The single search defaults to **substring**, because you usually do not know the whole
-name — searching `log4j` should find `log4j-core`. The cost is that a search for `react`
+name - searching `log4j` should find `log4j-core`. The cost is that a search for `react`
 returns `reactive-element` and `reactor`, and if `react` itself is not deployed it returns
 nothing that looks like an answer. Ticking the box switches to a case-insensitive
 whole-name comparison; the two run genuinely different queries against different indexes
@@ -245,7 +246,7 @@ whole-name comparison; the two run genuinely different queries against different
 mode rather than a filter applied afterwards.
 
 The list search defaults to **exact**, because a pasted list is an audit: 200 names in,
-200 verdicts out. Substring matching there is available but changes what a row means — one
+200 verdicts out. Substring matching there is available but changes what a row means - one
 line can match many packages, so the row reports the count and expands to name them, and
 each line is capped at 50 packages with the row saying when it hit the cap. The cap counts
 packages rather than (name, version) rows; `libc6` alone ships five versions here, so a
@@ -268,7 +269,7 @@ the same FILTER, as the number it opens from**. That is a correctness constraint
 convenience. The app/base-image split is a shared SQL predicate rather than a column, so a
 list fetched from a separate endpoint could not be narrowed to the count's scope, and a
 scoped count of 3 above an unscoped list of 8 is a contradiction the reader cannot resolve.
-Entries are keyed to match what the count counts — name *and* version for packages, because
+Entries are keyed to match what the count counts - name *and* version for packages, because
 eight vulnerable versions of `openssl` is one name and eight rows, and the difference is the
 whole finding.
 
@@ -291,15 +292,15 @@ is usually opened for.
 
 Two things are deliberately not sortable. The `critical → low` severity breakdowns already
 carry their meaning in their order, and reordering one destroys the thing it is showing.
-Free-text and composite cells — an audit entry's jsonb detail, a list of versions, a
-`name + version` tool cell — have no single value to order by.
+Free-text and composite cells - an audit entry's jsonb detail, a list of versions, a
+`name + version` tool cell - have no single value to order by.
 
 The **Vulnerable Applications** and **Vulnerable Packages** rankings sort, but they are a
 case worth stating plainly, because the obvious implementation is wrong. The server sends
 only its worst N rows, so sorting reorders those N and nothing else: ascending shows the
 least vulnerable **of the worst N**, which reads as "our safest applications" and is the
-opposite of the truth. Both titles therefore carry the row count — `Vulnerable Applications
-· top 10` — and both subtitles say outright that the sort does not rank the estate. The cap
+opposite of the truth. Both titles therefore carry the row count - `Vulnerable Applications
+· top 10` - and both subtitles say outright that the sort does not rank the estate. The cap
 is part of the answer rather than decoration; without it on screen, one click turns a
 ranking into a claim it cannot support. Sorting the merged `38 / 28` findings column orders
 on the ranked half alone, for the same reason the column is merged: a sort on the sum would
@@ -310,7 +311,7 @@ server-side: reordering the 50 rows on screen while the other 4,000 stay put is 
 that looks like it works and answers a different question. So sort state lives in the URL
 alongside the filters, and every ORDER BY ends in a **unique** column. Without that last
 part, sorting on a column with duplicate values leaves tied rows in whatever order the plan
-chooses, and offset pagination then genuinely loses data — the same row appearing on two
+chooses, and offset pagination then genuinely loses data - the same row appearing on two
 pages while another appears on none. It needs ties *and* a page boundary inside them to
 reproduce, and it reads as a data bug rather than a sorting one. `scripts/smoke-test.ps1`
 pages through several sorted lists with a page size of 3 and asserts the collected rows are
@@ -319,7 +320,7 @@ exactly the total, with no duplicates.
 Sort columns are never interpolated from the request: each service maps its validated
 `sortBy` through a `switch` over literals. The one exception is sorting the applications
 list by a custom attribute, where the target is administrator-defined and cannot be a fixed
-enum — safe because a jsonb key is a *value* (`attributes->>$1`) and binds as an ordinary
+enum - safe because a jsonb key is a *value* (`attributes->>$1`) and binds as an ordinary
 parameter.
 
 ### Searching a list of packages
@@ -327,7 +328,7 @@ parameter.
 **Package search → A list** takes a pasted list and checks all of it against the
 estate at once. A different question from the single search, and the difference
 shapes the output: "who ships log4j" wants applications, but "of these 40 packages
-from an advisory, which are we exposed to" wants a verdict on all 40 —
+from an advisory, which are we exposed to" wants a verdict on all 40 -
 **including the misses**, because if three are present the answer is mostly about
 the other thirty-seven.
 
@@ -340,7 +341,7 @@ people actually have on their clipboard:
 | `express@4.19.2` | that exact version |
 | `@wb-track/shared-front@2.1.0` | scoped npm name, split on the **last** `@` |
 | `django==4.2.1` | pip pin |
-| `django >= 4.2` | range — **specifier dropped**, name matched across all versions |
+| `django >= 4.2` | range - **specifier dropped**, name matched across all versions |
 | `express 4.19.2` | whitespace, tab or comma separated |
 | `pkg:npm/keyv@6.0.0` | purl; the ecosystem constrains the match |
 | `com.fasterxml…:jackson-databind:2.17.2` | maven coordinate, matched on the artifact id |
@@ -358,7 +359,7 @@ Four verdicts per package, not two:
 |---|---|
 | **in use** | in at least one application's current build |
 | **removed** | shipped once, no current build has it |
-| **other version** | the package is deployed, but not at the version you asked for — the versions that *are* present are listed |
+| **other version** | the package is deployed, but not at the version you asked for - the versions that *are* present are listed |
 | not found | never seen in any scan |
 
 "Other version" has to be its own answer. `express@4.0.0` being absent while
@@ -368,21 +369,21 @@ question wrongly.
 
 Three properties worth knowing:
 
-- **Every list gets a shareable URL.** The list travels in a POST body — several
-  hundred packages will not fit in a request line — so it is persisted and the
+- **Every list gets a shareable URL.** The list travels in a POST body - several
+  hundred packages will not fit in a request line - so it is persisted and the
   results live at `/search/list/:id`. Content-addressed, so resubmitting the same
   list (reordered, re-cased, differently commented) returns the same link instead
   of accumulating rows. Only the *question* is stored: results are recomputed on
   every open, because a cached answer behind a permanent link would be stale data
   wearing a current URL.
 - **Excel, not CSV.** `GET /components/bulk-search/:id/export.xlsx` returns a real
-  `.xlsx` — which earns its place by carrying four sheets in one file: provenance
+  `.xlsx` - which earns its place by carrying four sheets in one file: provenance
   and totals, the per-package verdict, the flat package × application matrix, and
   the lines that could not be parsed. Headers are frozen and filtered, because the
   first thing anyone does with a 200-row audit is filter it to the misses.
 - **Scope narrows the applications, not the verdict.** Whether a package exists at
   all is always answered against full retained history, so "not found" means never
-  seen — not merely absent today.
+  seen - not merely absent today.
 
 The list is capped at 1000 entries, and going over says so rather than silently
 reporting on a prefix. The query passes the parsed list to Postgres as arrays and
@@ -408,11 +409,11 @@ to be written similarly.
 
 | Section | What it measures |
 |---|---|
-| **Scan coverage** | Share of active applications with a build inside the staleness threshold. Printed above the totals, not in an appendix — it is the confidence interval on everything else |
+| **Scan coverage** | Share of active applications with a build inside the staleness threshold. Printed above the totals, not in an appendix - it is the confidence interval on everything else |
 | **Top 10 most widely deployed packages** | Blast radius: the number that decides whether a problem package is one team's afternoon or an estate-wide exercise |
 | **Top 10 applications by package count** | Size, *not* risk. A big image costs more to review and patch; it is not automatically in worse shape |
 | **Dependency churn** | Each application's current build against its last build from before the window |
-| **Version fragmentation** | Packages the estate runs several versions of at once — standardisation targets, and the one section that names work which can be finished |
+| **Version fragmentation** | Packages the estate runs several versions of at once - standardisation targets, and the one section that names work which can be finished |
 | **New to the estate** | First seen inside the window and still deployed: the supply-chain review queue |
 | **Coverage gaps** | Longest-silent applications, never-scanned ones first |
 | **Platform inventory** | OS and runtime counts, per [Runtime platform](#runtime-platform) |
@@ -420,11 +421,11 @@ to be written similarly.
 
 The window (7 / 30 / 90 / 365 days) is URL state, and the PDF link carries it, so
 what you print is what you were looking at. Every count that can be filtered for
-links into the filtered list — a metric you cannot drill into is trivia.
+links into the filtered list - a metric you cannot drill into is trivia.
 
 **Vulnerability sections appear only when scanning is enabled.** When it is off they
 are replaced by an explicit "not assessed" notice rather than by zeros, on the page and
-in the PDF alike — an unscanned estate rendered as a clean one is the worst thing a
+in the PDF alike - an unscanned estate rendered as a clean one is the worst thing a
 report like this could do. When it is on, the report gains estate totals, Top 10
 vulnerable applications, Top 10 vulnerable packages and base-image exposure, all from the
 same payload the page renders.
@@ -437,7 +438,7 @@ that one is an inventory of what exists, this one is an argument about what chan
 
 The problem it exists to solve is attribution. Findings are matched against *today's*
 vulnerability database across every retained build, so a count that fell between two
-reports means one of two very different things — somebody upgraded a package, or the
+reports means one of two very different things - somebody upgraded a package, or the
 database changed its mind. A report that presents both as "47 fixed" tells management the
 team did work it did not do.
 
@@ -456,7 +457,7 @@ So every movement is attributed to a cause:
 | **Newly tracked application** | Existing risk becoming visible, not new risk |
 
 Findings resolved in an earlier period that have returned are counted as **reintroduced**,
-in addition to being introduced rather than instead of it — a regression is a property of
+in addition to being introduced rather than instead of it - a regression is a property of
 a finding, not a fourth bucket, and counting it separately would stop the totals adding up.
 
 That distinction is only possible because **each report stores a snapshot of what it
@@ -471,7 +472,7 @@ the headline. On a typical estate here they outnumber real dependency findings f
 so a combined total is dominated by packages no application team can change.
 
 **Generate now** produces a report to look at. It is not emailed, and it does not become
-the comparison point for next month — the monthly series keeps that role, so pressing the
+the comparison point for next month - the monthly series keeps that role, so pressing the
 button cannot quietly shorten the period the next report covers.
 
 #### Scheduling and delivery
@@ -480,8 +481,8 @@ Sent on the **first working day of each month** (weekends skipped) at an hour an
 set in the panel, covering the month that has just finished. If the service is down at that
 hour it sends when it comes back.
 
-It cannot send the same month twice. That guarantee lives in the database — a unique index
-on `(kind, period_start)` and a conditional claim on `sent_at` — not in application logic,
+It cannot send the same month twice. That guarantee lives in the database - a unique index
+on `(kind, period_start)` and a conditional claim on `sent_at` - not in application logic,
 because a process that is restarting is precisely the process that cannot be trusted to
 remember what it already did.
 
@@ -491,7 +492,7 @@ project's rule that configuration belongs to whoever deploys: a relay address is
 credential or an executable path, and correcting it should not need a redeploy.
 
 The exception stops at credentials. **There is no password field**, and the host is
-validated as a bare hostname — `smtp://user:pass@host:25/` pasted into that box is rejected
+validated as a bare hostname - `smtp://user:pass@host:25/` pasted into that box is rejected
 rather than interpreted. If your relay needs authenticating, that belongs in the
 environment with everything else secret.
 
@@ -506,7 +507,7 @@ The overview and the analytics page share one filter: **scope** (application dep
 / base image / both) and **severity** (Critical, High, Medium, Low, Other). It is URL
 state (`?scope=app&severity=critical,high`) and the PDF link carries it, so a filtered
 dashboard can be pasted into a ticket and a filtered report cannot be mistaken for a full
-one — the filter is named on the PDF cover and beside the figures, and the unfiltered
+one - the filter is named on the PDF cover and beside the figures, and the unfiltered
 totals are printed alongside as the reference point.
 
 Four properties are load-bearing, each pinned by a test:
@@ -515,7 +516,7 @@ Four properties are load-bearing, each pinned by a test:
   churn, fragmentation or platform mix, so those always describe the whole estate. The
   control sits inside the section rather than in the page toolbar for that reason.
 - **It recounts rather than filtering rows.** Under `severity=critical`, an application's
-  findings count *is* its critical count, and the rankings reorder accordingly — so "worst
+  findings count *is* its critical count, and the rankings reorder accordingly - so "worst
   on criticals" is answerable, not just "which applications have a critical".
 - **An excluded scope reads as excluded, never as zero.** `app` and `baseImage` come back
   `null`, the base-image exposure section is dropped rather than shown empty, and the page
@@ -526,7 +527,7 @@ Four properties are load-bearing, each pinned by a test:
 
 `Other` folds negligible together with advisories no upstream feed has rated, so the five
 visible buckets always sum to the total. Unrated is a real answer rather than missing
-data — promoting it to Low would invent an assessment nobody made.
+data - promoting it to Low would invent an assessment nobody made.
 
 Selecting every severity bucket is normalised back to selecting none, so "everything" has
 one representation. Without that the page would advertise a filter that excludes nothing,
@@ -538,7 +539,7 @@ quietly wrong:
 
 - **Churn is counted by package name, not by exact version.** A patch bump is one
   upgrade, not one addition plus one removal. Counting identities would render a
-  routine dependency-update round as thousands added and thousands removed —
+  routine dependency-update round as thousands added and thousands removed -
   true, and useless.
 - **Applications with no build before the window are excluded from churn** and
   reported separately, because every package in a first build would otherwise
@@ -550,7 +551,7 @@ quietly wrong:
   bound is clamped, or the bars would total more than the number printed beside
   them.
 
-The PDF is generated server-side with `pdfkit` — vector text in a ~12 KB file, no
+The PDF is generated server-side with `pdfkit` - vector text in a ~12 KB file, no
 headless browser in the API image, and a curl-able URL a scheduled job can archive
 monthly. `Cache-Control: no-store`, because the response embeds its own generation
 time and a cached copy would misreport its freshness.
@@ -563,7 +564,7 @@ prints the expected result so the UI can be checked against it:
 
 | Package | What happens across the five builds |
 |---|---|
-| `lodash 4.17.21` | present in all five — must **never** appear as removed |
+| `lodash 4.17.21` | present in all five - must **never** appear as removed |
 | `express` | upgraded once, so `4.18.2` is gone |
 | `log4j-core` | upgraded twice, leaving **two** dead versions behind |
 | `request 2.88.2` | dropped in build 103 and never came back |
@@ -573,7 +574,7 @@ prints the expected result so the UI can be checked against it:
 | `commons-io 2.11.0` | shipped in build 104 only, then dropped |
 
 Open **drift-demo-service → No longer used**. It lists 9 rows. Tick *Hide
-version upgrades* and it drops to 2: `request` and `commons-io` — the only two
+version upgrades* and it drops to 2: `request` and `commons-io` - the only two
 packages with no remaining version.
 
 `moment 2.29.4` is the row worth understanding. It appears in the default view
@@ -587,7 +588,7 @@ serves the page, so the two agreeing is a real check rather than a tautology.
 
 ### Deploying from a git clone
 
-The target needs **Docker and git**, nothing else — no Node, no npm, no
+The target needs **Docker and git**, nothing else - no Node, no npm, no
 PostgreSQL, no compiler. Everything is built inside the images.
 
 ```bash
@@ -601,8 +602,8 @@ The first build takes several minutes: it installs dependencies, compiles both
 workspaces, and downloads the Grype binary. Then open `http://localhost:8080`.
 
 Use `.env.docker.example`, **not** `.env.example`. The latter configures a
-native development run — `DATABASE_URL` on `localhost` and `PUBLIC_URL` on the
-Vite port — and a compose deployment that inherits `PUBLIC_URL=…:5173` rejects
+native development run - `DATABASE_URL` on `localhost` and `PUBLIC_URL` on the
+Vite port - and a compose deployment that inherits `PUBLIC_URL=…:5173` rejects
 the browser's requests as a cross-origin.
 
 Data lives in three named Docker volumes rather than in the clone, so
@@ -611,13 +612,13 @@ Only `docker compose down -v` destroys it. See
 [Backups](deploy/README.md#backups).
 
 Pulling the published images instead of building is the lighter path when the
-machine can reach a registry — two files and no build. See
+machine can reach a registry - two files and no build. See
 [deploy/README.md](deploy/README.md).
 
 ### Deploying to a machine with no internet
 
-`npm run bundle:offline` produces a folder that runs the whole platform —
-PostgreSQL included — on a machine that has only Docker. No Node, no npm
+`npm run bundle:offline` produces a folder that runs the whole platform -
+PostgreSQL included - on a machine that has only Docker. No Node, no npm
 registry, no PostgreSQL install, no compiler for the argon2 native module.
 
 ```powershell
@@ -647,7 +648,7 @@ Full details, backups, and upgrades: [deploy/README.md](deploy/README.md).
 
 | Command | Needs Postgres | Needs `npm run dev` | What it does |
 |---|---|---|---|
-| `npm test` | no | no | Unit tests (343) — pure logic plus PDF and Excel output, no I/O |
+| `npm test` | no | no | Unit tests (343) - pure logic plus PDF and Excel output, no I/O |
 | `npm run typecheck` | no | no | Typecheck all workspaces |
 | `npm run build` | no | no | Compile all workspaces |
 | `npm run setup:db` | yes | no | One-time: create the local `sbom` role and database |
@@ -658,7 +659,7 @@ Full details, backups, and upgrades: [deploy/README.md](deploy/README.md).
 | `npm run db:seed:demo` | yes | no | Generate demo applications and scan history |
 | `npm run db:seed:drift` | yes | no | One application with a hand-designed drift history (see below) |
 | `npm run db:backfill:platform` | yes | no | Fill in OS/runtime for scans ingested before that existed |
-| `npm run dev` | yes | — | Start the API with watch-reload |
+| `npm run dev` | yes | - | Start the API with watch-reload |
 | `npm run dev:web` | yes | yes | Start the frontend on :5173 |
 | `npm run smoke` | yes | **yes** | 174 end-to-end API assertions (cleans up after itself) |
 | `npm run grype:install` | no | no | Fetch the pinned Grype build into `var/bin/` (checksum-verified) |
@@ -666,7 +667,7 @@ Full details, backups, and upgrades: [deploy/README.md](deploy/README.md).
 | `npm run bundle:offline` | no | no | Build the offline Docker bundle (needs Docker + internet) |
 
 `npm run smoke` is an HTTP client, so the API has to already be running in another
-terminal — it checks this first and tells you if it isn't. `npm run db:studio`
+terminal - it checks this first and tells you if it isn't. `npm run db:studio`
 talks to Postgres directly and does not care whether the API is up; note that it
 serves its UI from the hosted `local.drizzle.studio` frontend over a local
 websocket, so the page needs internet access even though your data stays local.
@@ -687,7 +688,7 @@ curl -f -H "Authorization: Bearer <token from INGEST_TOKENS in .env>" \
   http://127.0.0.1:3000/api/v1/scans
 ```
 
-`my-test-app` does not need to exist — it is auto-created with status
+`my-test-app` does not need to exist - it is auto-created with status
 `pending_confirmation`.
 
 ---
@@ -698,7 +699,7 @@ Two dev servers: `npm run dev` (API, :3000) and `npm run dev:web` (frontend, :51
 Open <http://localhost:5173>.
 
 The Vite dev server proxies `/api` to the API rather than relying on CORS. That is
-deliberate — it makes the app same-origin in development exactly as it is behind
+deliberate - it makes the app same-origin in development exactly as it is behind
 nginx in production, so the session cookie behaviour being tested locally is the
 real one. A CORS-relaxed dev setup can hide a cookie problem until deploy.
 
@@ -709,7 +710,7 @@ everyone with a badge; inactive ones are hidden until asked for.
 **Overview** is the landing page, and it answers one question: *does anything need
 me today?* Application counts by status, scan volume, the severity split, the
 applications carrying the most findings in their own dependencies, and **Needs
-attention** — the applications that have gone quiet, plus any registered by a build
+attention** - the applications that have gone quiet, plus any registered by a build
 under a name nobody has matched yet. Every counter that can be filtered for links
 into the filtered list.
 
@@ -719,13 +720,13 @@ page opened every day; Analytics owns all of it, and no table appears on both.
 
 **Package search** has two modes behind one toggle. *One package* answers who
 ships X, now or at any point in history. *A list* checks a whole pasted list at
-once and reports a verdict per package — see
+once and reports a verdict per package - see
 [Searching a list of packages](#searching-a-list-of-packages).
 
 **Analytics** answers the other question: *what shape is the estate in, and how is
 it changing?* Coverage, the vulnerable-package and advisory rankings, base-image
-exposure, the most widely deployed packages — the blast-radius list that decides
-whether a bad package is one team's afternoon or an organisation-wide exercise —
+exposure, the most widely deployed packages - the blast-radius list that decides
+whether a bad package is one team's afternoon or an organisation-wide exercise -
 dependency churn over a selectable window with a scan-volume trend, version
 fragmentation, packages new to the estate, and the platform and ecosystem
 breakdowns. Downloadable as a PDF. See
@@ -733,7 +734,7 @@ breakdowns. Downloadable as a PDF. See
 
 The split between the two pages runs along *who acts on it*. The overview ranks
 **applications**, because that is who gets chased; analytics ranks **packages and
-advisories**, because that is what gets fixed — usually once, centrally, clearing
+advisories**, because that is what gets fixed - usually once, centrally, clearing
 several applications at a stroke.
 
 **Application detail** has these tabs:
@@ -742,17 +743,27 @@ several applications at a stroke.
 |---|---|
 | Current components | The latest build's dependencies |
 | Latest build changes | Removed / version-changed / added against the previous build |
-| Vulnerabilities | *Findings* (opens on all packages; narrow to application dependencies or base image) and *Recommendations* — one upgrade target per package, see [Fix recommendations](#fix-recommendations). Shown only while scanning is on |
+| Vulnerabilities | *Findings* (opens on all packages; narrow to application dependencies or base image) and *Recommendations* - one upgrade target per package, see [Fix recommendations](#fix-recommendations). Shown only while scanning is on |
 | No longer used | Everything ever shipped that the current build does not contain, each with the build it was last seen in |
-| Scan history | Every build that submitted an SBOM, plus **Upload SBOM** and, for admins, per-build **Delete** |
+| Scan history | Every build that submitted an SBOM, with its application and image vulnerabilities as Critical / High / Medium / Low (see below), plus **Upload SBOM** and, for admins, per-build **Delete** |
 
 Any historical build opens its own page with that build's component list and
-provenance — commit, branch, image, Syft version, and the SBOM SHA-256, so a
+provenance - commit, branch, image, Syft version, and the SBOM SHA-256, so a
 downloaded SBOM can be verified against what was uploaded. "Compare with previous"
 opens a diff of any two builds, with the pair in the URL.
 
+**Vulnerabilities per build.** Each row of the Scan history tab shows the build's own
+dependencies (*Application vulns*) and its base image (*Image vulns*) separately, each as
+Critical / High / Medium / Low. A replaced build shows two lines: **Today**, counted
+against the current vulnerability database and moving with every update, and
+**Replaced**, the count saved at the moment a newer build became current and never
+changed afterwards. Together they separate "this build got worse because new CVEs were
+published" from "it was already this bad when it shipped". Builds replaced before
+this was recorded show `Replaced: -`; deleting the current build makes the one before it
+current again and clears its replaced figure.
+
 **Upload SBOM** on the Scan history tab takes a CycloneDX file and processes it
-exactly as a pipeline's — it becomes the application's current build. The dialog
+exactly as a pipeline's - it becomes the application's current build. The dialog
 says so before you submit, because that is the consequence someone needs to know
 about rather than discover. Rows uploaded this way carry a `manual` badge whose
 tooltip names the uploader, and the build page shows *Uploaded by* where a CI scan
@@ -762,8 +773,8 @@ that looked identical to a pipeline's would misrepresent where the data came fro
 
 **Delete** appears on each history row for administrators, and on a build's own
 page. It is admin-only while upload is open to every signed-in user, and the
-asymmetry is deliberate: upload is append-only — a wrong SBOM is corrected by
-uploading the right one, with the wrong one still visible and attributed — whereas
+asymmetry is deliberate: upload is append-only - a wrong SBOM is corrected by
+uploading the right one, with the wrong one still visible and attributed - whereas
 deletion destroys a record that diffs, the *No longer used* view and past reports
 point at, and nothing brings it back.
 
@@ -772,16 +783,16 @@ exists for: an SBOM uploaded against the wrong application becomes its current
 state immediately, and the fix has to be able to reach it. The build before it is
 promoted, and the application's component list, findings and its contribution to
 every dashboard and analytics figure revert with it. The confirmation says which
-of those is about to happen — it reads differently for a current build, an older
-one, and an application's only build — because the history table cannot show it.
+of those is about to happen - it reads differently for a current build, an older
+one, and an application's only build - because the history table cannot show it.
 Full contract in
 [`POST /api/v1/applications/:id/scans`](#post-apiv1applicationsidscans).
 
 *Latest build changes* folds a version bump into a single `changed` row rather
 than reporting it as one removal plus one addition. On a typical build almost
 every difference is an upgrade, and without that folding the genuine adds and
-drops are buried. Where the pairing is ambiguous — two versions added, one removed
-— the rows stay unpaired rather than being matched arbitrarily.
+drops are buried. Where the pairing is ambiguous - two versions added, one removed
+- the rows stay unpaired rather than being matched arbitrarily.
 
 **Package search** answers the cross-application question. The usage selector is
 the point of the page:
@@ -789,7 +800,7 @@ the point of the page:
 | Scope | Question it answers |
 |---|---|
 | Currently used | Which applications ship this package today? |
-| Previously used, not now | Which applications *dropped* it — and in which build was it last seen? |
+| Previously used, not now | Which applications *dropped* it - and in which build was it last seen? |
 | Both | Everything, labelled |
 
 The second scope is why full scan history is retained. Results link to the exact
@@ -802,39 +813,48 @@ into a ticket and opens the same way for the next person.
 
 Visible only to admins, at `/admin`.
 
-- **Applications** — register one before its first scan so CI lands on a confirmed
+- **Applications** - register one before its first scan so CI lands on a confirmed
   record with its attributes already set, edit name / status / attributes, or
   delete. Deleting destroys the scan history; *inactive* exists so "we don't build
   this any more" does not require that.
-- **Awaiting confirmation** — the triage queue for applications the ingest endpoint
+- **Awaiting confirmation** - the triage queue for applications the ingest endpoint
   auto-created because `app_name` matched nothing. Four resolutions: confirm,
   merge once, merge and record a permanent alias, or delete. *Merge always* is the
   one that fixes the cause rather than the occurrence: the alias redirects every
   future build posting that name.
-- **Users** — create accounts, record first and last names, change roles,
-  deactivate, delete, and reset passwords. The last active admin cannot be demoted,
-  deactivated or deleted, and an admin cannot do any of those to their own account.
-  The *No access yet* filter lists accounts that can sign in but reach nothing —
-  typically the ones single sign-on just created.
-- **Squads** — teams of people granted groups and applications together; see
-  [Squads](#squads).
-- **Attributes** — add, edit, hide, or delete the attribute definitions. Deleting
-  one that applications still carry values for is refused with the count, and
-  offers to purge those values as a separate, deliberate step.
-- **CI tokens** — mint, revoke and delete ingest tokens. Revoking keeps the row (and
+- **Access** - everything that decides who sees which project, as four sub-tabs:
+  - **Users** - create accounts, record first and last names, change roles,
+    deactivate, delete, and reset passwords. The last active admin cannot be demoted,
+    deactivated or deleted, and an admin cannot do any of those to their own account.
+    The *No access yet* filter lists accounts that can sign in but reach nothing -
+    typically the ones single sign-on just created.
+  - **Tribes** - groups of squads, with projects of their own; see [Tribes](#tribes).
+  - **Squads** - teams of people granted groups and applications together, searchable
+    by name; see [Squads](#squads).
+  - **Groups** - named sets of applications in one environment.
+
+  The old `/admin/users`, `/admin/squads` and `/admin/groups` addresses redirect here.
+- **Attributes** - add, edit, hide, or delete the attribute definitions, and mark any
+  of them **Required**. Deleting one that applications still carry values for is
+  refused with the count, and offers to purge those values as a separate, deliberate
+  step. *Tribe* and *Squad* are linked to Access and cannot be deleted; see
+  [Squad and tribe attributes](#squad-and-tribe-attributes).
+- **CI tokens** - mint, revoke and delete ingest tokens. Revoking keeps the row (and
   its name); deleting removes it so the name can be reused. Scans record the token's
   name as text, so their provenance survives the deletion. Personal API tokens on the
   *API* page can be deleted the same way. Environment-configured tokens are
   listed too, marked as such, because listing only database rows would report "no
   tokens" on a deployment where CI is authenticating perfectly well.
-- **Monthly report** — generate the management report, switch scheduled sending on
+- **Scanners** - vulnerability scanning and malicious-package detection, as two
+  sub-tabs. The old `/admin/vulnerabilities` and `/admin/malicious` addresses redirect.
+- **Monthly report** - generate the management report, switch scheduled sending on
   or off, and see the history of what was sent and whether it arrived. See
   [The monthly management report](#the-monthly-management-report).
-- **Configuration** — every value set once and forgotten: the staleness threshold,
+- **Configuration** - every value set once and forgotten: the staleness threshold,
   how often to check for a vulnerability database, and the mail relay, recipients
   and email template for the monthly report. See
   [The Configuration tab](#the-configuration-tab).
-- **Audit log** — every administrative write, kept indefinitely. This exists mainly
+- **Audit log** - every administrative write, kept indefinitely. This exists mainly
   for merges: a merge moves scan history between applications and then deletes the
   source, so without it "why does this app have someone else's builds" is
   unanswerable.
@@ -844,7 +864,7 @@ Visible only to admins, at `/admin`.
 **Administration → Configuration** gathers the values an administrator sets during setup
 and rarely touches again: the staleness threshold, the vulnerability database check
 interval, and the monthly report's relay, recipients, schedule and email template. Each
-section saves to its own endpoint with its own button — one button spanning three would
+section saves to its own endpoint with its own button - one button spanning three would
 produce partial failures with no way to report which half succeeded.
 
 Master on/off switches deliberately stay where the evidence for flipping them is.
@@ -858,7 +878,7 @@ The older single-field `/admin/settings` page is now this tab, and that URL redi
 ### Accounts and passwords
 
 User "emails" are **login identifiers, not mailboxes**. Nothing is ever sent to an
-account's address — no invites, no notifications, no reset links — so `admin@localhost`
+account's address - no invites, no notifications, no reset links - so `admin@localhost`
 is a perfectly valid account.
 
 The one thing the platform mails is the monthly report, and it goes to an explicitly
@@ -878,7 +898,7 @@ Step 3 is enforced server-side, not just by the client redirect: an admin-issued
 password has by construction been seen by someone other than its owner, often via
 a chat message. Re-entering the issued password as the "new" one is rejected for
 the same reason. Resetting a password also revokes every live session for that
-account immediately — which is why sessions are Postgres-backed rather than JWTs.
+account immediately - which is why sessions are Postgres-backed rather than JWTs.
 
 ### Accounts created by single sign-on
 
@@ -895,7 +915,7 @@ correction typed by an admin is never overwritten. The creation is audited as
 An optional domain list limits which addresses get an account; anything outside it,
 or a token with no address, goes to the access-request queue as before. An address
 already held by a *password* account is refused (`local_account`) rather than taken
-over — converting it is an admin decision. With the box unticked, the old
+over - converting it is an admin decision. With the box unticked, the old
 pre-provisioning behaviour applies unchanged.
 
 ### Squads
@@ -903,26 +923,68 @@ pre-provisioning behaviour applies unchanged.
 A squad is a team of people with a name, an optional team email and a set of granted
 groups and applications. Every member reaches what the squad is granted **in addition
 to** their own grants, and the environments those applications live in come along
-with them — a squad owning one production service opens that service, not the rest of
+with them - a squad owning one production service opens that service, not the rest of
 production. Adding or removing a member is the whole change; no application has to be
 re-ticked. Group grants follow the group, so an application added to it later is
 visible to every member.
 
-Squads are managed under **Admin → Squads**, or from the person's side in their
-*Edit Access* dialog, whose preview names the squad each application is reached
-through. The team email is stored for reporting about the squad's applications; nothing
-is sent to it yet.
+Squads are managed under **Admin → Access → Squads**, or from the person's side in
+their *Edit Access* dialog, whose preview names the squad (and tribe) each application
+is reached through. The team email is stored for reporting about the squad's
+applications; nothing is sent to it yet. A squad can sit under several tribes; the
+*Every squad must belong to a tribe* switch on the Squads tab (off by default) makes
+choosing at least one mandatory when a squad is created or its tribes are edited.
+
+### Tribes
+
+Tribe → squad → user. A tribe has a name, an optional email and description, the
+squads under it, and projects assigned to it directly. It has no members of its own:
+its people are the members of its squads. Every member of every squad in a tribe sees
+the tribe's projects, on top of what their own squads reach, and the environments
+those projects live in come along exactly as they do for a squad grant. Managed under
+**Admin → Access → Tribes**.
+
+### Squad and tribe attributes
+
+A project's **Squad** and **Tribe** attributes are the squads and tribes it is assigned
+to directly, kept in step with those assignments in both directions:
+
+- Granting a squad a project (Squads → *Members & access*), or assigning a project to
+  a tribe, writes the name into the project's attribute. Removing the grant, renaming
+  the squad or tribe, or deleting it updates every attribute that named it.
+- Typing names into the attribute - on the edit form, through the API, or with
+  `scripts/set_project_attribute.py` - assigns the project to exactly those squads or
+  tribes, comma-separated (`payments, storefront`). A name that does not exist is
+  refused (`400`, naming each unknown one); the edit form flags it and offers
+  **Create squad** / **Create tribe** with the name filled in.
+- Only direct assignments are listed. A squad that reaches a project through a group
+  grant still has access but does not appear in the attribute.
+
+Filtering the Applications list by squad or tribe matches on the assignments, so a
+project on two squads appears under both. On upgrade, migration `0023` turns every
+value already in a `squad` (or `tribe`) attribute into a squad (or tribe) with no
+members and assigns the project to it - nobody gains access from that until members
+are added. Names differing only in case become one squad, spelled the way most
+projects spelled it. Squad and tribe names cannot contain commas.
+
+### Required attributes
+
+Any attribute can be marked **Required** on the Attributes tab. A required attribute
+must have a value when an administrator creates or confirms a project, and cannot be
+cleared on an edit; the forms say which ones are missing before saving. CI uploads are
+never refused over one - losing a build's SBOM over a missing label would lose the one
+thing that cannot be recovered later.
 
 ---
 
 ## Vulnerability scanning
 
 Built in, backed by [Grype](https://github.com/anchore/grype), and **off by default**.
-Enable it under **Admin → Vulnerability scanning**; the update interval is under
+Enable it under **Admin → Scanners → Vulnerabilities**; the update interval is under
 **Admin → Configuration**.
 
 Grype ships inside the container image (`COPY --from=anchore/grype:v0.115.0`), pinned so
-findings are reproducible — results shift between releases, and the database schema is
+findings are reproducible - results shift between releases, and the database schema is
 tied to the binary version. On a native install, `npm run grype:install` fetches the same
 pinned build into `var/bin/` after verifying its SHA-256 against a checksum committed in
 the script. Binaries already on `PATH` are used as-is.
@@ -934,7 +996,7 @@ administrator asks for it. A fresh `docker compose up` downloads nothing.
 
 ### How findings are stored, and why it matters
 
-Findings are keyed on the **component**, not the scan — `component_vulnerability` joins a
+Findings are keyed on the **component**, not the scan - `component_vulnerability` joins a
 package version to an advisory. Three things follow:
 
 - **Re-evaluating the whole estate after a database update is one pass over distinct
@@ -958,7 +1020,7 @@ WHERE vuln_scanned_at IS NULL
 
 Installing a database moves the build timestamp, which makes every package pending again.
 The same expression covers a newly ingested package, the first time scanning is enabled, a
-new database, and a sweep killed halfway — so a restart needs no recovery logic, because
+new database, and a sweep killed halfway - so a restart needs no recovery logic, because
 there was never a queue to lose.
 
 ### Application dependencies vs base image
@@ -967,17 +1029,17 @@ Every count is reported in two groups. Measured on a realistic container SBOM: *
 findings, 2,817 of them (99%) from base-image OS packages.**
 
 The dashboards show a combined total *and* the split, with the split given the visual
-weight — the combined figure is the one that gets quoted in a meeting, and on a typical
+weight - the combined figure is the one that gets quoted in a meeting, and on a typical
 estate it is mostly a statement about base-image age. **No ranking is ever computed on the
 combined figure**: **Vulnerable Applications** ranks on application dependencies (or on
 base image alone, if the filter excludes dependencies), because ranking on the sum would
 order applications by base-image age and bury the handful of findings a team actually chose
-and can act on. Each row shows both halves in one column — `38 / 28` — so the pair reads as
+and can act on. Each row shows both halves in one column - `38 / 28` - so the pair reads as
 a pair rather than as two numbers to add up.
 
 ### Where a package actually is
 
-Every finding — a CVE or a malicious package — carries the paths where the package was found
+Every finding - a CVE or a malicious package - carries the paths where the package was found
 in that build, and a label saying whether it belongs to the application or to the image
 underneath it.
 
@@ -987,8 +1049,8 @@ those properties only for the package type and discarded the rest. Nothing about
 scans had to change.
 
 **Paths live on the scan, not on the package.** `component` is a global, content-addressed
-row shared by every application that ships that exact package — one `lodash@4.17.21` row
-that a hundred scans point at — and the path is different in each of them. So the columns
+row shared by every application that ships that exact package - one `lodash@4.17.21` row
+that a hundred scans point at - and the path is different in each of them. So the columns
 hang off `scan_component`, the per-scan join row.
 
 **OS packages deliberately store no path.** For `apk`, `deb` and `rpm`, the location Syft
@@ -1010,13 +1072,13 @@ since OS packages are the overwhelming majority of components in a container ima
 | Origin | How it is decided |
 |---|---|
 | **Base image (OS package)** | The ecosystem is a distro package manager. Certain, not inferred. |
-| **Image** | The path is under a system prefix — `/usr/lib`, `/usr/local/lib`, `/opt`, … |
+| **Image** | The path is under a system prefix - `/usr/lib`, `/usr/local/lib`, `/opt`, … |
 | **Application** | Anything else, including `/app` and `/usr/src/app`. |
 | **Unknown** | No location was recorded. Never rendered as either of the two above. |
 
 The middle two rest on a prefix list, which is the only heuristic in the feature. Two things
 make it acceptable: the list is small and auditable, and **the label is never shown without
-the path beside it** — a reader who sees *Image* above `/usr/src/app/node_modules/evil` can
+the path beside it** - a reader who sees *Image* above `/usr/src/app/node_modules/evil` can
 see instantly that the label is wrong and the path is right.
 
 Note what the list deliberately omits: a bare `/usr/` prefix. `/usr/src/app` is one of the
@@ -1025,7 +1087,7 @@ own dependencies in exactly the deployments most likely to be checking.
 
 #### Why not image layers
 
-The obvious rule — *a layer containing distro packages is the base image* — was measured
+The obvious rule - *a layer containing distro packages is the base image* - was measured
 against real images and does not work:
 
 ```
@@ -1033,7 +1095,7 @@ node:20-alpine     layer A {npm: 203, binary: 1}    layer B {apk: 18, npm: 1}
 python:3.12-slim   all three of its layers contain deb packages
 ```
 
-On the first, the rule calls Node's 203 global npm packages "application" — but to anyone
+On the first, the rule calls Node's 203 global npm packages "application" - but to anyone
 whose Dockerfile says `FROM node:20-alpine`, those are base image. On the second it has no
 discriminating power at all. The layer digest is still recorded, as ground truth to check
 against when the derived label looks wrong.
@@ -1043,7 +1105,7 @@ against when the derived label looks wrong.
 Syft emits the same package twice when it finds it in two layers or via two catalogers, and
 the parser collapses duplicates on identity hash. Those duplicate entries are precisely the
 ones carrying a location the first entry did not have. Collapsing without merging discards
-multi-location data on exactly the packages installed in more than one place — measured on
+multi-location data on exactly the packages installed in more than one place - measured on
 `node:20-alpine`, merging raised the maximum locations on a single package from 1 to 5.
 
 Stored paths are capped at three per package per scan, with the true total kept alongside so
@@ -1052,7 +1114,7 @@ a truncated list reads "Showing 3 of 81" rather than implying it is complete.
 #### Builds ingested before this existed
 
 `scan.locations_extracted_at` records whether anyone has looked. That is what keeps "this
-SBOM has no locations in it" distinct from "nobody has extracted this SBOM's locations yet" —
+SBOM has no locations in it" distinct from "nobody has extracted this SBOM's locations yet" -
 without it both would render as the same blank cell.
 
 Older builds are recovered from the raw SBOMs already in the blob store, on the
@@ -1068,20 +1130,20 @@ bad is this application" but "how far does this CVE reach". One row per advisory
 packages it affects, the applications running them now, and the applications that dropped it.
 
 The package cell is a **count that expands to the packages behind it**, and the reason it is
-a count at all is that one advisory affects many packages — there is no single name to put in
+a count at all is that one advisory affects many packages - there is no single name to put in
 the cell. The list travels on the row rather than being fetched when opened, which is a
 correctness constraint rather than an optimisation: the app/base-image split is a shared SQL
 predicate rather than a column, so a list fetched from the per-advisory endpoint could not be
 narrowed to the same scope, and a scoped count of 3 above an unscoped list of 8 is a
 contradiction the reader cannot resolve. One query, one WHERE clause, no disagreement
-possible. Entries are keyed on name **and** version to match what the count counts — eight
+possible. Entries are keyed on name **and** version to match what the count counts - eight
 vulnerable versions of `openssl` is one name and eight rows, and the difference is the whole
 finding.
 
 The application counts open the same way, and the two are not complements of each other.
 An application shipping one affected version in an older build and a different affected
 version in its current one appears under *both*, so the historical list means "has history
-with this advisory" rather than "is clean now" — the second reading would turn a
+with this advisory" rather than "is clean now" - the second reading would turn a
 still-vulnerable application into a resolved one. Note also that the historical count is
 structurally zero in the default view, because restricting to current builds makes its own
 filter unsatisfiable; tick **include historical** to populate it.
@@ -1115,8 +1177,8 @@ force an impossible choice when Grype fails: fail a build whose SBOM stored perf
 return 201 while silently recording no vulnerabilities.
 
 Two settings are forced on every Grype invocation. `GRYPE_DB_AUTO_UPDATE=false` because
-Grype otherwise downloads a database mid-scan — measured at **96s versus 1.8s** for the
-same match — which on the ingest path would stall a CI request and on an air-gapped host
+Grype otherwise downloads a database mid-scan - measured at **96s versus 1.8s** for the
+same match - which on the ingest path would stall a CI request and on an air-gapped host
 would fail it. `GRYPE_DB_VALIDATE_AGE=false` because Grype refuses to match against a
 database older than five days, and a stale database still produces useful findings; the
 age is reported prominently instead.
@@ -1134,12 +1196,12 @@ No internet connection to https://grype.anchore.io/databases/v6/latest.json
 That is reported as a **state, not a failure**: HTTP 200 with `outcome: "unreachable"`, the
 previously installed database untouched, and nothing else in the platform affected.
 Ingestion, search, the dashboards and the report all continue exactly as normal. A
-permanently offline server does not log an error every three hours — the staleness warning
+permanently offline server does not log an error every three hours - the staleness warning
 in the panel is the signal.
 
 An update and a sweep are **mutually exclusive**, and the exclusion runs in both
 directions. Installing a database means deleting the old file, and a sweep holds that file
-open through the grype process it spawns. On Windows the unlink then fails — and it fails
+open through the grype process it spawns. On Windows the unlink then fails - and it fails
 *after* grype has removed `import.json`, so a working installation is left
 present-but-invalid by an update that never landed. POSIX unlink-while-open hides the
 symptom, but a sweep matching against a file being swapped underneath it would attribute
@@ -1148,8 +1210,8 @@ its findings to the wrong database build, so both orderings are refused everywhe
 next tick. See `packages/api/test/unit/vuln-db-exclusion.test.ts`.
 
 Installing by hand, for a host with no route to the listing at all: fetch
-`latest.json`, take its **`path`** field — a filename, not a link — prepend the base URL,
-and upload the `.tar.zst` under **Admin → Vulnerability scanning**. The upload ceiling is
+`latest.json`, take its **`path`** field - a filename, not a link - prepend the base URL,
+and upload the `.tar.zst` under **Admin → Scanners → Vulnerabilities**. The upload ceiling is
 `GRYPE_DB_MAX_UPLOAD_BYTES` (1 GiB), deliberately separate from `INGEST_MAX_SBOM_BYTES`:
 they differ by more than an order of magnitude, and sharing one limit meant tightening the
 ingest limit silently broke the only install path an air-gapped deployment has.
@@ -1164,7 +1226,7 @@ For an air-gapped machine, **Import from file** takes the `.tar.zst` archive thr
 
 Scanner and database are reported **separately**, because they fail independently and need
 different fixes. When the binary is missing, every resolution rule that was tried is listed
-with the reason it failed — "not found" alone tells nobody where to put it.
+with the reason it failed - "not found" alone tells nobody where to put it.
 
 There is deliberately **no field for the binary path.** A web form that sets an executable
 the server then runs is a remote-code-execution primitive, and this project is meant to be
@@ -1175,7 +1237,7 @@ published; a default-on field like that becomes every deployer's vulnerability. 
 
 An admin can accept a finding as a risk, with a required reason, scoped to one package
 version, one application, or the whole estate. Accepted findings are **excluded from every
-count and ranking but never deleted** — a dashboard that only grows is one people stop
+count and ranking but never deleted** - a dashboard that only grows is one people stop
 reading, and a silently dropped finding is one nobody can audit later. They stay listed
 under Accepted risks with who accepted them and why.
 
@@ -1186,13 +1248,13 @@ versions. The **Recommendations** view on an application's Vulnerabilities tab t
 those into one target per package (grouped by ecosystem and name, across every version
 the build ships):
 
-1. **Minimum** — for each advisory, the lowest fix above the installed version; the
+1. **Minimum** - for each advisory, the lowest fix above the installed version; the
    target is the highest of those, and never below a version already shipped. Three
    advisories fixed in 1.2, 2.3 and 1.8 give *at least 2.3*.
-2. **Checked** — that version is put to the scanner as if it were a package (its purl
+2. **Checked** - that version is put to the scanner as if it were a package (its purl
    with the version substituted, qualifiers such as `distro=` kept). If it is itself
    affected and a later fix exists, the next version is checked, up to five rounds. The
-   row then reads *2.8 — no known vulnerabilities*, with *not 2.3 — it is affected too*
+   row then reads *2.8 - no known vulnerabilities*, with *not 2.3 - it is affected too*
    beneath it, and **Why** shows the chain.
 
 Statuses: *no known vulnerabilities*, *N unfixed remain* (the best version still carries
@@ -1220,7 +1282,7 @@ The one invariant worth stating on its own. With scanning off:
 - `analytics/report` and `dashboard/vulnerabilities` return `vulnerabilities: null`, not a
   zero-filled object.
 - The nav item, the application tab and the dashboard cards are **absent**.
-- The PDF prints "Not assessed … the absence of findings below is not a clean result —
+- The PDF prints "Not assessed … the absence of findings below is not a clean result -
   nothing was checked", and its methodology note tracks the flag.
 
 An empty findings list means the packages were checked and are clean. Rendering an
@@ -1244,10 +1306,10 @@ statement that there are none"*. Nullable types are what enforce it: a consumer 
 | `GRYPE_DB_CA_CERT` | unset | CA for a mirror behind a TLS-inspecting proxy. |
 | `GRYPE_BATCH_SIZE` | `5000` | Packages per Grype invocation. Bounds memory and gives the sweep resume points. |
 | `GRYPE_SCAN_TIMEOUT_MS` | `600000` | Per-batch match timeout. |
-| `GRYPE_DB_UPDATE_TIMEOUT_MS` | `1800000` | Download timeout — 141 MB on a slow link. |
+| `GRYPE_DB_UPDATE_TIMEOUT_MS` | `1800000` | Download timeout - 141 MB on a slow link. |
 | `GRYPE_REACHABILITY_TIMEOUT_MS` | `8000` | Listing probe. Short: it only answers "is there a route". |
 
-Whether scanning is **on**, and the check interval, are not here — they are admin-editable
+Whether scanning is **on**, and the check interval, are not here - they are admin-editable
 rows in `setting`, because they are runtime decisions rather than deployment ones.
 
 Plan **~4 GB** for the database volume: 1.9 GB installed, plus the archive and its
@@ -1264,12 +1326,12 @@ package you chose deliberately, fixed by upgrading. A malicious package **is** t
 |---|---|---|
 | What is wrong | A legitimate package has a flaw | The package exists to attack you |
 | Fix | Upgrade | Remove it, **then rotate every credential the installing machine could read** |
-| Severity | CVSS 0–10 | Binary. There is no medium malware |
+| Severity | CVSS 0-10 | Binary. There is no medium malware |
 | When the harm happens | When the vulnerable path runs | **At install time**, before anyone looked |
 
 That last row drives everything else. `npm install` runs `postinstall`; `pip install` runs
 `setup.py`. The payload executed on developer laptops and CI runners before the package was ever
-reported, so removing it does not undo the damage — the credentials on those machines are gone.
+reported, so removing it does not undo the damage - the credentials on those machines are gone.
 
 ### Current *and* historical, always
 
@@ -1280,8 +1342,8 @@ surviving record**, and this feature is built around that.
 
 Every finding therefore carries two counts that are never collapsed:
 
-- **In current builds** — what can be removed today by rebuilding.
-- **Ever shipped** — every application that has ever contained it, in any retained build. This
+- **In current builds** - what can be removed today by rebuilding.
+- **Ever shipped** - every application that has ever contained it, in any retained build. This
   number does not fall when the package is removed, because the payload already ran. It is the set
   of pipelines whose secrets must be rotated.
 
@@ -1290,7 +1352,7 @@ cleaned up, and a tool reporting only current builds would call that estate heal
 
 ### The feed
 
-[OpenSSF `malicious-packages`](https://github.com/ossf/malicious-packages) — Apache-2.0, no account
+[OpenSSF `malicious-packages`](https://github.com/ossf/malicious-packages) - Apache-2.0, no account
 and no API key, pooled from GitHub, Amazon Inspector, Checkmarx, Datadog and others in OSV format.
 Roughly **236,000 reports**, overwhelmingly npm and PyPI, in a single ~41 MB archive.
 
@@ -1298,8 +1360,8 @@ Chosen over querying OSV.dev per package (one request per component, unusable at
 over OSV's bulk archives, whose npm bundle is 220 MB because it carries every advisory rather than
 only the malicious ones.
 
-Matching needs no scanner binary and no multi-gigabyte database — it is a name lookup and a version
-test — so it refreshes every 6 hours by default and re-checks the whole component set in seconds.
+Matching needs no scanner binary and no multi-gigabyte database - it is a name lookup and a version
+test - so it refreshes every 6 hours by default and re-checks the whole component set in seconds.
 That speed is the point: a malicious release is usually pulled from its registry within a day, so a
 check that waited for a nightly scan would frequently be looking after the fact.
 
@@ -1311,13 +1373,13 @@ Reports specify versions three ways, and all three are matched exactly:
 | Explicit versions | 13.6% | A real package whose maintainer account was compromised. Only those releases |
 | Version range | 0.7% | Compared; when versions cannot be ordered the match is **reported**, not dropped |
 
-Withdrawn reports stop producing findings immediately — roughly 350 are retracted at any time — but
+Withdrawn reports stop producing findings immediately - roughly 350 are retracted at any time - but
 the row is retained, because somebody may already have acted on it.
 
 ### Acknowledging a finding
 
-Findings are never hidden. An admin records a decision — *investigating*, *remediated*, *not
-affected*, *false positive* — with a **mandatory note**, and the finding stays on the list carrying
+Findings are never hidden. An admin records a decision - *investigating*, *remediated*, *not
+affected*, *false positive* - with a **mandatory note**, and the finding stays on the list carrying
 that label. There is deliberately no "accept the risk": that is a reasonable thing to say about a
 medium CVE in a library nobody calls, and not about a package whose purpose is to exfiltrate
 credentials.
@@ -1325,7 +1387,7 @@ credentials.
 ### Alerts
 
 Off by default. When enabled, an email goes to a configured list as soon as a finding appears, once
-per package per application — a package reaching a *second* application is news; the same pair
+per package per application - a package reaching a *second* application is news; the same pair
 re-detected every sweep is not. It reuses the SMTP relay configured for the monthly report, with its
 own recipient list, because the people who want a management summary monthly are rarely the people
 who should be interrupted for this.
@@ -1339,7 +1401,7 @@ database, with its reporters and a link to the original, so a claim can be check
 starts revoking keys.
 
 **Not proof of safety.** These feeds are reactive. A package published in the last few hours may not
-be reported yet, so an empty result renders as *"no known malicious packages, as of ‹feed date›"* —
+be reported yet, so an empty result renders as *"no known malicious packages, as of ‹feed date›"* -
 never as a clean bill of health.
 
 **Not a build gate.** Ingest never rejects a scan because of what is in it.
@@ -1378,12 +1440,12 @@ Status codes are the contract, because pipelines call this with `curl -f`:
 | Code | Meaning |
 |---|---|
 | 201 | Scan committed and queryable |
-| 400 | Malformed request (missing/empty `sbom`, invalid `app_name`) — retrying won't help |
+| 400 | Malformed request (missing/empty `sbom`, invalid `app_name`) - retrying won't help |
 | 401 | Bad or revoked ingest token |
 | 413 | SBOM exceeds `INGEST_MAX_SBOM_BYTES` |
 | 415 | Not `multipart/form-data` |
 | 422 | File is not a CycloneDX SBOM |
-| 5xx | Transient — safe to retry |
+| 5xx | Transient - safe to retry |
 
 **An unknown `app_name` is not an error.** It auto-creates an application with
 status `pending_confirmation` and ingests the scan against it. Losing a build's
@@ -1394,7 +1456,7 @@ queue to resolve.
 
 The same ingestion, reached by a signed-in person instead of a pipeline. Used by
 the **Upload SBOM** button on an application's Scan history tab, for the case
-where a pipeline is not wired up yet — or not wired up at all — and someone has a
+where a pipeline is not wired up yet - or not wired up at all - and someone has a
 CycloneDX file in hand.
 
 `multipart/form-data`, authenticated with the **session cookie**. An ingest token
@@ -1430,7 +1492,7 @@ rather than a `curl -f`:
    existing scan so the UI can link to it. A double-clicked button is far more
    likely than a genuine need for the duplicate. Serialised by a per-application
    advisory lock, so the check is a guarantee rather than a race. The CI endpoint
-   keeps the old behaviour — a pipeline re-scanning an unchanged artifact produces
+   keeps the old behaviour - a pipeline re-scanning an unchanged artifact produces
    identical bytes legitimately, and failing that would break builds over a
    non-problem.
 3. **The uploader is recorded** on the scan (`source`, `uploaded_by_user_id`,
@@ -1452,7 +1514,7 @@ level of the path it mirrors: CI ingest is authenticated by a token shared acros
 pipelines, auto-creates applications with no human approval, and is usable by any
 pipeline author. Restricting the *named, audited* equivalent to admins while
 leaving the anonymous-by-design one open would be backwards, and it would block
-the case the feature exists for. The write is also append-only — history is never
+the case the feature exists for. The write is also append-only - history is never
 overwritten, and a wrong upload is corrected by uploading the right one. To make
 it admin-only, change the single `fastify.requireAuth` hook in
 `manual-upload.routes.ts` to `fastify.requireAdmin`.
@@ -1460,7 +1522,7 @@ it admin-only, change the single `fastify.requireAuth` hook in
 ### Ingest tokens
 
 Tokens attest "a trusted CI system is calling", not which application is
-reporting — application identity comes entirely from `app_name`. Configure them
+reporting - application identity comes entirely from `app_name`. Configure them
 two ways:
 
 - `INGEST_TOKENS=jenkins:<token>,gitlab:<token>` in the environment (also the
@@ -1472,7 +1534,7 @@ Only SHA-256 hashes are stored. A leaked token can write a scan under any
 application name; named tokens exist so the blast radius can be scoped and
 rotated per environment.
 
-### `scripts/scan_images.py` — scanning images without a pipeline
+### `scripts/scan_images.py` - scanning images without a pipeline
 
 For images that no pipeline builds: a vendor appliance, a base image tracked on
 its own, an application whose CI is not wired up yet. It holds a dictionary of
@@ -1487,8 +1549,8 @@ IMAGES = {
 ```
 
 The value can be a bare reference or the whole `docker pull ...` command, so a list
-pasted from a runbook works unedited. Flags survive and reach the pull —
-`docker pull --platform linux/amd64 nginx:1.27` does what it reads as — while the
+pasted from a runbook works unedited. Flags survive and reach the pull -
+`docker pull --platform linux/amd64 nginx:1.27` does what it reads as - while the
 reference alone is what gets scanned and recorded on the build, because
 `--platform` describes how the image was fetched, not which image it is. The
 reference must be the last word, which is where docker wants it anyway.
@@ -1499,7 +1561,7 @@ export SBOM_INGEST_TOKEN=<from Admin -> Ingest tokens>
 python scripts/scan_images.py
 ```
 
-Standard library only — no `pip install` — so it runs on a locked-down machine.
+Standard library only - no `pip install` - so it runs on a locked-down machine.
 It needs Python 3.8+, `docker`, and `syft` on PATH.
 
 | Flag | Effect |
@@ -1512,25 +1574,25 @@ It needs Python 3.8+, `docker`, and `syft` on PATH.
 
 The results are ordinary scans, indistinguishable from a pipeline's: current-build
 components, a diff against the previous run, vulnerability findings, and inclusion
-in the dashboard and reports. Re-running is the intended usage — each run adds a
+in the dashboard and reports. Re-running is the intended usage - each run adds a
 build, and the CI endpoint accepts an unchanged SBOM without complaint, so an image
 that has not moved records another build rather than failing.
 
 **A key that names no existing application creates one**, as `pending_confirmation`
 in Admin → Pending. That is how onboarding is meant to work, but it also means a
-typo makes a second application instead of an error — worth checking that queue
+typo makes a second application instead of an error - worth checking that queue
 after a first run. Names match case-insensitively, so `Checkout-Web` and
 `checkout-web` are one application.
 
 One image failing does not stop the rest; the run reports what failed and exits
 non-zero, so a scheduled invocation is visibly broken rather than quietly
-half-done. Only 5xx and transport errors are retried — a 4xx means the request
+half-done. Only 5xx and transport errors are retried - a 4xx means the request
 itself is wrong and will be wrong again.
 
 **If an upload dies with the connection closed and no reply**, the API is rarely
 the culprit: it accepts up to `INGEST_MAX_SBOM_BYTES` (64 MB by default) and
 answers an oversized body with a 413. Silence means something in between hung up
-instead — a reverse proxy's `client_max_body_size` (the bundled nginx sets `1g`,
+instead - a reverse proxy's `client_max_body_size` (the bundled nginx sets `1g`,
 but a proxy in front of it may not), or a corporate proxy. The script names any
 proxy it is using in its header line, and `--no-proxy` bypasses it. To tell the
 script apart from the network path, post the same file by hand:
@@ -1550,11 +1612,11 @@ signed-in user; everything under `/admin` needs `role = admin`.
 
 | Route | Purpose |
 |---|---|
-| `GET /applications` | List with search, attribute filters, staleness, sorting |
+| `GET /applications` | List with search, attribute filters (`squad` and `tribe` match assignments), staleness, sorting |
 | `GET /applications/:id` | Detail, including CI aliases |
 | `GET /applications/:id/components` | Current build's packages |
-| `GET /applications/:id/scans` | Scan history, each row carrying `source` and `uploadedByEmail` |
-| `POST /applications/:id/scans` | Manual SBOM upload — see the ingestion section above |
+| `GET /applications/:id/scans` | Scan history, each row carrying `source`, `uploadedByEmail` and `vulnerabilities` (`today`, `whenReplaced`, `replacedAt`) |
+| `POST /applications/:id/scans` | Manual SBOM upload - see the ingestion section above |
 | `GET /applications/:id/removed-components` | Ever shipped, not in the current build, with last-seen build |
 | `GET /applications/:id/diff` | Compare two builds; defaults to latest vs. previous |
 | `GET /scans/:id` | Build provenance, with previous/next ids |
@@ -1571,7 +1633,7 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `GET /analytics/report` | The whole estate report as JSON (`?periodDays=7\|30\|90\|365`, plus the vulnerability filter) |
 | `GET /analytics/report.pdf` | The same report as a PDF, curl-able and date-stamped. Accepts the same filter, and prints it |
 | `GET /vuln-status` | Whether scanning is enabled, database age, sweep coverage. Readable when disabled |
-| `GET /vulnerabilities` | Estate-wide advisory search — "who is affected by CVE-X". 409 when disabled |
+| `GET /vulnerabilities` | Estate-wide advisory search - "who is affected by CVE-X". 409 when disabled |
 | `GET /vulnerabilities/:id` | One advisory's blast radius: applications and the packages carrying it |
 | `GET /applications/:id/vulnerabilities` | Findings for an application's current build, with the app/base-image split |
 | `GET /applications/:id/vulnerabilities/recommendations` | One upgrade target per vulnerable package (`scope=all\|app\|os`, `verify=true\|false`) |
@@ -1602,6 +1664,9 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `GET/POST/PATCH/DELETE /admin/squads[/:id]` | Squads |
 | `PUT /admin/squads/:id/members`, `PUT /admin/squads/:id/access` | A squad's members, and its granted groups and applications |
 | `GET/PUT /admin/users/:id/squads` | One account's squads |
+| `GET/PUT /admin/squads/settings` | Whether every squad must belong to a tribe |
+| `GET/POST/PATCH/DELETE /admin/tribes[/:id]` | Tribes |
+| `PUT /admin/tribes/:id/squads`, `PUT /admin/tribes/:id/applications` | A tribe's squads, and the projects assigned to it |
 | `GET /admin/vuln/status` | Scanner, database, schedule and coverage, reported separately |
 | `PATCH /admin/vuln/settings` | Enable/disable scanning; set the check interval |
 | `POST /admin/vuln/update` | Update the database now. 200 with `unreachable` when offline |
@@ -1617,21 +1682,23 @@ signed-in user; everything under `/admin` needs `role = admin`.
 
 **Attributes are JSONB, not columns.** `application.attributes` holds squad /
 owner / severity, described by rows in `attribute_definition`. Adding a fourth
-attribute is an admin action, not a migration. GIN-indexed for filtering.
+attribute is an admin action, not a migration. GIN-indexed for filtering. The two
+linked ones, `squad` and `tribe`, are a projection of `squad_application` and
+`tribe_application`, rewritten whenever those change; the tables are the authority.
 
 **Vulnerability findings are keyed on the package, not the build.** The consequence
 worth knowing: re-evaluating the whole estate after a database update is one pass over
 distinct components (~1m41s for 50,000) instead of one Grype run per application (~9s
 each), and every historical build is re-evaluated for free. The trade is that a scan does
-not carry a frozen record of what was known on its own scan date — `scan_vuln_summary`
+not carry a frozen record of what was known on its own scan date - `scan_vuln_summary`
 keeps per-scan severity counts for that, which also serve as the pre-aggregation the
 rankings read so they touch one row per application rather than millions of
 `scan_component` rows.
 
 **Manual upload and CI ingest are one code path, not two.** `ingest()` and
 `ingestManual()` are thin wrappers over a private `store()` that does the parsing,
-blob write, component linking and current-build pointer update. The alternative —
-a second write path for the UI — is how a platform ends up with hand-uploaded
+blob write, component linking and current-build pointer update. The alternative -
+a second write path for the UI - is how a platform ends up with hand-uploaded
 scans that are missing from search or that never became the current build, and
 those failures look fine on the page that created them and are invisible
 everywhere they matter. What differs between the two is pushed to the edges:
@@ -1642,7 +1709,7 @@ up by id, and `Provenance` carries the token name or the uploader.
 violation and recovering inside it does not work.** `resolveApplication` used to
 insert the auto-created application, catch `23505` when a concurrent build won the
 race, and re-read the winner's row. The recovering SELECT died with `25P02`
-("current transaction is aborted") and the loser got a 500 — reproducibly, 9 times
+("current transaction is aborted") and the loser got a 500 - reproducibly, 9 times
 in 10. `ON CONFLICT DO NOTHING` never raises, so the transaction stays usable. This
 is the shape to reach for anywhere a write races on a unique index; a `SAVEPOINT`
 is the other option, but it is more moving parts for the same outcome. Pinned by a
@@ -1651,7 +1718,7 @@ smoke assertion that fires both requests with `curl --parallel`.
 `scan.source` is stored explicitly rather than inferred from
 `uploaded_by_user_id IS NOT NULL`. The uploader reference is `ON DELETE SET NULL`,
 so deleting an account would otherwise silently reclassify their uploads as CI
-scans — and the whole point of the column is that a hand-uploaded build can always
+scans - and the whole point of the column is that a hand-uploaded build can always
 be identified as one.
 
 **Report output is generated server-side, from one payload.** `pdfkit` for the
@@ -1668,13 +1735,13 @@ here: exceljs imports only `v4` and calls it with no arguments, in one file that
 generates conditional-formatting ids.
 
 **Sessions, not JWT.** An admin deactivating a user has to take effect on the next
-request, which means a revocation lookup per request regardless — at which point a
+request, which means a revocation lookup per request regardless - at which point a
 JWT's only remaining advantage is gone, and it brings refresh-token complexity
 with it. Cookie values are stored as SHA-256 hashes.
 
 **Auth is behind an interface.** `AuthProvider` (`modules/auth/provider.ts`) has
-three capability flags — `canProvisionOnLogin`, `supportsPasswordReset`,
-`supportsPasswordChange` — that correspond exactly to how LDAP differs from local
+three capability flags - `canProvisionOnLogin`, `supportsPasswordReset`,
+`supportsPasswordChange` - that correspond exactly to how LDAP differs from local
 passwords. Adding LDAP means writing one class and registering it in
 `context.ts`; no route, session, or permission code changes.
 
@@ -1688,7 +1755,7 @@ remembered. A wiring test asserts the whole scope rejects anonymous callers.
 `scan.application_id` is `ON DELETE CASCADE`, so deleting the source application
 first would destroy the history the merge exists to preserve. Scans and their
 denormalised `scan_component.application_id` move together, then the destination's
-`latest_scan_id` and counters are fully recomputed rather than incremented —
+`latest_scan_id` and counters are fully recomputed rather than incremented -
 merged builds can interleave with the target's own history, so the newest scan
 overall may come from either side.
 
@@ -1703,7 +1770,7 @@ Global historical search becomes a single index scan with no join back to `scan`
 and `created_at` gives a range-partition key later without touching queries.
 
 **Raw SBOMs are content-addressed.** The blob key is derived from the SHA-256 of
-the upload, so a rebuild of unchanged code — byte-identical Syft output — stores
+the upload, so a rebuild of unchanged code - byte-identical Syft output - stores
 nothing new. It also means a blob can be shared by many scans, so deleting a scan
 must never unconditionally delete its blob.
 
@@ -1735,7 +1802,7 @@ At roughly 1000 applications building a few times a day:
   combines them into a single number, because a weighting invented by this platform would
   be carried into a meeting and acted on as though it meant something.
 - **Alerting.** No email, no webhooks. The platform is a place to look, not a thing that
-  interrupts you — consistent with there being no outbound mail anywhere in it.
+  interrupts you - consistent with there being no outbound mail anywhere in it.
 - **Elasticsearch or a search service.** Postgres with a trigram index is the
   right size for this.
 - **Email to user accounts.** No invites, notifications, or password-reset links,

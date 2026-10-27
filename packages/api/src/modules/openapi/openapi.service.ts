@@ -9,7 +9,7 @@ import { RouteCollector, type CollectedRoute } from "./route-collector.js";
  *
  * Nothing here is a list of endpoints. The paths come from Fastify, the request bodies from the
  * Zod schemas the server validates with, and the read/write marking from the same function the
- * authorisation hook calls. The only hand-written part is the prose in the catalog — so the
+ * authorisation hook calls. The only hand-written part is the prose in the catalog - so the
  * document can be wrong about what an endpoint is *for*, but not about whether it exists, what
  * it accepts, or who may call it.
  *
@@ -182,7 +182,7 @@ export function buildOpenApiDocument(
       version: options.version,
       description: [
         "The API this platform's own web interface is built on. Every screen is drawn by",
-        "calling these endpoints, so a token reaches exactly what the UI reaches — no more,",
+        "calling these endpoints, so a token reaches exactly what the UI reaches - no more,",
         "and no less.",
         "",
         "## Authenticating",
@@ -194,7 +194,7 @@ export function buildOpenApiDocument(
         "```",
         "",
         "Mint one on the **API access** page. A token acts as the account that created it, and",
-        "its permissions are resolved per request — narrowing an account's access, or disabling",
+        "its permissions are resolved per request - narrowing an account's access, or disabling",
         "it, applies to its tokens immediately.",
         "",
         "## Read and write",

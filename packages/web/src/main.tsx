@@ -34,6 +34,8 @@ import { AdminEnvironmentsPage } from "./pages/admin/AdminEnvironmentsPage.tsx";
 import { AdminAuthenticationPage } from "./pages/admin/AdminAuthenticationPage.tsx";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage.tsx";
 import { AdminSquadsPage } from "./pages/admin/AdminSquadsPage.tsx";
+import { AdminTribesPage } from "./pages/admin/AdminTribesPage.tsx";
+import { AdminAccessLayout, AdminScannersLayout, MovedTo } from "./pages/admin/AdminSections.tsx";
 import { AdminVulnerabilitiesPage } from "./pages/admin/AdminVulnerabilitiesPage.tsx";
 import { AdminMaliciousPage } from "./pages/admin/AdminMaliciousPage.tsx";
 import { AdvisoryDetailPage, VulnerabilitiesPage } from "./pages/VulnerabilitiesPage.tsx";
@@ -125,7 +127,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/search" element={<ComponentSearchPage />} />
               {/*
                 A saved package list. Its own route rather than a query param
-                because this is the shareable form of a bulk search — the list
+                because this is the shareable form of a bulk search - the list
                 itself travels in a POST body and has no other address.
               */}
               <Route path="/search/list/:id" element={<ComponentSearchPage mode="list" />} />
@@ -142,7 +144,7 @@ createRoot(document.getElementById("root")!).render(
 
               {/*
                 Nested under RequireAuth so an admin with a temporary password is
-                still held on the change-password screen — the admin panel must
+                still held on the change-password screen - the admin panel must
                 not be the one way around that gate.
               */}
               <Route
@@ -156,9 +158,17 @@ createRoot(document.getElementById("root")!).render(
                 <Route index element={<Navigate to="/admin/applications" replace />} />
                 <Route path="applications" element={<AdminApplicationsPage />} />
                 <Route path="pending" element={<AdminPendingPage />} />
-                <Route path="groups" element={<AdminGroupsPage />} />
-                <Route path="users" element={<AdminUsersPage />} />
-                <Route path="squads" element={<AdminSquadsPage />} />
+                <Route path="access" element={<AdminAccessLayout />}>
+                  <Route index element={<Navigate to="/admin/access/users" replace />} />
+                  <Route path="users" element={<AdminUsersPage />} />
+                  <Route path="tribes" element={<AdminTribesPage />} />
+                  <Route path="squads" element={<AdminSquadsPage />} />
+                  <Route path="groups" element={<AdminGroupsPage />} />
+                </Route>
+                {/* Where these lived before Access grouped them. Kept as redirects: bookmarked. */}
+                <Route path="users" element={<MovedTo to="/admin/access/users" />} />
+                <Route path="squads" element={<MovedTo to="/admin/access/squads" />} />
+                <Route path="groups" element={<MovedTo to="/admin/access/groups" />} />
                 <Route path="authentication" element={<AdminAuthenticationPage />} />
                 <Route path="environments" element={<AdminEnvironmentsPage />} />
                 <Route path="attributes" element={<AdminAttributesPage />} />
@@ -171,8 +181,13 @@ createRoot(document.getElementById("root")!).render(
                   and a 404 on a path that worked yesterday reads as a broken deployment.
                 */}
                 <Route path="settings" element={<Navigate to="/admin/configuration" replace />} />
-                <Route path="vulnerabilities" element={<AdminVulnerabilitiesPage />} />
-                <Route path="malicious" element={<AdminMaliciousPage />} />
+                <Route path="scanners" element={<AdminScannersLayout />}>
+                  <Route index element={<Navigate to="/admin/scanners/vulnerabilities" replace />} />
+                  <Route path="vulnerabilities" element={<AdminVulnerabilitiesPage />} />
+                  <Route path="malicious" element={<AdminMaliciousPage />} />
+                </Route>
+                <Route path="vulnerabilities" element={<MovedTo to="/admin/scanners/vulnerabilities" />} />
+                <Route path="malicious" element={<MovedTo to="/admin/scanners/malicious" />} />
                 <Route path="audit" element={<AdminAuditPage />} />
                 <Route path="errors" element={<AdminErrorsPage />} />
               </Route>

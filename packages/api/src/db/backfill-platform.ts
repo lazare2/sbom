@@ -17,7 +17,7 @@ import { closeDb, getDb } from "./client.js";
  * Idempotent and resumable. Only touches scans where `os_name IS NULL AND
  * runtimes IS NULL`, so re-running after an interruption picks up where it
  * stopped, and a scan whose SBOM genuinely reveals no platform is marked with an
- * empty runtimes array rather than left null — otherwise every run would
+ * empty runtimes array rather than left null - otherwise every run would
  * reconsider the same distroless images forever.
  */
 
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
       try {
         raw = await blobStore.get(row.sbom_blob_key);
       } catch {
-        // The blob is gone — trimmed by a retention sweep, most likely. Mark the
+        // The blob is gone - trimmed by a retention sweep, most likely. Mark the
         // scan as processed with an empty platform so the loop terminates
         // instead of selecting this row on every pass forever.
         await markEmpty(row.id);

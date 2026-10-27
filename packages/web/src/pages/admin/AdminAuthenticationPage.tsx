@@ -132,7 +132,7 @@ function SingleSignOnCard() {
     <Card>
       <CardHeader
         title="Single sign-on (OpenID Connect)"
-        subtitle="Works with any OpenID Connect provider — Microsoft Entra ID, Keycloak, Okta — because every endpoint is read from the issuer's own discovery document."
+        subtitle="Works with any OpenID Connect provider - Microsoft Entra ID, Keycloak, Okta - because every endpoint is read from the issuer's own discovery document."
       />
 
       {settings.isLoading ? (
@@ -151,7 +151,7 @@ function SingleSignOnCard() {
           <FormRow
             label="Issuer URL"
             htmlFor="oidc-issuer"
-            hint="For Entra ID: https://login.microsoftonline.com/<tenant-id>/v2.0 — no trailing slash."
+            hint="For Entra ID: https://login.microsoftonline.com/<tenant-id>/v2.0 - no trailing slash."
           >
             <TextInput
               id="oidc-issuer"
@@ -171,7 +171,7 @@ function SingleSignOnCard() {
             hint={
               stored?.clientSecretConfigured
                 ? "A secret is stored. Leave this blank to keep it; it is never shown again."
-                : "The secret value shown once at creation — not the secret ID beside it."
+                : "The secret value shown once at creation - not the secret ID beside it."
             }
           >
             <TextInput
@@ -292,7 +292,7 @@ function SingleSignOnCard() {
  *
  * The server builds the URI it sends from `PUBLIC_URL`; this page knows the origin the browser
  * is actually on. When those disagree the provider will be handed a URI nobody registered, and
- * the resulting failure appears on the provider's own error page — so the disagreement is worth
+ * the resulting failure appears on the provider's own error page - so the disagreement is worth
  * more than either value shown alone.
  */
 function Verdict({
@@ -340,7 +340,7 @@ function Verdict({
             <Mono>{verdict.issuer}</Mono>
           </dd>
           <dt className="text-text-faint">Signing keys</dt>
-          <dd className="text-text-muted">{verdict.jwksKeyCount ?? "—"}</dd>
+          <dd className="text-text-muted">{verdict.jwksKeyCount ?? " - "}</dd>
           <dt className="text-text-faint">Credentials</dt>
           <dd className="text-text-muted">
             {verdict.credentialsAccepted === true

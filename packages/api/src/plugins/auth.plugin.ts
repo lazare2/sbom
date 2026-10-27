@@ -141,8 +141,8 @@ export const authPlugin = fp(
 
     /**
      * Enforced server-side rather than only in the UI. An admin-issued password
-     * has, by construction, been seen by someone other than its owner — often
-     * pasted into a chat — so a session opened with it must not be able to read
+     * has, by construction, been seen by someone other than its owner - often
+     * pasted into a chat - so a session opened with it must not be able to read
      * the estate just by skipping past the client-side redirect.
      */
     async function requireChangedPassword(request: FastifyRequest, reply: FastifyReply): Promise<void> {

@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Loads the bundled container images, generates per-deployment secrets on the
-    first run, and brings the stack up. Safe to run repeatedly — loading images
+    first run, and brings the stack up. Safe to run repeatedly - loading images
     and starting an already-running stack are both idempotent.
 
     Requires only Docker. No internet, no Node, no PostgreSQL install.
@@ -54,7 +54,7 @@ function Invoke-Docker {
         else {
             # Two things are going on in this one line.
             #
-            # `2>&1 | ForEach-Object { Write-Host $_ }` — docker writes its
+            # `2>&1 | ForEach-Object { Write-Host $_ }` - docker writes its
             # normal progress ("Container ... Started") to stderr, and Windows
             # PowerShell renders anything a native command puts on stderr as a
             # red NativeCommandError. Left alone, a completely successful start
@@ -62,7 +62,7 @@ function Invoke-Docker {
             # stringifying each record prints them as the ordinary status lines
             # they are.
             #
-            # Write-Host rather than returning them — a bare `& docker` would
+            # Write-Host rather than returning them - a bare `& docker` would
             # put every output line on this function's output stream, so the
             # caller would receive an array of strings with the exit code
             # appended instead of the integer it compares against. `-ne 0` on
@@ -147,7 +147,7 @@ $envPath = Join-Path $PSScriptRoot ".env"
 function New-Secret {
     param([int]$Length = 44, [switch]$Hex)
 
-    # Cryptographic RNG, not Get-Random — these are a session-signing key and a
+    # Cryptographic RNG, not Get-Random - these are a session-signing key and a
     # CI credential, and Get-Random is a seeded PRNG that must never be used
     # for either.
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -170,7 +170,7 @@ function New-Secret {
 }
 
 if (-not (Test-Path $envPath)) {
-    Write-Step "First run — generating secrets for this deployment"
+    Write-Step "First run - generating secrets for this deployment"
 
     $sessionSecret = New-Secret -Length 64
     $secretsKey = New-Secret -Length 48
@@ -217,7 +217,7 @@ LOG_LEVEL=info
 
     $credentials = Join-Path $PSScriptRoot "CREDENTIALS.txt"
     @"
-SBOM Platform — generated $(Get-Date -Format "yyyy-MM-dd HH:mm")
+SBOM Platform - generated $(Get-Date -Format "yyyy-MM-dd HH:mm")
 
 Web UI          http://localhost:$Port
 Sign in         admin@sbom.local

@@ -5,14 +5,24 @@ import type {
   SquadDetail,
   SquadGrant,
   SquadMember,
+  SquadSettings,
   SquadSummary,
+  TeamRef,
   UpdateSquad,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { squad } from "../../db/schema.js";
-import { ConflictError, isPgError, NotFoundError, PG_UNIQUE_VIOLATION } from "../../lib/errors.js";
+import {
+  ConflictError,
+  isPgError,
+  NotFoundError,
+  PG_UNIQUE_VIOLATION,
+  ValidationError,
+} from "../../lib/errors.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 import type { Actor, AuditService } from "../admin/audit.service.js";
+import { SQUAD_APPLICATIONS } from "./reach.js";
+import type { TeamAttributes } from "./team-attributes.js";
 
 /**
  * Squads: who is on which team, and what each team is granted.
@@ -26,7 +36,17 @@ import type { Actor, AuditService } from "../admin/audit.service.js";
  * `EnvironmentService.accessFor`, not here. This service only keeps the rows.
  */
 export class SquadsService {
-  constructor(private readonly deps: { db: Database; audit: AuditService }) {}
+  constructor(
+    private readonly deps: {
+      db: Database;
+      audit: AuditService;
+      teams: TeamAttributes;
+      settings: {
+        getSquadSettings(): Promise<SquadSettings>;
+        updateSquadSettings(next: SquadSettings): Promise<SquadSettings>;
+      };
+    },
+  ) {}
 
   async list(): Promise<SquadSummary[]> {
     const rows = await this.deps.db.execute<Row<SquadRowQuery>>(sql`
@@ -96,16 +116,30 @@ export class SquadsService {
   }
 
   async create(input: CreateSquad, actor: Actor): Promise<SquadDetail> {
+    const tribeIds = input.tribeIds ?? [];
+    await this.assertTribeRule(tribeIds);
+    await this.assertKnown("tribe", tribeIds);
+
     let created;
     try {
-      [created] = await this.deps.db
-        .insert(squad)
-        .values({
-          name: input.name,
-          email: input.email ?? null,
-          description: input.description ?? null,
-        })
-        .returning();
+      created = await this.deps.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(squad)
+          .values({
+            name: input.name,
+            email: input.email ?? null,
+            description: input.description ?? null,
+          })
+          .returning();
+        if (!row) throw new Error("insert returned no row");
+        for (const tribeId of tribeIds) {
+          await tx.execute(sql`
+            INSERT INTO squad_tribe (squad_id, tribe_id) VALUES (${row.id}::uuid, ${tribeId}::uuid)
+            ON CONFLICT DO NOTHING
+          `);
+        }
+        return row;
+      });
     } catch (err) {
       // The case-insensitive index is the authority, so two admins racing get one squad and
       // one readable 409 rather than a 500.
@@ -114,14 +148,12 @@ export class SquadsService {
       }
       throw err;
     }
-    if (!created) throw new Error("insert returned no row");
-
     await this.deps.audit.record({
       actor,
       action: "squad.create",
       targetType: "squad",
       targetId: created.id,
-      metadata: { name: created.name, email: created.email },
+      metadata: { name: created.name, email: created.email, tribeIds },
     });
 
     return this.get(created.id);
@@ -129,6 +161,11 @@ export class SquadsService {
 
   async update(id: string, input: UpdateSquad, actor: Actor): Promise<SquadDetail> {
     const existing = await this.require(id);
+    const tribesBefore = (await this.tribesOf(id)).map((t) => t.id);
+    if (input.tribeIds !== undefined) {
+      await this.assertTribeRule(input.tribeIds);
+      await this.assertKnown("tribe", input.tribeIds);
+    }
 
     const patch: Partial<typeof squad.$inferInsert> = { updatedAt: new Date() };
     if (input.name !== undefined) patch.name = input.name;
@@ -138,14 +175,35 @@ export class SquadsService {
 
     let updated;
     try {
-      [updated] = await this.deps.db.update(squad).set(patch).where(eq(squad.id, id)).returning();
+      updated = await this.deps.db.transaction(async (tx) => {
+        const [row] = await tx.update(squad).set(patch).where(eq(squad.id, id)).returning();
+        if (!row) throw new NotFoundError("Squad");
+        if (input.tribeIds !== undefined) {
+          await tx.execute(sql`
+            DELETE FROM squad_tribe
+             WHERE squad_id = ${id}::uuid
+               AND NOT (tribe_id = ANY(${sql.param(input.tribeIds)}::uuid[]))
+          `);
+          for (const tribeId of input.tribeIds) {
+            await tx.execute(sql`
+              INSERT INTO squad_tribe (squad_id, tribe_id) VALUES (${id}::uuid, ${tribeId}::uuid)
+              ON CONFLICT DO NOTHING
+            `);
+          }
+        }
+        return row;
+      });
     } catch (err) {
       if (isPgError(err, PG_UNIQUE_VIOLATION)) {
         throw new ConflictError(`A squad named "${input.name}" already exists.`);
       }
       throw err;
     }
-    if (!updated) throw new NotFoundError("Squad");
+
+    // A rename changes the name every assigned application's "squad" attribute shows.
+    if (updated.name !== existing.name) {
+      await this.deps.teams.refresh(await this.deps.teams.applicationsOf("squad", id));
+    }
 
     await this.deps.audit.record({
       actor,
@@ -153,8 +211,12 @@ export class SquadsService {
       targetType: "squad",
       targetId: id,
       metadata: {
-        from: { name: existing.name, email: existing.email },
-        to: { name: updated.name, email: updated.email },
+        from: { name: existing.name, email: existing.email, tribeIds: tribesBefore },
+        to: {
+          name: updated.name,
+          email: updated.email,
+          tribeIds: input.tribeIds ?? tribesBefore,
+        },
       },
     });
 
@@ -182,7 +244,10 @@ export class SquadsService {
       },
     });
 
+    const assigned = await this.deps.teams.applicationsOf("squad", id);
     await this.deps.db.delete(squad).where(eq(squad.id, id));
+    // The cascade removed the assignments; the attributes that named this squad follow.
+    await this.deps.teams.refresh(assigned);
     return { members: existing.members.length };
   }
 
@@ -250,6 +315,13 @@ export class SquadsService {
       }
     });
 
+    // Direct grants are what an application's "squad" attribute lists, so every application
+    // that gained or lost one is rewritten.
+    await this.deps.teams.refresh([
+      ...existing.applications.map((a) => a.id),
+      ...input.applicationIds,
+    ]);
+
     const after = await this.get(id);
     await this.deps.audit.record({
       actor,
@@ -314,7 +386,46 @@ export class SquadsService {
     });
   }
 
+  async getSettings(): Promise<SquadSettings> {
+    return this.deps.settings.getSquadSettings();
+  }
+
+  async updateSettings(next: SquadSettings, actor: Actor): Promise<SquadSettings> {
+    const before = await this.deps.settings.getSquadSettings();
+    const saved = await this.deps.settings.updateSquadSettings(next);
+    await this.deps.audit.record({
+      actor,
+      action: "squad.settings_update",
+      targetType: "setting",
+      targetId: null,
+      metadata: { from: before, to: saved },
+    });
+    return saved;
+  }
+
   // -------------------------------------------------------------------------
+
+  /**
+   * Refuses a squad with no tribe while an administrator requires one. Checked on create, and
+   * on any save that changes the squad's tribes; squads that predate the rule are left alone
+   * until somebody edits their tribes.
+   */
+  private async assertTribeRule(tribeIds: readonly string[]): Promise<void> {
+    if (tribeIds.length > 0) return;
+    if (!(await this.deps.settings.getSquadSettings()).requireTribe) return;
+    throw new ValidationError("Every squad must belong to a tribe", {
+      tribeIds: ["Choose at least one tribe. This is required under Admin → Access → Squads."],
+    });
+  }
+
+  private async tribesOf(id: string): Promise<TeamRef[]> {
+    const rows = await this.deps.db.execute<Row<{ id: string; name: string }>>(sql`
+      SELECT t.id, t.name FROM squad_tribe st JOIN tribe t ON t.id = st.tribe_id
+       WHERE st.squad_id = ${id}::uuid
+       ORDER BY lower(t.name)
+    `);
+    return rowsOf(rows);
+  }
 
   private async require(id: string) {
     const [row] = await this.deps.db.select().from(squad).where(eq(squad.id, id)).limit(1);
@@ -336,7 +447,7 @@ export class SquadsService {
    * which is the same reason the account-access routes only count.
    */
   private async assertKnown(
-    table: "user" | "squad" | "application" | "application_group",
+    table: "user" | "squad" | "tribe" | "application" | "application_group",
     ids: readonly string[],
   ): Promise<void> {
     if (ids.length === 0) return;
@@ -350,7 +461,9 @@ export class SquadsService {
           ? "User"
           : table === "squad"
             ? "Squad"
-            : table === "application"
+            : table === "tribe"
+              ? "Tribe"
+              : table === "application"
               ? "Application"
               : "Group",
       );
@@ -364,16 +477,22 @@ export class SquadsService {
  * The summary columns, reachable count included.
  *
  * Reachable is counted rather than summed: a squad granted a group and, directly, an application
- * already in it reaches one application, not two.
+ * already in it reaches one application, not two. Applications assigned to the squad's tribes
+ * count too, since every member sees them.
  */
 const SUMMARY_COLUMNS = sql`
   s.id, s.name, s.email, s.description, s.created_at, s.updated_at,
+  COALESCE((
+    SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY lower(t.name))
+      FROM squad_tribe st JOIN tribe t ON t.id = st.tribe_id
+     WHERE st.squad_id = s.id
+  ), '[]'::json) AS tribes,
   (SELECT count(*) FROM squad_member sm WHERE sm.squad_id = s.id)::int AS member_count,
   (SELECT count(*) FROM squad_group sg WHERE sg.squad_id = s.id)::int AS group_count,
   (SELECT count(*) FROM squad_application sa WHERE sa.squad_id = s.id)::int AS application_count,
   (
     SELECT count(DISTINCT x.application_id) FROM (
-      SELECT sa.application_id FROM squad_application sa WHERE sa.squad_id = s.id
+      SELECT sa.application_id FROM ${SQUAD_APPLICATIONS} sa WHERE sa.squad_id = s.id
       UNION
       SELECT gm.application_id
         FROM squad_group sg JOIN application_group_member gm ON gm.group_id = sg.group_id
@@ -386,6 +505,7 @@ interface SquadRowQuery {
   name: string;
   email: string | null;
   description: string | null;
+  tribes: TeamRef[] | null;
   created_at: Date | string;
   updated_at: Date | string;
   member_count: number | string;
@@ -407,6 +527,7 @@ function toSummary(row: SquadRowQuery): SquadSummary {
     name: row.name,
     email: row.email,
     description: row.description,
+    tribes: row.tribes ?? [],
     memberCount: Number(row.member_count),
     groupCount: Number(row.group_count),
     applicationCount: Number(row.application_count),

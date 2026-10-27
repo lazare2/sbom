@@ -4,8 +4,8 @@ import type { ScannablePackage } from "./grype-output.js";
  * Translating this platform's packages into the component identifiers Xray understands.
  *
  * Grype is handed a CycloneDX document and matches purls directly. Xray's graph scan takes a
- * flat list of its own coordinate strings — `npm://lodash:4.17.15`, `gav://group:artifact:v`
- * — so every package has to be rewritten, and a package that cannot be rewritten cannot be
+ * flat list of its own coordinate strings - `npm://lodash:4.17.15`, `gav://group:artifact:v`
+ * - so every package has to be rewritten, and a package that cannot be rewritten cannot be
  * assessed at all.
  *
  * ## The rule that matters: unmapped is not clean
@@ -16,7 +16,7 @@ import type { ScannablePackage } from "./grype-output.js";
  * is indistinguishable from a package that was checked and found safe.
  *
  * On a typical container image the packages at risk of being dropped are the operating-system
- * ones, and they are roughly two thirds of the component list — the exact figure from the
+ * ones, and they are roughly two thirds of the component list - the exact figure from the
  * Xray-generated SBOM this was designed against was 413 deb packages out of 613 components.
  *
  * ## The schemes are a best-known mapping, not a guarantee
@@ -33,7 +33,7 @@ import type { ScannablePackage } from "./grype-output.js";
  *
  * Only ecosystems with a known coordinate form appear. Everything else is deliberately
  * absent rather than guessed, because a wrong scheme and an unsupported one look identical
- * from here — both return nothing — and only one of them is worth fixing in this table.
+ * from here - both return nothing - and only one of them is worth fixing in this table.
  */
 const SCHEMES: Record<string, string> = {
   /*
@@ -185,7 +185,7 @@ export function toXrayCoordinate(pkg: ScannablePackage): string | null {
 
       The architecture is a segment, not a qualifier. It comes from the purl's `arch`, which
       is why this module keeps qualifiers at all. Without one the identifier cannot be built
-      correctly, so the package is not submitted — an OS package assessed against the wrong
+      correctly, so the package is not submitted - an OS package assessed against the wrong
       architecture is worse than one honestly marked unassessed.
 
       The distribution is deliberately omitted even though Syft supplies something for it.
@@ -243,8 +243,8 @@ export function mappableEcosystems(): string[] {
  * Known-vulnerable packages, one per ecosystem, used to ask a specific Xray deployment what
  * it actually covers.
  *
- * This is the manual database-health check from the original investigation — Log4Shell and a
- * vulnerable lodash — generalised into something the platform performs for itself. Each entry
+ * This is the manual database-health check from the original investigation - Log4Shell and a
+ * vulnerable lodash - generalised into something the platform performs for itself. Each entry
  * is a package with long-standing, widely published advisories, chosen so that "no findings"
  * is far more likely to mean "this ecosystem is not covered" than "this version is fine".
  *

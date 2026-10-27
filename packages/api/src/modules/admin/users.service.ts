@@ -22,12 +22,13 @@ import { hashPassword } from "../auth/password.js";
 import type { SessionService } from "../auth/session.service.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 import type { Actor, AuditService } from "./audit.service.js";
+import { SQUAD_APPLICATIONS } from "../squads/reach.js";
 
 /**
  * Sort clause for the admin users table.
  *
  * `u.id` is the unique tail. Email is unique in the database, but only case-insensitively
- * via an index — `lower(u.email)` is not itself declared unique, so it is not safe to rely
+ * via an index - `lower(u.email)` is not itself declared unique, so it is not safe to rely
  * on as a total order.
  */
 function userOrderBy(sortBy: ListUsersQuery["sortBy"], dir: SortDirection): SQL {
@@ -64,8 +65,8 @@ function userOrderBy(sortBy: ListUsersQuery["sortBy"], dir: SortDirection): SQL 
  * Admin user management.
  *
  * Two invariants are enforced here and nowhere else, both of them about not
- * being able to lock everyone out. With no self-service password reset — user
- * emails are identifiers, not mailboxes — an estate with zero usable admins has
+ * being able to lock everyone out. With no self-service password reset - user
+ * emails are identifiers, not mailboxes - an estate with zero usable admins has
  * no recovery path short of hand-editing the database, so the service refuses
  * to create that state:
  *
@@ -131,7 +132,7 @@ export class AdminUsersService {
    * Create an account and return its password exactly once.
    *
    * The plaintext is never stored. If the admin loses it before handing it over,
-   * the fix is another reset — which is cheap, and far better than a system that
+   * the fix is another reset - which is cheap, and far better than a system that
    * can show you a password it should not still know.
    */
   /**
@@ -360,7 +361,7 @@ export class AdminUsersService {
    * The scenario this exists for happened during this platform's own rollout: the directory
    * became unreachable from the server, and every sign-in through it failed for reasons that
    * took three rounds of diagnosis to find. If every administrator had been directory-backed
-   * by then, there would have been no way into the admin screens to read the diagnosis — the
+   * by then, there would have been no way into the admin screens to read the diagnosis - the
    * one screen that could explain the outage would have been behind the outage.
    *
    * So one active administrator must always keep a password. It is the break-glass account,
@@ -386,7 +387,7 @@ export class AdminUsersService {
     if (Number(rowsOf(rows)[0]?.count ?? 0) === 0) {
       throw new BadRequestError(
         `"${target.email}" is the only active administrator who can sign in with a password. ` +
-          "Keep one, or an outage at the directory locks everybody out of the admin screens — " +
+          "Keep one, or an outage at the directory locks everybody out of the admin screens - " +
           "including the page that would explain the outage. Give another administrator a local " +
           "password first.",
       );
@@ -495,7 +496,7 @@ export class AdminUsersService {
 
     if (remaining === 0) {
       throw new BadRequestError(
-        `"${target.email}" is the only active administrator. Promote another account first — ` +
+        `"${target.email}" is the only active administrator. Promote another account first - ` +
           "there is no self-service password recovery, so an estate with no admin cannot be recovered from the UI.",
       );
     }
@@ -517,7 +518,7 @@ const HAS_ACCESS: SQL = sql`(
     SELECT 1 FROM squad_member sm
      WHERE sm.user_id = u.id
        AND (EXISTS (SELECT 1 FROM squad_group sg WHERE sg.squad_id = sm.squad_id)
-            OR EXISTS (SELECT 1 FROM squad_application sa WHERE sa.squad_id = sm.squad_id))
+            OR EXISTS (SELECT 1 FROM ${SQUAD_APPLICATIONS} sa WHERE sa.squad_id = sm.squad_id))
   )
   OR (
     EXISTS (SELECT 1 FROM user_environment ue WHERE ue.user_id = u.id)

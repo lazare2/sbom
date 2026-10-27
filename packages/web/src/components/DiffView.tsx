@@ -98,7 +98,7 @@ export function DiffView({ diff }: { diff: ScanDiff }) {
         <Card className="mb-4">
           <CardHeader
             title={`Removed (${formatNumber(diff.removed.length)})`}
-            subtitle="Present in the earlier build, gone from the later one — and not replaced by another version."
+            subtitle="Present in the earlier build, gone from the later one - and not replaced by another version."
           />
           <TableWrap>
             <Table>
@@ -230,7 +230,7 @@ export function DiffView({ diff }: { diff: ScanDiff }) {
                       <EcosystemBadge ecosystem={c.ecosystem} />
                     </Td>
                     <Td className="max-w-[520px] truncate" title={c.purl ?? undefined}>
-                      {c.purl ? <Mono>{c.purl}</Mono> : <span className="text-text-faint">—</span>}
+                      {c.purl ? <Mono>{c.purl}</Mono> : <span className="text-text-faint">-</span>}
                     </Td>
                   </Tr>
                 ))}
@@ -272,7 +272,7 @@ export function PackageLink({ name }: { name: string }) {
 }
 
 /**
- * "last seen in build #N, on date D" — the exact phrasing the requirement asks
+ * "last seen in build #N, on date D" - the exact phrasing the requirement asks
  * for, rendered as a link to that build's full component list.
  */
 export function LastSeen({
@@ -284,7 +284,7 @@ export function LastSeen({
   buildNumber: string | null;
   at: string;
 }) {
-  if (!scanId) return <span className="text-text-faint">—</span>;
+  if (!scanId) return <span className="text-text-faint">-</span>;
   return (
     <span className="flex flex-wrap items-center gap-1.5 text-xs">
       <Link to={`/scans/${scanId}`} className="text-accent hover:underline">

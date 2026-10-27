@@ -130,7 +130,7 @@ export function MaliciousPage() {
             title="Detection is switched off"
             hint={
               isAdmin
-                ? "Nothing has been checked, so this page cannot tell you whether the estate is affected. Enable it in Admin → Malicious packages."
+                ? "Nothing has been checked, so this page cannot tell you whether the estate is affected. Enable it in Admin → Scanners → Malicious packages."
                 : "Nothing has been checked, so this page cannot tell you whether the estate is affected. An administrator can enable it."
             }
           />
@@ -335,7 +335,7 @@ export function MaliciousPage() {
                         className="text-text-muted"
                         title={finding.firstShippedAt ? formatDateTime(finding.firstShippedAt) : undefined}
                       >
-                        {finding.firstShippedAt ? formatRelative(finding.firstShippedAt) : "—"}
+                        {finding.firstShippedAt ? formatRelative(finding.firstShippedAt) : " - "}
                       </Td>
                       <Td>
                         {finding.acknowledgement ? (

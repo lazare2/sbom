@@ -162,6 +162,13 @@
       "when": 1793027751920,
       "tag": "0022_squads_and_fix_recommendations",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793089665908,
+      "tag": "0023_tribes_required_attributes_scan_history",
+      "breakpoints": true
     }
   ]
 }

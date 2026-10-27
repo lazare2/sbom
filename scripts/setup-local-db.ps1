@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Run this once before `npm run db:migrate`. It prompts for the PostgreSQL
-    superuser password (normally set during installation) and does not store it —
+    superuser password (normally set during installation) and does not store it -
     the password is held only for the lifetime of this process and passed to psql
     through the PGPASSWORD environment variable of the child process.
 

@@ -172,7 +172,7 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 
 /**
  * Wide tables scroll inside their own container so the page body never scrolls
- * horizontally — a dependency table with long purls is easily 1400px wide.
+ * horizontally - a dependency table with long purls is easily 1400px wide.
  */
 export function TableWrap({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto">{children}</div>;
@@ -203,7 +203,7 @@ export function Th({
       /*
         `aria-sort` belongs on the header cell, not on the button inside it. It is only
         defined for `columnheader`/`rowheader`, so on a `<button>` it is invalid ARIA that
-        assistive technology ignores outright — the caret was communicating the state to
+        assistive technology ignores outright - the caret was communicating the state to
         sighted users and to nobody else. Set here it is announced with the column name, and
         it is also the one attribute a test can read to assert the rows and the arrow agree.
 
@@ -331,7 +331,7 @@ export function Button({
   size?: "sm" | "md";
   /**
    * Id of a form this button submits. Lets a modal's footer button submit a
-   * form in the modal body — they are siblings in the DOM, not ancestor and
+   * form in the modal body - they are siblings in the DOM, not ancestor and
    * descendant, so without this the button could not submit anything.
    */
   form?: string;
@@ -486,7 +486,7 @@ export function Pagination({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-base px-4 py-2.5">
       <p className="nums text-xs text-text-muted">
-        {first.toLocaleString()}–{last.toLocaleString()} of {total.toLocaleString()}
+        {first.toLocaleString()}-{last.toLocaleString()} of {total.toLocaleString()}
         {isFetching ? <span className="ml-2 text-text-faint">updating…</span> : null}
       </p>
       <div className="flex items-center gap-1.5">
@@ -576,7 +576,7 @@ export function FormRow({
  *
  * Using the platform element rather than a div with a high z-index gets focus
  * trapping, the top layer, inert background content, and Escape-to-close from
- * the browser — all things a hand-rolled overlay gets subtly wrong.
+ * the browser - all things a hand-rolled overlay gets subtly wrong.
  */
 export function Modal({
   open,
@@ -600,7 +600,7 @@ export function Modal({
    *
    * Not `[open]`-driven: the early return below means this component only ever
    * exists while open, so an effect keyed on `open` could never observe the
-   * false case — it would unmount first, leaving a still-open <dialog> to be
+   * false case - it would unmount first, leaving a still-open <dialog> to be
    * removed from the browser's top layer without ever being closed. Closing in
    * the cleanup is the only place that reliably runs.
    *
@@ -624,19 +624,19 @@ export function Modal({
       ref={ref}
       /*
        * Escape fires `cancel`, and preventing the default keeps the browser from
-       * closing the dialog behind React's back — `onClose` unmounts it instead,
+       * closing the dialog behind React's back - `onClose` unmounts it instead,
        * and the cleanup above performs the actual close.
        *
        * The native `close` event is deliberately NOT bound. Every way this dialog
        * can close is already React-initiated (Escape via `cancel`, the × button,
        * the footer buttons, a successful submit), so listening for `close` adds no
-       * information — and it actively breaks a dialog that mounts already open.
+       * information - and it actively breaks a dialog that mounts already open.
        * `HTMLDialogElement.close()` queues its event rather than firing it
        * synchronously, and StrictMode double-invokes mount effects, so the cleanup
        * above runs once while the element is still connected: that queued `close`
        * would then arrive at a dialog React has just re-opened and tear down the
        * state that opened it. The symptom is a dialog that appears and vanishes in
-       * the same frame, and only for callers that mount it open — which is why it
+       * the same frame, and only for callers that mount it open - which is why it
        * was reachable from "Accept risk" and from nowhere else.
        */
       onCancel={(e) => {
@@ -673,7 +673,7 @@ export function Modal({
 /**
  * Destructive-action confirmation that requires typing the target's name.
  *
- * Reserved for operations that destroy retained history — deleting an
+ * Reserved for operations that destroy retained history - deleting an
  * application takes its entire scan record with it. A plain "are you sure"
  * gets clicked through; typing the name does not happen by accident.
  */
@@ -773,7 +773,7 @@ export function SecretReveal({ label, value, note }: { label: string; value: str
  * Inline error for a form submission, distinct from the page-level ErrorBanner.
  *
  * The field-level reasons matter more than the summary. A rejected body arrives as
- * "Body validation failed" plus a map of which field failed and why — and rendering only the
+ * "Body validation failed" plus a map of which field failed and why - and rendering only the
  * summary throws away the entire useful half of a message the API went to the trouble of
  * writing. That is what made a rejected SMTP host and a rejected Xray URL both read as an
  * unexplained refusal, with the actual sentence sitting unread in the response.
@@ -805,7 +805,7 @@ export function FormError({ error }: { error: unknown }) {
   );
 }
 
-/** Words that look wrong in sentence case. Only acronyms — see `humaniseFieldPath`. */
+/** Words that look wrong in sentence case. Only acronyms - see `humaniseFieldPath`. */
 const ACRONYMS = new Set(["url", "id", "api", "smtp", "tls", "ssl", "ca", "cve", "sbom", "ci"]);
 
 /**
@@ -814,7 +814,7 @@ const ACRONYMS = new Set(["url", "id", "api", "smtp", "tls", "ssl", "ca", "cve",
  * Deliberately not a map of field names to labels: one that has to be extended for every new
  * field degrades to a raw path for the newest one, which is the case where a reader most
  * needs help. Acronyms are a closed set rather than a growing list, so they are safe to
- * enumerate — and a missing one merely reads as `Url`, not as `connection.baseUrl`.
+ * enumerate - and a missing one merely reads as `Url`, not as `connection.baseUrl`.
  */
 function humaniseFieldPath(path: string): string {
   const leaf = path.split(".").pop() ?? path;

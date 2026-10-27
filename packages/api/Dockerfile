@@ -8,7 +8,7 @@
 #
 # Copied from the official image rather than fetched by a script: the image digest is
 # the integrity check, so there is no checksum list to keep current and no network call
-# inside the build. The vulnerability DATABASE is deliberately not included — it is
+# inside the build. The vulnerability DATABASE is deliberately not included - it is
 # 1.9 GB expanded and Anchore rebuilds it daily, so a baked copy would be stale before
 # anyone pulled the image. It lives on a volume and is fetched at runtime.
 FROM anchore/grype:v0.115.0 AS grype

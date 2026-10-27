@@ -9,8 +9,8 @@
  *
  * Almost every write is a POST, PATCH, PUT or DELETE and almost every read is a GET, but this
  * API has two POSTs that are searches. Refusing them to a read-only token would make such a
- * token nearly useless for the thing people actually want one for — querying the inventory
- * from a script — so they are named below rather than inferred.
+ * token nearly useless for the thing people actually want one for - querying the inventory
+ * from a script - so they are named below rather than inferred.
  *
  * The converse does not arise: there is no GET in this API that changes anything, and if one is
  * ever added it is the route that is wrong, not this list.
@@ -47,7 +47,7 @@ const READ_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "OPTIONS"]);
  *
  * Takes the router path rather than the URL for the reason given above, and falls back to
  * refusing: an unrecognised POST is treated as a write, so adding a route cannot accidentally
- * widen what a read token can do. The failure direction is the safe one — a new read-only POST
+ * widen what a read token can do. The failure direction is the safe one - a new read-only POST
  * is refused until somebody adds it here, which is a bug report rather than a breach.
  */
 export function isReadOnlyRequest(method: string, routerPath: string): boolean {

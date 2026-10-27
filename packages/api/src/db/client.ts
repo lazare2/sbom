@@ -8,7 +8,7 @@ export type Database = NodePgDatabase<typeof schema>;
 /**
  * `pg` parses int8 (bigint) into a JS string by default to avoid precision
  * loss. Our only int8 columns are `component.id` and `scan.sbom_size_bytes`,
- * both far below 2^53, and Drizzle's `mode: "number"` expects numbers — so
+ * both far below 2^53, and Drizzle's `mode: "number"` expects numbers - so
  * parse them as numbers to keep the mapping honest.
  */
 pg.types.setTypeParser(pg.types.builtins.INT8, (value) => Number(value));

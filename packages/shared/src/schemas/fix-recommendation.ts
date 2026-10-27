@@ -12,7 +12,7 @@ import { vulnScopeSchema } from "./vulnerability.js";
  *
  * ## Then it checks the answer
  *
- * The version that clears today's findings is not necessarily safe — it can be affected by
+ * The version that clears today's findings is not necessarily safe - it can be affected by
  * advisories that never applied to the version in use, and nothing in the findings says so,
  * because nothing in the estate ships it. So the candidate is put to the scanner as if it were a
  * package, and if anything comes back the next fix is taken and checked in turn, until either a
@@ -82,13 +82,13 @@ export type FixRecommendationStatus =
   | "clean"
   /** Checked, and still affected by advisories nobody has fixed yet. */
   | "residual"
-  /** Not checked — the scanner was unavailable, verification was not asked for, or the cap was hit. */
+  /** Not checked - the scanner was unavailable, verification was not asked for, or the cap was hit. */
   | "unverified"
   /** Nothing to recommend: none of the advisories reported against it has a fix. */
   | "no_fix";
 
 export interface FixRecommendation {
-  /** `ecosystem:name`, stable across builds — the package, not one version of it. */
+  /** `ecosystem:name`, stable across builds - the package, not one version of it. */
   key: string;
   name: string;
   ecosystem: string;
@@ -124,7 +124,7 @@ export interface FixRecommendationReport {
   verification: {
     /**
      * `verified` when candidates were checked, `skipped` when the caller did not ask,
-     * `unavailable` when the scanner could not be used — with `message` saying why.
+     * `unavailable` when the scanner could not be used - with `message` saying why.
      */
     status: "verified" | "skipped" | "unavailable" | "partial";
     message: string | null;

@@ -13,7 +13,7 @@ import {
  * The tier decides which findings a human opens first, and the failure it must not have is
  * the quiet one: a report with no attribution silently counted as though someone had vouched
  * for it. Measured against the installed feed, 16.9% of reports carry no reporter at all and
- * 77.1% carry exactly one — so the boundary between "nobody said who" and "one party said so"
+ * 77.1% carry exactly one - so the boundary between "nobody said who" and "one party said so"
  * covers 94% of everything, and getting it wrong would mis-sort almost the entire table.
  *
  * The other half of what is pinned here is that the tier is only ever *derived*. It is

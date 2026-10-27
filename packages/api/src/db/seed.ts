@@ -20,7 +20,24 @@ import { attributeDefinition, user } from "./schema.js";
  * action instead of a migration.
  */
 const DEFAULT_ATTRIBUTES = [
-  { key: "squad", label: "Squad", type: "string" as const, options: null, sortOrder: 10 },
+  // The two linked attributes. Migration 0023 creates them first on every database, so these
+  // rows only matter to a schema built some other way; they say the same thing.
+  {
+    key: "tribe",
+    label: "Tribe",
+    type: "string" as const,
+    options: null,
+    sortOrder: 5,
+    linkedTo: "tribe" as const,
+  },
+  {
+    key: "squad",
+    label: "Squad",
+    type: "string" as const,
+    options: null,
+    sortOrder: 10,
+    linkedTo: "squad" as const,
+  },
   { key: "owner", label: "Owner", type: "string" as const, options: null, sortOrder: 20 },
   {
     key: "severity",
@@ -61,7 +78,7 @@ async function seedBootstrapAdmin(): Promise<void> {
 
   if (!config.BOOTSTRAP_ADMIN_EMAIL) {
     console.log(
-      "[seed] no users and no BOOTSTRAP_ADMIN_EMAIL set — set it (and optionally " +
+      "[seed] no users and no BOOTSTRAP_ADMIN_EMAIL set - set it (and optionally " +
         "BOOTSTRAP_ADMIN_PASSWORD) and re-run `npm run db:seed` to create the first admin",
     );
     return;
@@ -73,8 +90,8 @@ async function seedBootstrapAdmin(): Promise<void> {
    * With no password configured, generate one and print it.
    *
    * An account with no password used to be a valid state, recoverable through
-   * an emailed setup link. There is no such link any more — emails are
-   * identifiers, not mailboxes — so a passwordless bootstrap admin would be an
+   * an emailed setup link. There is no such link any more - emails are
+   * identifiers, not mailboxes - so a passwordless bootstrap admin would be an
    * instance nobody can ever log into. Printing a generated password to the
    * seed output is the only honest option: it goes to the operator's terminal,
    * which is where they already are.

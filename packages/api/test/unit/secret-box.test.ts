@@ -5,7 +5,7 @@ import { openSecret, sealSecret, SecretBoxError } from "../../src/lib/secret-box
  * The only secret this platform stores in a form it can read back.
  *
  * Everything else is hashed, because everything else only needs verifying. An Xray API token
- * has to be presented to Xray on every scan, so it has to be recoverable — and that makes
+ * has to be presented to Xray on every scan, so it has to be recoverable - and that makes
  * this the one place where getting the cryptography wrong loses a live credential rather than
  * merely breaking a login.
  *

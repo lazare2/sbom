@@ -192,7 +192,7 @@ export function LoginPage() {
         </div>
 
         <p className="mt-4 text-center text-xs text-text-faint">
-          Accounts are created by an administrator, and so are password resets — there is no
+          Accounts are created by an administrator, and so are password resets - there is no
           self-service signup or recovery. If you are locked out, ask an administrator to issue you
           a new password.
         </p>
@@ -205,7 +205,7 @@ export function LoginPage() {
  * The two ways in.
  *
  * A real tablist rather than two styled buttons, because arrow-key navigation between tabs is
- * what a screen reader announces as available the moment `role="tab"` appears — and offering it
+ * what a screen reader announces as available the moment `role="tab"` appears - and offering it
  * without implementing it is worse than not claiming it at all.
  */
 function MethodTabs({ method, onPick }: { method: Method; onPick: (m: Method) => void }) {

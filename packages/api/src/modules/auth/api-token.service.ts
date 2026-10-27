@@ -41,7 +41,7 @@ const hashOf = (secret: string): string => createHash("sha256").update(secret).d
  * What a token authenticated, when it worked.
  *
  * The account comes back whole rather than as an id, so the caller never has to decide whether
- * to trust a cached copy — there is no cached copy.
+ * to trust a cached copy - there is no cached copy.
  */
 export interface AuthenticatedToken {
   tokenId: string;
@@ -66,7 +66,7 @@ export class ApiTokenService {
    * that an unauthenticated caller cannot use the difference to learn which of its guesses was
    * once real.
    *
-   * The prefix check is a cheap reject, not a security measure — it saves a query and a hash
+   * The prefix check is a cheap reject, not a security measure - it saves a query and a hash
    * on the garbage that arrives at any public endpoint.
    */
   async authenticate(secret: string): Promise<AuthenticatedToken | null> {
@@ -166,7 +166,7 @@ export class ApiTokenService {
    * Revoke one, scoped to its owner.
    *
    * `userId` is part of the predicate rather than checked afterwards, so one person cannot
-   * revoke another's token by guessing an id — the row simply does not match.
+   * revoke another's token by guessing an id - the row simply does not match.
    */
   async revokeForUser(userId: string, tokenId: string): Promise<void> {
     const revoked = await this.deps.db
@@ -297,7 +297,7 @@ export class ApiTokenService {
  * Row to summary, computing `active` from the three facts that decide it.
  *
  * `accountActive` is passed in rather than read here because the caller already has the
- * account — and because a token on a deactivated account is refused by `authenticate`'s
+ * account - and because a token on a deactivated account is refused by `authenticate`'s
  * predicate whatever this says. This is the explanation, not the enforcement.
  */
 function toSummary(row: ApiTokenRow, accountActive: boolean): ApiTokenSummary {

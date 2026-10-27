@@ -13,7 +13,7 @@ import type { FastifyInstance } from "fastify";
  * The guarantee that the API document describes the API.
  *
  * A specification is read far more often than it is checked, so the failure that matters is
- * not a malformed document — anything will catch that — but a document that is confidently
+ * not a malformed document - anything will catch that - but a document that is confidently
  * wrong: it promises an endpoint that was removed, or omits one that was added, and a
  * developer builds against it and blames their own code.
  *

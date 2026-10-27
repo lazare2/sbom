@@ -7,20 +7,20 @@ import type { VerifiedIngestToken } from "./ingest-token.service.js";
 import { IngestTokenService } from "./ingest-token.service.js";
 
 /**
- * `POST /api/v1/scans` — the CI/CD ingestion endpoint.
+ * `POST /api/v1/scans` - the CI/CD ingestion endpoint.
  *
  * Both integration paths (a Jenkins shared-library step and a GitLab CI
  * `include:` template) post an identical `multipart/form-data` body here, and the
- * API has no way to tell which called it — that is by design.
+ * API has no way to tell which called it - that is by design.
  *
  * Because pipelines invoke this with `curl -f`, the status code is the contract:
- *   201 — the scan is committed and queryable
- *   400 — the request is malformed (missing file, bad app_name); retrying won't help
- *   401 — bad or missing ingest token
- *   413 — SBOM larger than INGEST_MAX_SBOM_BYTES
- *   415 — not multipart/form-data
- *   422 — the file is not a CycloneDX SBOM
- *   5xx — transient; the pipeline may retry
+ *   201 - the scan is committed and queryable
+ *   400 - the request is malformed (missing file, bad app_name); retrying won't help
+ *   401 - bad or missing ingest token
+ *   413 - SBOM larger than INGEST_MAX_SBOM_BYTES
+ *   415 - not multipart/form-data
+ *   422 - the file is not a CycloneDX SBOM
+ *   5xx - transient; the pipeline may retry
  *
  * An unrecognised `app_name` is deliberately NOT an error: it auto-creates a
  * `pending_confirmation` application so a build's SBOM is never dropped just
@@ -140,8 +140,8 @@ export async function ingestionRoutes(fastify: FastifyInstance): Promise<void> {
       /*
        * Vulnerability matching is kicked off but never waited for.
        *
-       * 201 keeps meaning exactly what it meant before this feature existed — the SBOM
-       * is committed and queryable — so a pipeline's `curl -f` is unaffected. Findings
+       * 201 keeps meaning exactly what it meant before this feature existed - the SBOM
+       * is committed and queryable - so a pipeline's `curl -f` is unaffected. Findings
        * appear seconds later. Making this synchronous would put Grype's runtime on every
        * build (measured: ~9s for a 3,000-package image) and would force an impossible
        * choice when Grype fails: fail a build whose SBOM stored perfectly, or return 201

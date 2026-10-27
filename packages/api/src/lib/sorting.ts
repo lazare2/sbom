@@ -14,8 +14,8 @@ import type { SortDirection } from "@sbom/shared";
  * **Every ORDER BY ends in a unique column.** Without one, sorting on a column with
  * duplicate values leaves the order of tied rows up to the plan, and offset pagination
  * then genuinely loses data: the same row can appear on page 1 and page 2 while another
- * appears on neither. It is invisible in testing — you need ties *and* a page boundary
- * falling inside them — and it looks like a data bug rather than a sorting one. Hence
+ * appears on neither. It is invisible in testing - you need ties *and* a page boundary
+ * falling inside them - and it looks like a data bug rather than a sorting one. Hence
  * `orderBy` requiring the tiebreaker as a separate argument, so it cannot be forgotten by
  * omission.
  */
@@ -42,7 +42,7 @@ export function directionNullsLast(dir: SortDirection): SQL {
  *
  * @param keys       The chosen sort key, plus any secondary keys that make the result
  *                   read sensibly (name within a status, say).
- * @param tiebreaker A column unique across the result set — a primary key. Not optional:
+ * @param tiebreaker A column unique across the result set - a primary key. Not optional:
  *                   see the note above on what its absence costs.
  */
 export function orderBy(keys: SQL[], tiebreaker: SQL): SQL {

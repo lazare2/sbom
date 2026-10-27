@@ -180,7 +180,7 @@ export interface UserSummary {
    * False when the account can sign in and reach nothing at all.
    *
    * A non-admin with no estate, or narrowed to nothing, and in no squad that grants anything.
-   * Coarse on purpose — it does not intersect grants with estates — because its job is to find
+   * Coarse on purpose - it does not intersect grants with estates - because its job is to find
    * the accounts nobody has looked at yet, not to answer what a particular one can see.
    */
   hasAccess: boolean;
@@ -192,7 +192,7 @@ export interface UserSummary {
 
 /**
  * Returned once, and only once, when a password is generated or set by an
- * admin. The plaintext is never stored and cannot be retrieved again — if the
+ * admin. The plaintext is never stored and cannot be retrieved again - if the
  * admin loses it, the fix is another reset.
  */
 export interface UserCredentialResponse {

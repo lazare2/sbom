@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * Table sorting, defined once per table and consumed by both ends.
  *
- * The API needs the set of sortable fields to validate `sortBy` against — a sort column
+ * The API needs the set of sortable fields to validate `sortBy` against - a sort column
  * arriving from the client is interpolated into an ORDER BY, so an unvalidated one is an
  * injection. The web needs the same set to decide which headers are clickable, plus each
  * column's kind to decide which direction its first click sorts.
@@ -20,7 +20,7 @@ export type SortDirection = (typeof sortDirections)[number];
  * What a column holds, which is all that is needed to pick a sensible first click.
  *
  * Names read naturally A→Z, while counts and timestamps are almost always asked about
- * from the top — "which application has the most findings", "what came in most recently".
+ * from the top - "which application has the most findings", "what came in most recently".
  * Making the first click land on the useful end means the common question takes one click
  * rather than two.
  */
@@ -38,7 +38,7 @@ export interface SortTable<F extends string> {
   readonly defaultDirection: SortDirection;
   /** The direction a first click on this column should choose. */
   firstDirectionFor(field: F): SortDirection;
-  /** Narrows an untrusted value — a URL parameter, say — to a known field. */
+  /** Narrows an untrusted value - a URL parameter, say - to a known field. */
   isField(value: unknown): value is F;
   /**
    * `{ sortBy, sortDir }` with defaults applied, to be spread into a query schema.
@@ -59,7 +59,7 @@ export interface SortTable<F extends string> {
  * default sort is a timestamp lands on newest-first without restating it.
  */
 export function defineSortTable<K extends Record<string, SortColumnKind>>(
-  // Inferred from this object's keys, not from `defaultField` — a single literal there
+  // Inferred from this object's keys, not from `defaultField` - a single literal there
   // would narrow the field union to that one name and reject every other column.
   kind: K,
   defaultField: keyof K & string,
@@ -70,7 +70,7 @@ export function defineSortTable<K extends Record<string, SortColumnKind>>(
     `K extends Record<string, SortColumnKind>` keeps an index signature in scope, so under
     noUncheckedIndexedAccess every lookup would widen to `| undefined`. Re-viewing it as a
     mapped type over the literal key union removes the index signature, and with it the
-    phantom undefined — the keys are exactly F by construction.
+    phantom undefined - the keys are exactly F by construction.
   */
   const kinds = kind as unknown as Record<F, SortColumnKind>;
   const fields = Object.keys(kind) as F[];
@@ -137,7 +137,7 @@ export function sortRows<T>(
     /*
       Ties broken by a stable secondary key so equal rows keep a fixed order. Array#sort
       is stable in modern engines, but the incoming row order is the server's, which
-      changes as data changes — without this, two rows with the same value can swap places
+      changes as data changes - without this, two rows with the same value can swap places
       between renders for no visible reason.
     */
     return compareTiebreak(a, b, tiebreak);

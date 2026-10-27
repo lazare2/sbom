@@ -5,7 +5,7 @@ import { uuidSchema } from "./common.js";
  * People the directory authenticated who have no account here.
  *
  * Accounts are created by an administrator before anyone can use them, which is the whole
- * security posture of this platform — but it leaves a gap it took a real deployment to notice.
+ * security posture of this platform - but it leaves a gap it took a real deployment to notice.
  * A colleague clicks "sign in with your organisation account", authenticates perfectly against
  * the directory, and is refused. Nothing records that it happened. They are told to ask an
  * administrator, and whether they do is up to them.
@@ -43,7 +43,7 @@ export type AccessRequestReason = (typeof accessRequestReasons)[number];
  * Where a request stands.
  *
  * `resolved` is reached two ways: an administrator created the account from the queue, or the
- * person simply signed in successfully later. The second matters more than it looks — it means
+ * person simply signed in successfully later. The second matters more than it looks - it means
  * the queue drains itself however the account came to exist, rather than depending on an
  * administrator remembering to press the right button afterwards.
  *
@@ -63,7 +63,7 @@ export interface AccessRequest {
    *
    * Nullable because a token need not carry one: `email` arrives only where that claim was
    * consented to, and the fallback to `preferred_username` can also be absent. A request
-   * without an address is still worth showing — the name usually identifies the person — so
+   * without an address is still worth showing - the name usually identifies the person - so
    * this is null rather than the row being dropped.
    */
   email: string | null;
@@ -89,7 +89,7 @@ export interface AccessRequest {
 
 export interface AccessRequestList {
   requests: AccessRequest[];
-  /** Pending rows only — what the badge on the admin nav counts. */
+  /** Pending rows only - what the badge on the admin nav counts. */
   pendingCount: number;
   /**
    * Whether single sign-on is switched on.

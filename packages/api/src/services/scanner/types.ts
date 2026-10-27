@@ -35,7 +35,7 @@ export interface MatchResult {
   findings: ParsedFinding[];
   grypeVersion: string | null;
   dbBuiltAt: Date | null;
-  /** Non-zero means findings were dropped — see `ParsedReport.unmappedFindings`. */
+  /** Non-zero means findings were dropped - see `ParsedReport.unmappedFindings`. */
   unmappedFindings: number;
   /** Component ids submitted in this batch, so the caller can mark them all scanned. */
   submittedComponentIds: number[];
@@ -70,7 +70,7 @@ export interface ReachabilityResult {
  * specifically, lets tests substitute a fake with no subprocess or database, and
  * leaves room for a different matcher without touching anything upstream.
  *
- * Every method is expected to resolve rather than throw for operational problems —
+ * Every method is expected to resolve rather than throw for operational problems -
  * a missing binary, an unreachable listing, an invalid database. Those are states to
  * report, not exceptions to propagate, because none of them may be allowed to break
  * ingestion or any other part of the platform.
@@ -88,7 +88,7 @@ export interface VulnerabilityScanner {
    *
    * It exists as its own method because the sweep used to read `dbStatus().builtAt` directly,
    * which quietly made "has a local database with a build date" a precondition for scanning
-   * at all. A remote database has no build date to read — Xray publishes none — and faking
+   * at all. A remote database has no build date to read - Xray publishes none - and faking
    * one from the current time would re-queue the whole estate on every tick.
    *
    * Null means "cannot be determined", and the sweep refuses to run rather than guessing.
@@ -98,7 +98,7 @@ export interface VulnerabilityScanner {
   /**
    * The exact URL consulted for updates, derived from the binary's supported schema.
    *
-   * Exposed so the admin panel can show it even when nothing has failed yet — an
+   * Exposed so the admin panel can show it even when nothing has failed yet - an
    * operator pointing at an internal mirror needs to confirm the platform agrees with
    * them before they wait for a scheduled check to prove it.
    */
@@ -106,7 +106,7 @@ export interface VulnerabilityScanner {
   /** Probes the listing URL only. Cheap, and the basis of the "no internet" message. */
   checkReachable(): Promise<ReachabilityResult>;
   updateDb(): Promise<DbUpdateResult>;
-  /** Installs a database from a local archive — the air-gapped path. */
+  /** Installs a database from a local archive - the air-gapped path. */
   importDb(archivePath: string): Promise<DbUpdateResult>;
   /** Matches one batch of packages. Throws only if the batch itself cannot be processed. */
   match(packages: readonly ScannablePackage[]): Promise<MatchResult>;

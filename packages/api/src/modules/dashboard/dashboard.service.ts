@@ -24,7 +24,7 @@ import { applicationScopePredicate } from "../vulnerabilities/scope.js";
  * hours out of date.
  *
  * "Current use" throughout means `scan_component` rows belonging to some
- * application's `latest_scan_id`. That join is the whole trick — it turns
+ * application's `latest_scan_id`. That join is the whole trick - it turns
  * "what is deployed right now" into an equality on an indexed column instead of
  * a correlated max() over the scan history.
  */
@@ -127,7 +127,7 @@ export class DashboardService {
    * How many applications currently run each OS and each runtime.
    *
    * Also the source for the applications list's platform filter dropdowns, so
-   * the options offered are exactly the values that exist — a filter that lists
+   * the options offered are exactly the values that exist - a filter that lists
    * `wolfi` when nothing runs it is noise, and one that omits it when something
    * does is a dead end.
    *
@@ -197,8 +197,8 @@ export class DashboardService {
           applications: Number(r.applications),
           applicationList: r.application_list ?? [],
         })),
-      // A runtime entry with no name cannot happen — the parser only stores
-      // named ones — but jsonb carries no guarantee, so it is filtered rather
+      // A runtime entry with no name cannot happen - the parser only stores
+      // named ones - but jsonb carries no guarantee, so it is filtered rather
       // than asserted.
       runtimes: rowsOf(runtimeRows).flatMap((r) =>
         typeof r.name === "string" && r.name !== ""
@@ -252,7 +252,7 @@ export class DashboardService {
    *
    * The blast-radius list: when a package turns out to be a problem, this is
    * the number that decides whether it is one team's afternoon or an
-   * organisation-wide exercise. Inactive applications are excluded — counting
+   * organisation-wide exercise. Inactive applications are excluded - counting
    * decommissioned services would inflate exactly the figure being used to
    * judge urgency.
    */

@@ -8,7 +8,7 @@ import path from "node:path";
  * Drives the real UI in a headless browser and screenshots each view.
  *
  * Complements the smoke test rather than duplicating it: that one proves the API
- * contracts, this one proves the pages actually render them — a route that
+ * contracts, this one proves the pages actually render them - a route that
  * returns perfect JSON to a component that crashes on it is still broken.
  *
  * Every console error, page error, failed request and 5xx is collected as a
@@ -19,7 +19,7 @@ import path from "node:path";
  * Screenshot directory, resolved against the repo rather than the working directory.
  *
  * The default used to be `.`, which meant a bare `node scripts/ui-drive.mjs` scattered
- * fifty PNGs across whatever directory it was launched from — usually the repo root, where
+ * fifty PNGs across whatever directory it was launched from - usually the repo root, where
  * they are untracked clutter that is easy to commit by accident. Defaulting to a path under
  * `var/` makes the harmless invocation the harmless one; an explicit argument still wins.
  */
@@ -27,7 +27,7 @@ const OUT =
   process.argv[2] ?? path.join(path.dirname(new URL(import.meta.url).pathname.slice(1)), "..", "var", "ui-shots");
 /*
   `localhost`, not `127.0.0.1`. Vite binds to whatever the OS resolves `localhost` to, and
-  on this machine that is `[::1]` alone — a hardcoded IPv4 literal is then refused outright
+  on this machine that is `[::1]` alone - a hardcoded IPv4 literal is then refused outright
   while the dev server is running perfectly well. Overridable so the script can be pointed
   at a preview build or a container.
 */
@@ -53,7 +53,7 @@ const context = await browser.newContext({
   viewport: { width: 1500, height: 950 },
   deviceScaleFactor: 1,
   // The analytics page's report link is a plain anchor with `download`, so the
-  // browser has to be allowed to accept it — without this Playwright cancels the
+  // browser has to be allowed to accept it - without this Playwright cancels the
   // transfer and the download event never carries a body.
   acceptDownloads: true,
 });
@@ -133,11 +133,11 @@ function watch(target, prefix = "") {
      * dev server is delivered to `fetch()` intact and *then* reported as
      * ERR_ABORTED, because the proxy ends the connection in a way Chromium logs
      * as an abort. One request, one 204, one spurious failure. Flagging it would
-     * mean every successful delete looks like a bug — the real defect this hook
+     * mean every successful delete looks like a bug - the real defect this hook
      * exists to catch is a request that never completes at all.
      */
     if (answered.has(req)) return;
-    problems.push(`${prefix}requestfailed: ${req.method()} ${req.url()} — ${req.failure()?.errorText}`);
+    problems.push(`${prefix}requestfailed: ${req.method()} ${req.url()} - ${req.failure()?.errorText}`);
   });
 }
 watch(page);
@@ -395,8 +395,8 @@ await expectText("How to read this page");
 /*
  * Asserted on a claim that holds in both states.
  *
- * The first methodology item tracks the feature flag — it says "no vulnerability data"
- * when scanning is off and describes the Grype source when it is on — and this step runs
+ * The first methodology item tracks the feature flag - it says "no vulnerability data"
+ * when scanning is off and describes the Grype source when it is on - and this step runs
  * before step 22 enables it. Pinning either wording here would make the assertion depend
  * on the order of the run, and on whatever the previous run happened to leave behind.
  */
@@ -556,7 +556,7 @@ await shot("admin-applications");
 log("15. register an application");
 await page.getByRole("button", { name: "Register application" }).click();
 await page.getByLabel("Name", { exact: true }).fill(TEST_APP);
-// Attribute inputs are rendered from the definitions, not hardcoded — filling
+// Attribute inputs are rendered from the definitions, not hardcoded - filling
 // one proves that indirection actually works end to end.
 await page.getByLabel("Squad").fill("platform");
 await page.getByLabel("Severity").selectOption("high");
@@ -569,7 +569,7 @@ await page.waitForLoadState("networkidle");
  *
  * The admin list is paginated and sorted, so whether a freshly created record
  * lands on the first page depends on its random name suffix. Asserting against the
- * unfiltered list passed for a long time and then started failing — not because
+ * unfiltered list passed for a long time and then started failing - not because
  * creation broke, but because that run drew a suffix that sorted onto page two.
  */
 await page.getByLabel("Search applications").fill(TEST_APP);
@@ -581,8 +581,8 @@ await shot("admin-application-created");
 // --- 15b. manual SBOM upload, end to end ------------------------------------
 /*
  * Driven against the application just registered rather than a demo one, because
- * it has no scans yet. That covers the case the feature most has to work for — an
- * application whose pipeline is not wired up — and it exercises the empty-history
+ * it has no scans yet. That covers the case the feature most has to work for - an
+ * application whose pipeline is not wired up - and it exercises the empty-history
  * state, the first-build path, and the duplicate guard without disturbing any
  * demo data the earlier assertions depend on.
  */
@@ -615,7 +615,7 @@ await fs.writeFile(
        * Locations, in the three shapes the origin classifier has to tell apart.
        *
        * express sits in the application's own tree, lodash in the image's global
-       * node_modules, and `no-location-here` carries no location property at all — which is
+       * node_modules, and `no-location-here` carries no location property at all - which is
        * what a non-Syft SBOM looks like and must render as "recorded no location" rather than
        * as a blank cell. The alpine marker above covers the fourth case, os_package.
        */
@@ -694,7 +694,7 @@ await shot("scan-upload-filled");
 await page.locator("dialog").getByRole("button", { name: "Upload SBOM" }).click();
 await page.waitForTimeout(1500);
 await expectText("SBOM uploaded", "the upload receipt");
-await expectText("Yes — this scan", "confirmation that it became the current build");
+await expectText("Yes - this scan", "confirmation that it became the current build");
 await expectText("View the scan", "the link to the stored scan");
 await shot("scan-upload-receipt");
 await page.getByRole("button", { name: "Done" }).click();
@@ -705,7 +705,7 @@ await page.waitForLoadState("networkidle");
 await expectText("manual-1", "the uploaded build number");
 await expectText("current", "the new scan marked as the current build");
 // Located by the badge's own tooltip rather than by the word "manual", which the
-// build number "manual-1" would satisfy on its own — a match that would pass even
+// build number "manual-1" would satisfy on its own - a match that would pass even
 // if the badge were missing entirely.
 const manualBadge = page.locator('[title^="Uploaded manually"]');
 if ((await manualBadge.count()) === 0) {
@@ -747,7 +747,7 @@ await expectText("lodash", "a package from the uploaded SBOM");
  *
  * All four are exercised by one table because the upload fixture was built to contain one of
  * each. The origin label is a heuristic over a path prefix, and the rule that makes it
- * acceptable is that the path is always rendered beside it — so this checks for both, not
+ * acceptable is that the path is always rendered beside it - so this checks for both, not
  * just the badge.
  */
 await expectText("Location", "the component location column");
@@ -907,8 +907,8 @@ log("18z. a new account can change its password and get in");
 // currently ticked, and save two endpoints in the right order.
 //
 // The specific failure worth catching is a screen that looks like it worked. Saving posts to
-// two endpoints, and if the second is skipped the boxes still show as ticked when reopened —
-// from local state — while nothing was stored.
+// two endpoints, and if the second is skipped the boxes still show as ticked when reopened -
+// from local state - while nothing was stored.
 log("18a. granting an account access to particular groups");
 {
   await page.goto(`${BASE}/admin/users`, { waitUntil: "networkidle" });
@@ -973,7 +973,7 @@ log("18a. granting an account access to particular groups");
       */
       const shown = await dialog.getByRole("checkbox").allInnerTexts();
       problems.push(
-        `the application picker does not offer ${TEST_APP} — it shows: ${shown.join(", ") || "nothing"}`,
+        `the application picker does not offer ${TEST_APP} - it shows: ${shown.join(", ") || "nothing"}`,
       );
     } else {
       await appBox.check();
@@ -1078,11 +1078,11 @@ log("18a. granting an account access to particular groups");
 // The API-level proof that estates do not blend lives in the smoke test. What that cannot
 // reach is the half of the promise a person actually experiences: a control in the header
 // that changes what every page below it means. Two things go wrong here and neither is a
-// console error — the switcher renders but the pages keep showing the previous estate's
+// console error - the switcher renders but the pages keep showing the previous estate's
 // cached rows, or it switches and the pages never refetch.
 //
 // So this creates a real second estate, switches to it, and checks that an application
-// which is plainly visible in the first one is *absent* — then switches back and checks it
+// which is plainly visible in the first one is *absent* - then switches back and checks it
 // returns. An empty list is a weak assertion on its own, which is why both directions are
 // driven.
 log("18b. admin panel, environments");
@@ -1416,13 +1416,13 @@ await page.getByLabel("Mail server").fill("mail.corp.invalid");
 await page.getByLabel("From address").fill("sbom@intranet");
 await page.waitForTimeout(300);
 
-const presets = await page.getByRole("button", { name: /^(25|587|465) —/ }).count();
+const presets = await page.getByRole("button", { name: /^(25|587|465) -/ }).count();
 if (presets !== 3) {
   problems.push(`expected 3 port/encryption presets, found ${presets}`);
 } else {
   log("  OK   the common port and encryption pairings are offered as presets");
 }
-await page.getByRole("button", { name: /^25 —/ }).click();
+await page.getByRole("button", { name: /^25 -/ }).click();
 await page.waitForTimeout(300);
 
 await page.getByRole("button", { name: "Test connection" }).click();
@@ -1552,7 +1552,7 @@ log("22-err. a rejected form explains itself, and the rejection is logged");
   22b-prov. Choosing the vulnerability database.
 
   Two things the API tests cannot reach. First, that the JFrog Xray option is *unselectable*
-  until a connection works — the server refuses it either way, but a checkbox that fails with
+  until a connection works - the server refuses it either way, but a checkbox that fails with
   a validation error tells an administrator less than one that is visibly unavailable.
 
   Second, that a failed connection produces a readable diagnosis rather than a stack trace or
@@ -1672,7 +1672,7 @@ if (swept) {
   // The CVE-by-alias path: grype reports log4shell under a GHSA id.
   log("22d. search by CVE number");
   // log4j 2.14.1 was upgraded away in the demo estate, so it is only reachable with
-  // dropped packages included — which is also the realistic shape of this question when
+  // dropped packages included - which is also the realistic shape of this question when
   // someone checks historical exposure to an old CVE.
   await page.getByLabel("Include dropped packages").click();
   await page.waitForTimeout(600);
@@ -1698,7 +1698,7 @@ if (swept) {
   await expectText("Vulnerable Applications");
   /*
     The row count in the title. These tables are the server's worst N, and sorting reorders
-    only those N — so ascending shows the least vulnerable *of the worst N*. Without the cap
+    only those N - so ascending shows the least vulnerable *of the worst N*. Without the cap
     on screen that reads as "our safest applications", so the cap is a correctness assertion
     rather than a cosmetic one.
   */
@@ -1784,7 +1784,7 @@ if (swept) {
    * just opened it. The dialog appeared and vanished in the same frame.
    *
    * The waits are the point of the test. Asserting visibility immediately after the click
-   * would pass even with the bug present, because the teardown arrives a task later — so
+   * would pass even with the bug present, because the teardown arrives a task later - so
    * this settles first, then checks the dialog is still there.
    */
   log("22g. accepting a risk keeps its dialog open");
@@ -1925,7 +1925,7 @@ if (!wasEnabled) {
 // --- 22b-dep. what pulled each package in -----------------------------------
 //
 // The actionable half of a finding, and the half a table cell can most easily get wrong:
-// the line has to appear where an edge exists and be absent — not empty, not "none" —
+// the line has to appear where an edge exists and be absent - not empty, not "none" -
 // where one does not.
 log("22b-dep. dependants in the component list");
 {
@@ -1956,7 +1956,7 @@ log("22b-dep. dependants in the component list");
 
     /*
       express is depended on by nothing in this fixture. The cell must stay silent rather
-      than assert a negative — null means "no edge recorded", which is the state every npm
+      than assert a negative - null means "no edge recorded", which is the state every npm
       package in a container-image scan is in, and printing "nothing depends on this" there
       would be wrong on every row of such a build.
     */
@@ -2015,7 +2015,7 @@ log("22b-raw. SBOM download from the scan history");
       problems.push("the SBOM link is missing the download attribute");
     }
 
-    // The size has to stay readable as a size — it is still the cell's own content, and
+    // The size has to stay readable as a size - it is still the cell's own content, and
     // turning it into a link must not have replaced it with a generic word.
     if (!/\d/.test(label)) {
       problems.push(`the SBOM cell no longer shows a size: "${label}"`);
@@ -2122,7 +2122,7 @@ log("22c. export dialog");
 // --- 23. clean up the records this run created ------------------------------
 log("23. clean up");
 // Navigated by URL rather than by link text. "Applications" and "Users" each
-// appear twice — once in the main nav, once as an admin tab — and a name-based
+// appear twice - once in the main nav, once as an admin tab - and a name-based
 // locator resolves to the main-nav one, which leaves the admin panel entirely.
 await page.goto(`${BASE}/admin/users`, { waitUntil: "networkidle" });
 
@@ -2130,8 +2130,8 @@ await page.goto(`${BASE}/admin/users`, { waitUntil: "networkidle" });
  * Loops over every `ui-drive-user` account, not just this run's.
  *
  * A run that crashes partway through leaves its account behind, and the next run's search
- * then matches two rows. Taking `.first()` clicked whichever sorted first — often the stale
- * one — and the confirmation dialog then asked for a name this run had never generated, so
+ * then matches two rows. Taking `.first()` clicked whichever sorted first - often the stale
+ * one - and the confirmation dialog then asked for a name this run had never generated, so
  * cleanup hung waiting for a label that would never appear. The failure looked like a
  * broken dialog and was really an accumulated fixture, so this drains them all, exactly as
  * the application cleanup below already does.
@@ -2150,7 +2150,7 @@ for (let attempt = 0; attempt < 10; attempt += 1) {
 
   const dialog = page.locator("dialog[open]");
   // The dialog names its own target, so the confirmation text is read from it rather than
-  // assumed — that is what makes deleting an account this run did not create still work.
+  // assumed - that is what makes deleting an account this run did not create still work.
   const prompt = await dialog.locator("label").first().innerText();
   const target = prompt.replace(/^Type\s+/, "").replace(/\s+to confirm$/, "").trim();
   await dialog.getByLabel(prompt).fill(target);
@@ -2289,7 +2289,7 @@ log("24. dark colour scheme");
   reorders anything at all.
 
   Asserted through `aria-sort` rather than the caret glyph. It is the same state the
-  screen reader gets, so a passing check means the control is announced correctly too — and
+  screen reader gets, so a passing check means the control is announced correctly too - and
   it does not break the next time the arrows are restyled.
 */
 async function driveSort(route, headerName, { expectRowsChange = true, markerColumn = null } = {}) {
@@ -2298,7 +2298,7 @@ async function driveSort(route, headerName, { expectRowsChange = true, markerCol
 
   /*
     The overview and analytics pages carry several tables at once, and they share column
-    names — "Package" and "Apps" each appear in two of them. Unscoped, the lookup would
+    names - "Package" and "Apps" each appear in two of them. Unscoped, the lookup would
     take whichever header came first in the DOM and then compare row text from every table
     on the page, so a sort that worked would look broken and a broken one could look fine.
     `markerColumn` names a column unique to the intended table and scopes both to it.
@@ -2355,7 +2355,7 @@ async function driveSort(route, headerName, { expectRowsChange = true, markerCol
   }
   /*
     Row text must actually change between the two directions. This is the assertion that
-    catches a header wired to a column the API silently ignores — the caret would flip
+    catches a header wired to a column the API silently ignores - the caret would flip
     while the rows sat still, which is the failure mode most likely to ship unnoticed.
     Skipped where the table is too short or too uniform for a reversal to be visible.
   */
@@ -2399,7 +2399,7 @@ await driveSort("/analytics", "Apps", { markerColumn: "Name" });
 /*
   The two vulnerability rankings. Both are one shared component that the overview and the
   analytics page each render, so the full click cycle runs here against the overview copy
-  and the analytics copy is checked for the controls themselves below — that pair catches a
+  and the analytics copy is checked for the controls themselves below - that pair catches a
   page that stopped sharing the component without doubling the runtime.
 
   "Application" and "Package" are text columns (first click ascending); "Fixable" and
@@ -2409,7 +2409,7 @@ await driveSort("/analytics", "Apps", { markerColumn: "Name" });
 await driveSort("/", "Application", { markerColumn: "Findings \\(app / base image\\)" });
 /*
   "Fixable" rather than "Crit" for the numeric case. Critical counts are 0 on every row of
-  the seeded estate, and reversing a uniform column legitimately cannot reorder anything —
+  the seeded estate, and reversing a uniform column legitimately cannot reorder anything -
   equal values fall through to the tiebreaker, which stays ascending in both directions by
   design. Asserting a reordering there would be a claim about the fixture, not the control.
   Crit is still driven, for its caret and its announcement, with that assertion off.
@@ -2471,7 +2471,7 @@ await shot("sortable-headers");
   The reported bug: searching "react" returned reactive-element and reactor but never react
   itself, with no visible way to narrow it. Both modes already existed behind a two-value
   dropdown in a row of other dropdowns, which is why nobody found it. Driven here to prove
-  the checkbox is present, changes the query, and survives a reload — the last part matters
+  the checkbox is present, changes the query, and survives a reload - the last part matters
   because the mode lives in the URL and a shared link has to carry it.
 */
 log("23c. exact name match");
@@ -2797,8 +2797,8 @@ if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") {
 }
 
 // --- 25. horizontal overflow ------------------------------------------------
-// `/analytics` and a bulk result carry the widest tables in the app — seven
-// columns including version lists and platform summaries — so they are the routes
+// `/analytics` and a bulk result carry the widest tables in the app - seven
+// columns including version lists and platform summaries - so they are the routes
 // most likely to push the body sideways.
 const OVERFLOW_ROUTES = [
   "/",

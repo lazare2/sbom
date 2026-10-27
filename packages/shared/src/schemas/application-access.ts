@@ -9,18 +9,18 @@ import { uuidSchema } from "./common.js";
  *   environment   a hard partition. Every application is in exactly one, always. Access is
  *                 an enumeration, and an account with no environments sees nothing.
  *   this          a narrowing. An application belongs to no groups, one, or several, so this
- *                 cannot partition anything — it filters within estates already granted.
+ *                 cannot partition anything - it filters within estates already granted.
  *
  * They compose by intersection: an application is visible when its estate is granted AND it
- * passes this filter. Reversing that — letting a group grant reach into an estate the account
- * was never given — would make the environment boundary decorative, and the environment
+ * passes this filter. Reversing that - letting a group grant reach into an estate the account
+ * was never given - would make the environment boundary decorative, and the environment
  * boundary is the one this platform's numbers depend on.
  *
  * ## Unrestricted is not "granted everything"
  *
  * `unrestricted: true` means the account sees every application in its environments,
  * including ones created tomorrow. An account enumerated today does not. Collapsing the two
- * would silently narrow every existing user the first time somebody ingested a new service —
+ * would silently narrow every existing user the first time somebody ingested a new service -
  * which is the same distinction `EnvironmentAccess.all` draws, for the same reason.
  *
  * Restricted with nothing granted is a real state and means exactly nothing is visible. It is
@@ -33,7 +33,7 @@ import { uuidSchema } from "./common.js";
  * A squad grant is a union, not an intersection: being on a squad adds its applications to
  * whatever the account already reaches, and brings the estates those applications live in with
  * it. That cannot be expressed with "unrestricted" alone. An account that sees everything in
- * test and is put on a squad owning one production service must see that one service — not
+ * test and is put on a squad owning one production service must see that one service - not
  * the whole of production, which is what turning production on for an unrestricted account
  * would mean.
  *
@@ -64,7 +64,7 @@ export const UNRESTRICTED_APPLICATIONS: ApplicationAccess = {
 /**
  * Caps, and what they are actually for.
  *
- * Not about query cost — a hundred uuids in an `= ANY` is nothing. They exist because a
+ * Not about query cost - a hundred uuids in an `= ANY` is nothing. They exist because a
  * grant list that has grown past this stopped being a decision anybody made and became a
  * paste, and a per-application list that long is a sign the groups are wrong.
  */
@@ -79,7 +79,7 @@ export const setUserApplicationAccessSchema = z
      * had, rather than silently granting nothing and reading as a broken save.
      */
     restricted: z.boolean(),
-    /** The complete set, not a delta — the screen edits a checklist, so it knows the whole. */
+    /** The complete set, not a delta - the screen edits a checklist, so it knows the whole. */
     groupIds: z.array(uuidSchema).max(USER_GROUP_GRANT_LIMIT).default([]),
     applicationIds: z.array(uuidSchema).max(USER_APPLICATION_GRANT_LIMIT).default([]),
   })
@@ -104,7 +104,7 @@ export interface UserApplicationAccess {
    * needs the answer to "and how much is that", and two counts they have to reconcile
    * themselves is how somebody concludes a save did not work.
    *
-   * Null when the account is unrestricted — the answer is "everything in its environments",
+   * Null when the account is unrestricted - the answer is "everything in its environments",
    * and rendering a number there would invite comparing it against a restricted account's.
    */
   visibleApplicationCount: number | null;
@@ -117,7 +117,7 @@ export interface UserApplicationAccess {
  * answers "what would it reach if I pressed save", which is a different question and the one
  * an administrator is actually asking while ticking boxes. Without it the screen can only
  * recalculate after the write, so a correct grant is indistinguishable from a failed one until
- * the modal is reopened — and the reasonable conclusion from that is that the save did not
+ * the modal is reopened - and the reasonable conclusion from that is that the save did not
  * work.
  */
 export const previewUserApplicationAccessSchema = z.object({
@@ -175,6 +175,11 @@ export interface ReachableApplication {
    * and unticking the account's own boxes will not remove it.
    */
   viaSquads: string[];
+  /**
+   * Tribes, above the account's squads, that the application is assigned to directly. Members
+   * of every squad in a tribe see its applications.
+   */
+  viaTribes: string[];
 }
 
 /**

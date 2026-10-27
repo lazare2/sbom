@@ -24,7 +24,7 @@ import { renderReportPdf } from "../reports/pdf.js";
  *
  * That is also why the PDF accepts the vulnerability filter. A screen showing four
  * critical findings next to a Download button that produced a report about four thousand
- * would be the precise drift this shape exists to prevent — so the filter travels with
+ * would be the precise drift this shape exists to prevent - so the filter travels with
  * the request, and the PDF prints what it was narrowed by.
  */
 export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -101,7 +101,7 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
       .header("Content-Disposition", `inline; filename="${filename}"`)
       .header("Content-Length", String(pdf.length))
       // Regenerated from live data on every request, and the response embeds the
-      // generation time — a cached copy would be a report that lies about its own
+      // generation time - a cached copy would be a report that lies about its own
       // freshness.
       .header("Cache-Control", "no-store")
       .send(pdf);

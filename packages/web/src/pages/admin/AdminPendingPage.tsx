@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import type { ApplicationSummary, Attributes, SortDirection } from "@sbom/shared";
 import { applicationSort } from "@sbom/shared";
 import { useServerSort } from "../../lib/useSort.ts";
-import { AttributeFields } from "../../components/AttributeFields.tsx";
+import { AttributeFields, missingRequiredAttributes } from "../../components/AttributeFields.tsx";
 import { formatNumber, formatRelative } from "../../lib/format.ts";
 import {
   useConfirmApplication,
@@ -36,8 +36,8 @@ import {
  * Triage for applications the ingest endpoint created on its own.
  *
  * These exist because a scan arrived under an `app_name` matching nothing. The
- * platform never rejects that upload — losing a build's SBOM because nobody
- * pre-registered the repo would be the worse failure — so the cost is this
+ * platform never rejects that upload - losing a build's SBOM because nobody
+ * pre-registered the repo would be the worse failure - so the cost is this
  * queue, and the four resolutions below are how it gets drained.
  */
 export function AdminPendingPage() {
@@ -221,6 +221,7 @@ function ConfirmModal({ target, onClose }: { target: ApplicationSummary | null; 
   const confirmApp = useConfirmApplication();
   const [name, setName] = useState("");
   const [attributes, setAttributes] = useState<Attributes>({});
+  const missing = missingRequiredAttributes(definitions.data ?? [], attributes);
 
   useEffect(() => {
     if (!target) return;
@@ -258,7 +259,7 @@ function ConfirmModal({ target, onClose }: { target: ApplicationSummary | null; 
             variant="primary"
             type="submit"
             form="confirm-app-form"
-            disabled={!name.trim() || confirmApp.isPending}
+            disabled={!name.trim() || confirmApp.isPending || missing.length > 0}
           >
             {confirmApp.isPending ? "Confirming…" : "Confirm and activate"}
           </Button>
@@ -294,6 +295,11 @@ function ConfirmModal({ target, onClose }: { target: ApplicationSummary | null; 
             onChange={setAttributes}
             idPrefix="confirm"
           />
+          {missing.length > 0 ? (
+            <p className="mt-2 text-xs text-warn">
+              Required before saving: {missing.join(", ")}.
+            </p>
+          ) : null}
         </div>
       </form>
     </Modal>
@@ -307,7 +313,7 @@ function MergeModal({ target, onClose }: { target: ApplicationSummary | null; on
   const [always, setAlways] = useState(true);
   const debounced = useDebounced(search, 250);
 
-  // Merge destinations must already be confirmed — merging one unconfirmed
+  // Merge destinations must already be confirmed - merging one unconfirmed
   // record into another just moves the problem.
   const candidates = useApplications({
     search: debounced || undefined,
@@ -327,7 +333,7 @@ function MergeModal({ target, onClose }: { target: ApplicationSummary | null; on
 
   const options = useMemo(
     () => [
-      { value: "", label: "— choose an application —" },
+      { value: "", label: "- choose an application -" },
       ...(candidates.data?.items ?? []).map((a) => ({ value: a.id, label: a.name })),
     ],
     [candidates.data],

@@ -16,7 +16,7 @@ import type {
 /**
  * The `VulnerabilityScanner` port, backed by an organisation's own JFrog Xray.
  *
- * Everything upstream — the sweep, the frozen per-scan summaries, every dashboard figure —
+ * Everything upstream - the sweep, the frozen per-scan summaries, every dashboard figure -
  * is written against this port and cannot tell which implementation answered. That is the
  * point: adding a second vulnerability database should not require a second code path
  * through the platform.
@@ -29,7 +29,7 @@ import type {
  * build timestamp this platform can read.
  *
  * Those methods therefore answer honestly rather than pretending. `updateDb` does not
- * silently succeed — reporting "already current" would be a claim about a database this
+ * silently succeed - reporting "already current" would be a claim about a database this
  * platform has no visibility into, and an administrator watching the update log would take
  * it as confirmation that something happened.
  */
@@ -97,7 +97,7 @@ export class XrayScanner implements VulnerabilityScanner {
    * The remote database, as far as it can be described from here.
    *
    * `builtAt` is null and stays null: Xray publishes no build timestamp for its feed, and
-   * inventing one — the time of the last successful call, say — would put a date on the
+   * inventing one - the time of the last successful call, say - would put a date on the
    * admin screen that looks like a database age and is not one. The platform shows "not
    * reported" instead, which is true.
    *
@@ -122,7 +122,7 @@ export class XrayScanner implements VulnerabilityScanner {
    *
    * Deliberately not derived from anything that moves on its own. A component assessed at
    * the current epoch is up to date until somebody changes the connection or the interval
-   * rolls over — which is the same contract Grype's build timestamp provides, expressed by
+   * rolls over - which is the same contract Grype's build timestamp provides, expressed by
    * the only side that can know it.
    */
   async watermark(): Promise<Date | null> {
@@ -158,7 +158,7 @@ export class XrayScanner implements VulnerabilityScanner {
     return {
       outcome: "failed",
       message:
-        "JFrog Xray maintains its own vulnerability database. There is nothing for this platform to download — its synchronisation is managed on the Xray server.",
+        "JFrog Xray maintains its own vulnerability database. There is nothing for this platform to download - its synchronisation is managed on the Xray server.",
       builtBefore: null,
       builtAfter: null,
       schemaVersion: null,
@@ -184,8 +184,8 @@ export class XrayScanner implements VulnerabilityScanner {
    * ## Packages that cannot be expressed are not silently dropped
    *
    * `submittedComponentIds` is what the sweep marks as scanned, and it deliberately contains
-   * only the components that were actually sent. A package with no coordinate — an ecosystem
-   * Xray has no identifier for, an OS package with no architecture — is left out of that
+   * only the components that were actually sent. A package with no coordinate - an ecosystem
+   * Xray has no identifier for, an OS package with no architecture - is left out of that
    * list, so the sweep does not stamp it as assessed and every figure derived from it reads
    * as not assessed rather than as clean.
    *
@@ -254,8 +254,8 @@ export class XrayScanner implements VulnerabilityScanner {
    * whose canary comes back with no findings is reported as uncovered, and everything in it
    * is then rendered as not assessed rather than as clean.
    *
-   * This is the manual database-health check from the original investigation — Log4Shell and
-   * a vulnerable lodash, to prove the server was synchronised rather than silently empty —
+   * This is the manual database-health check from the original investigation - Log4Shell and
+   * a vulnerable lodash, to prove the server was synchronised rather than silently empty -
    * turned into something the platform performs for itself and repeats whenever the
    * connection is tested.
    *

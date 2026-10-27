@@ -30,7 +30,7 @@ import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
  * Written as tagged SQL rather than the query builder for the list and search
  * paths. Two reasons: the `count(*) OVER ()` total has no builder equivalent, and
  * the attribute filters must compile to jsonb containment (`@>`) to hit the GIN
- * index — a `->>` comparison silently degrades to a sequential scan over every
+ * index - a `->>` comparison silently degrades to a sequential scan over every
  * application, which is precisely the regression that is easy to introduce and
  * hard to notice.
  */
@@ -75,7 +75,7 @@ export class ApplicationsService {
      * Default visibility: active plus pending_confirmation.
      *
      * Per the access model, unconfirmed applications are visible to every
-     * authenticated user — a scan arriving for an unknown repo should be
+     * authenticated user - a scan arriving for an unknown repo should be
      * discoverable immediately, not hidden until an admin gets to it. Inactive
      * apps are the ones that stay out of the way unless explicitly requested.
      */
@@ -83,8 +83,8 @@ export class ApplicationsService {
     /**
      * Built as an explicit `IN (...)` bind list rather than `= ANY($1::text[])`.
      *
-     * Drizzle expands a JS array inside a `sql` template into a tuple — `($1,
-     * $2)` — not a single array parameter, so the array form fails at runtime
+     * Drizzle expands a JS array inside a `sql` template into a tuple - `($1,
+     * $2)` - not a single array parameter, so the array form fails at runtime
      * with "cannot cast type record to text[]". One bind per value sidesteps the
      * ambiguity and does not depend on how the driver serialises arrays.
      */
@@ -99,9 +99,24 @@ export class ApplicationsService {
       conditions.push(sql`a.name ILIKE ${"%" + query.search + "%"}`);
     }
 
-    // Attribute filters as jsonb containment so the GIN index applies.
+    /*
+      Squad and tribe filter on the assignments their attributes are built from, not on the
+      attribute text: an application can be on several squads, and its attribute then reads
+      "payments, storefront", which a containment match on "payments" would miss.
+    */
+    if (query.squad) {
+      conditions.push(sql`EXISTS (
+        SELECT 1 FROM squad_application fsa JOIN squad fs ON fs.id = fsa.squad_id
+         WHERE fsa.application_id = a.id AND lower(fs.name) = lower(${query.squad}))`);
+    }
+    if (query.tribe) {
+      conditions.push(sql`EXISTS (
+        SELECT 1 FROM tribe_application fta JOIN tribe ft ON ft.id = fta.tribe_id
+         WHERE fta.application_id = a.id AND lower(ft.name) = lower(${query.tribe}))`);
+    }
+
+    // The other attribute filters as jsonb containment so the GIN index applies.
     for (const [key, value] of [
-      ["squad", query.squad],
       ["owner", query.owner],
       ["severity", query.severity],
     ] as const) {
@@ -127,7 +142,7 @@ export class ApplicationsService {
       /**
        * jsonb containment, not `->>`. The runtimes column is an ARRAY of
        * objects, and `@>` with a single-element array asks "does this array
-       * contain an element with these fields" — which is both correct and the
+       * contain an element with these fields" - which is both correct and the
        * only form the GIN index on the column can serve. Extracting an element
        * by position would also silently miss an image with two runtimes.
        */
@@ -139,7 +154,7 @@ export class ApplicationsService {
 
     /*
       Membership filter. EXISTS rather than a join so an application in two of the selected
-      group's overlapping sets still appears once — a join would emit it per matching row.
+      group's overlapping sets still appears once - a join would emit it per matching row.
     */
     if (query.group) {
       conditions.push(sql`EXISTS (
@@ -254,7 +269,7 @@ export class ApplicationsService {
 
           NULLS LAST in both directions. An application whose current build has no summary row
           has not been assessed, and ranking it either first or last on a numeric scale would
-          assert something the data does not support — so it sorts out of the way instead,
+          assert something the data does not support - so it sorts out of the way instead,
           exactly as `lastScanAt` treats "never scanned".
 
           Sorting on the sum does not use `scan_vuln_summary_rank_idx`, which is on
@@ -407,7 +422,7 @@ export class ApplicationsService {
 
     if (query.search) {
       // A single scan is a bounded set (thousands, not millions), so a plain
-      // ILIKE is the right tool here — the trigram index exists for the global
+      // ILIKE is the right tool here - the trigram index exists for the global
       // search that spans every component in the organisation.
       conditions.push(sql`c.name ILIKE ${"%" + query.search + "%"}`);
     }
@@ -451,6 +466,25 @@ export class ApplicationsService {
 
   /** Distinct attribute values across all applications, for filter dropdowns. */
   async listAttributeValues(key: string, scope: ReadScope): Promise<string[]> {
+    // One entry per squad or tribe rather than per distinct attribute text, which for an
+    // application on two squads would offer "payments, storefront" as a value of its own.
+    if (key === "squad" || key === "tribe") {
+      const teamRows = await this.deps.db.execute<Row<{ value: string }>>(
+        key === "squad"
+          ? sql`SELECT DISTINCT t.name AS value
+                  FROM squad_application x JOIN squad t ON t.id = x.squad_id
+                  JOIN application a ON a.id = x.application_id
+                 WHERE ${applicationInScope("a", scope)}
+                 ORDER BY value ASC LIMIT 500`
+          : sql`SELECT DISTINCT t.name AS value
+                  FROM tribe_application x JOIN tribe t ON t.id = x.tribe_id
+                  JOIN application a ON a.id = x.application_id
+                 WHERE ${applicationInScope("a", scope)}
+                 ORDER BY value ASC LIMIT 500`,
+      );
+      return rowsOf(teamRows).map((r) => r.value);
+    }
+
     // `key` reaches SQL as a bind parameter, never interpolated.
     const rows = await this.deps.db.execute<Row<{ value: string }>>(sql`
       SELECT DISTINCT a.attributes ->> ${key} AS value
@@ -467,7 +501,7 @@ export class ApplicationsService {
 }
 
 /**
- * Sort clause for a component list — a scan's inventory, or an application's history.
+ * Sort clause for a component list - a scan's inventory, or an application's history.
  *
  * Exported and shared by every component table rather than repeated per query: they are
  * the same columns over the same join, and one function is what stops the same header
@@ -512,7 +546,7 @@ interface ApplicationListRow extends PlatformRow {
   scan_count: number | string;
   created_at: Date | string;
   latest_component_count: number | string | null;
-  /** Always an array — the aggregate coalesces to `[]` rather than null for an ungrouped app. */
+  /** Always an array - the aggregate coalesces to `[]` rather than null for an ungrouped app. */
   groups: Array<{ id: string; name: string }> | null;
   /*
     All six are null together when the current build has no summary row, which is the
@@ -606,7 +640,7 @@ function toApplicationSummary(row: ApplicationListRow, vulnEnabled: boolean): Ap
     isStale: row.is_stale === true,
     createdAt: toIso(row.created_at)!,
     // Null when the application has never been scanned. Distinct from a scan
-    // whose SBOM revealed no platform, which yields an object of nulls — a
+    // whose SBOM revealed no platform, which yields an object of nulls - a
     // scratch image is not the same as no data.
     platform: row.latest_scan_id === null ? null : toScanPlatform(row),
   };

@@ -44,9 +44,9 @@ import {
  * Bulk package list search.
  *
  * Answers a different question from the single search: not "who ships X" but "of
- * these N packages, which are in the estate at all". That inverts what matters —
+ * these N packages, which are in the estate at all". That inverts what matters -
  * if three of forty are present, the answer is mostly about the thirty-seven that
- * are not — so the default view is one row per submitted line, misses included.
+ * are not - so the default view is one row per submitted line, misses included.
  *
  * Submitting navigates to `/search/list/:id`. The list has to travel in a POST
  * body (several hundred packages will not fit in a URL), and persisting it is what
@@ -108,7 +108,7 @@ export function BulkPackageSearch() {
   const recent = useRecentPackageLists();
 
   // Repopulate the box from a shared link, including the lines that failed to
-  // parse — those are the ones the recipient will want to fix.
+  // parse - those are the ones the recipient will want to fix.
   useEffect(() => {
     if (query.data?.input) setText(query.data.input);
   }, [query.data?.input]);
@@ -207,7 +207,7 @@ export function BulkPackageSearch() {
         */}
         <p className="border-t border-border-base px-3 py-2 text-[11px] text-text-faint">
           Usage narrows which applications are listed. Whether a package exists at all is always
-          reported against the full retained history, so “not found” means never seen — not merely
+          reported against the full retained history, so “not found” means never seen - not merely
           absent today.{" "}
           {state.match === "exact"
             ? "Each line matches one package, by exact name."
@@ -271,7 +271,7 @@ export function BulkPackageSearch() {
               subtitle={
                 state.view === "rollup"
                   ? "One row per package you submitted. Click a package to open it in the single search."
-                  : `${formatNumber(result.matches?.total ?? 0)} application–package pair${
+                  : `${formatNumber(result.matches?.total ?? 0)} application - package pair${
                       (result.matches?.total ?? 0) === 1 ? "" : "s"
                     }`
               }
@@ -296,7 +296,7 @@ export function BulkPackageSearch() {
                   </div>
                   {/*
                     A plain link, not a fetch: the endpoint is a GET on the saved
-                    list, which is the payoff for persisting it — no re-posting the
+                    list, which is the payoff for persisting it - no re-posting the
                     body and no synthesised blob URL.
                   */}
                   <a
@@ -399,7 +399,7 @@ function ParseNotices({ result }: { result: { parse: BulkRollupResultParse } }) 
       {parse.truncated ? (
         <div role="alert" className="rounded-lg border border-warn bg-warn-subtle px-4 py-2.5 text-xs text-warn">
           The list was cut at {formatNumber(BULK_SEARCH_MAX_ENTRIES)} packages. Everything past that was not
-          searched — split the list and run it in batches.
+          searched - split the list and run it in batches.
         </div>
       ) : null}
 
@@ -414,7 +414,7 @@ function ParseNotices({ result }: { result: { parse: BulkRollupResultParse } }) 
             {parse.problems.slice(0, 8).map((problem) => (
               <li key={problem.line} className="text-xs text-text-muted">
                 <span className="text-text-faint">line {problem.line}:</span>{" "}
-                <Mono>{problem.raw}</Mono> — {problem.reason}
+                <Mono>{problem.raw}</Mono> - {problem.reason}
               </li>
             ))}
             {parse.problems.length > 8 ? (
@@ -449,7 +449,7 @@ type BulkRollupResultParse = {
  * is a different and far more interesting answer than *we do not have it*.
  */
 /*
-  Defaults to `line` ascending — the order the list was pasted in. That is the whole point
+  Defaults to `line` ascending - the order the list was pasted in. That is the whole point
   of the rollup: someone checking their own 200-line list against the results should be able
   to read down both in step. Any other default would break that on first load, so the other
   orders are available but never assumed.
@@ -568,7 +568,7 @@ function RollupTable({ rows, match }: { rows: readonly BulkRollupRow[]; match: N
                     {row.versionKind === "version-ignored" ? (
                       <span
                         className="ml-1 text-[11px] text-warn"
-                        title="Not a single version — a range, wildcard or tag. Matched across every version instead, so this row may over-report."
+                        title="Not a single version - a range, wildcard or tag. Matched across every version instead, so this row may over-report."
                       >
                         (ignored)
                       </span>
@@ -581,7 +581,7 @@ function RollupTable({ rows, match }: { rows: readonly BulkRollupRow[]; match: N
               </Td>
               <Td>
                 {row.versionsFound.length === 0 ? (
-                  <span className="text-xs text-text-faint">—</span>
+                  <span className="text-xs text-text-faint">-</span>
                 ) : (
                   <Mono>
                     {row.versionsFound.join(", ")}

@@ -47,7 +47,7 @@ function removedOrderBy(sortBy: ListRemovedComponentsQuery["sortBy"], dir: SortD
  *
  * A base-image change can legitimately swap thousands of OS packages at once,
  * and rendering 40,000 rows helps nobody. The response reports `truncated` so
- * the UI can say so rather than quietly showing a partial answer — a diff that
+ * the UI can say so rather than quietly showing a partial answer - a diff that
  * silently omits rows is worse than one that admits it stopped counting.
  */
 const DIFF_CAP = 2000;
@@ -101,7 +101,7 @@ export class DiffService {
      *
      * It used to ride along on the first row of the query below. That query
      * returns *only* rows that differ, so two identical builds produced no rows
-     * at all and the count silently read as zero — the UI then reported "0
+     * at all and the count silently read as zero - the UI then reported "0
      * unchanged" for two builds sharing every package, which says the exact
      * opposite of the truth. A count that only works when there is something
      * else to report is not a count.
@@ -189,7 +189,7 @@ export class DiffService {
 
     if (!app.latest_scan_id) {
       // Never scanned: nothing has been shipped, so nothing can have been
-      // dropped. An empty page, not a 404 — the application does exist.
+      // dropped. An empty page, not a 404 - the application does exist.
       return { ...paginate<RemovedComponent>([], 0, query), latestScanId: null };
     }
 
@@ -199,7 +199,7 @@ export class DiffService {
 
     /**
      * With `ignoreVersion`, a package counts as gone only when no version of it
-     * remains — so a routine upgrade does not appear. Without it (the default),
+     * remains - so a routine upgrade does not appear. Without it (the default),
      * the specific version that left is reported, which is what someone tracking
      * a known-bad release needs to see.
      */
@@ -292,8 +292,8 @@ export class DiffService {
       const seen = byId.get(c.id);
       return {
         ...c,
-        // The fallback cannot normally happen — the component was in the `from`
-        // scan, which is at or before `asOf` — but a null-free contract keeps
+        // The fallback cannot normally happen - the component was in the `from`
+        // scan, which is at or before `asOf` - but a null-free contract keeps
         // the UI from having to render an empty provenance cell.
         lastSeenScanId: seen?.last_seen_scan_id ?? "",
         lastSeenAt: seen ? toIso(seen.last_seen_at)! : "",
@@ -368,7 +368,7 @@ export class DiffService {
  *
  * Matched on lowercased name + ecosystem, and only when exactly one entry
  * appears on each side. A package with two versions added and one removed is
- * genuinely ambiguous — which of the two is "the upgrade"? — so those stay in
+ * genuinely ambiguous - which of the two is "the upgrade"? - so those stay in
  * the raw added and removed lists rather than being paired arbitrarily.
  */
 export function pairVersionChanges(

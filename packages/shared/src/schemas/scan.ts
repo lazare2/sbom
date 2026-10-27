@@ -3,11 +3,12 @@ import type { ScanSource } from "../enums.js";
 import { paginationQuerySchema, uuidSchema } from "./common.js";
 import { defineSortTable } from "./sort.js";
 import type { ComponentLocation } from "./location.js";
+import type { SeverityCounts } from "./vulnerability.js";
 
 /**
  * Sortable columns of an application's scan history.
  *
- * Defaults to newest first — a build list is read from the top, and "what shipped most
+ * Defaults to newest first - a build list is read from the top, and "what shipped most
  * recently" is the question the page exists to answer.
  */
 export const scanHistorySort = defineSortTable(
@@ -45,7 +46,7 @@ export interface DetectedRuntime {
  *
  * This describes observed *contents*, not image ancestry. An SBOM sees a
  * flattened filesystem, so nothing here can report that the Dockerfile said
- * `FROM node:22-alpine` — only that Node 22 and Alpine files are present.
+ * `FROM node:22-alpine` - only that Node 22 and Alpine files are present.
  */
 export interface ScanPlatform {
   osName: string | null;
@@ -66,7 +67,7 @@ export interface ScanSummary {
   imageRef: string | null;
   branch: string | null;
   componentCount: number;
-  /** CycloneDX `metadata.tools` — which Syft version produced this SBOM. */
+  /** CycloneDX `metadata.tools` - which Syft version produced this SBOM. */
   toolName: string | null;
   toolVersion: string | null;
   sbomSizeBytes: number;
@@ -101,9 +102,32 @@ export interface ScanSummary {
    * re-report its locations as missing when they are there.
    */
   dependenciesExtractedAt: string | null;
+  /**
+   * This build's vulnerability counts, application and base image apart. Null when the build has
+   * never been matched (scanning off, or not reached yet).
+   */
+  vulnerabilities: ScanVulnerabilityCounts | null;
 }
 
-/** Sortable columns of a component list — a scan's inventory, or an application's. */
+/** One build's findings by severity, split into its own dependencies and its base image. */
+export interface ScanSeverityCounts {
+  app: SeverityCounts;
+  os: SeverityCounts;
+}
+
+export interface ScanVulnerabilityCounts {
+  /** Against the current vulnerability database. Moves with every database update. */
+  today: ScanSeverityCounts;
+  /**
+   * As they stood when a newer build replaced this one as the application's current state,
+   * frozen at that moment. Null for the current build, and for builds replaced before these
+   * figures were recorded.
+   */
+  whenReplaced: ScanSeverityCounts | null;
+  replacedAt: string | null;
+}
+
+/** Sortable columns of a component list - a scan's inventory, or an application's. */
 export const componentListSort = defineSortTable(
   { name: "text", version: "text", ecosystem: "text", purl: "text" } as const,
   "name",
@@ -130,7 +154,7 @@ export interface ComponentRef {
  *
  * Separate from `ComponentRef` because the location belongs to the scan, not to the package.
  * The diff and removed-package views compare packages across scans and deliberately keep the
- * plainer shape — a path that came from one of the two scans being compared would be read as
+ * plainer shape - a path that came from one of the two scans being compared would be read as
  * applying to both.
  */
 export interface ScanComponentEntry extends ComponentRef {
@@ -199,7 +223,7 @@ export const listRemovedComponentsQuerySchema = paginationQuerySchema
     /**
      * When true, a package counts as removed only if no version of it remains.
      * When false (the default), an upgraded package reports its old version as
-     * removed — which is usually what someone auditing a specific vulnerable
+     * removed - which is usually what someone auditing a specific vulnerable
      * version wants to see.
      */
     ignoreVersion: z
@@ -237,7 +261,7 @@ export interface DeleteScanResponse {
   /**
    * Whether the raw CycloneDX document was removed along with the scan.
    *
-   * False when another scan still holds a byte-identical SBOM — blobs are
+   * False when another scan still holds a byte-identical SBOM - blobs are
    * content-addressed and therefore shared, so a rebuild of unchanged code has
    * the same key. Reported rather than assumed, because "the original upload is
    * gone" is a different claim from "the scan record is gone".

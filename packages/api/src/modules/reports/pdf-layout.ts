@@ -9,8 +9,8 @@
  *
  * Only the standard-14 fonts are used, so no font files ship with the build. Those cover
  * Latin-1; a package name in Cyrillic or CJK would render as substituted glyphs. Package
- * names are ASCII in every ecosystem the platform ingests, and the alternative — embedding a
- * full Unicode TTF — costs several megabytes on every report for a case that has not
+ * names are ASCII in every ecosystem the platform ingests, and the alternative - embedding a
+ * full Unicode TTF - costs several megabytes on every report for a case that has not
  * occurred.
  */
 
@@ -41,7 +41,7 @@ export interface Column<T> {
   /** Fraction of the content width. The set should sum to 1. */
   width: number;
   align?: "left" | "right";
-  /** Rendered text. Return "—" for absent values rather than an empty cell. */
+  /** Rendered text. Return " - " for absent values rather than an empty cell. */
   value: (row: T, index: number) => string;
   /** Monospace-ish treatment for versions and identifiers. */
   mono?: boolean;
@@ -51,7 +51,7 @@ export interface Column<T> {
  * Cursor and page management.
  *
  * pdfkit tracks `doc.y` itself, but its automatic flow breaks pages wherever the
- * cursor happens to land — which puts a section heading alone at the bottom of a
+ * cursor happens to land - which puts a section heading alone at the bottom of a
  * page and splits three-row tables across two. This wrapper makes the break
  * decision explicit at each block boundary instead.
  */
@@ -97,7 +97,7 @@ export class Layout {
    */
   heading(text: string, subtitle?: string): void {
     // Enough room for the heading, its subtitle, and the first two rows of
-    // whatever follows — a heading stranded at the foot of a page is worse than
+    // whatever follows - a heading stranded at the foot of a page is worse than
     // an early break.
     this.ensureSpace(subtitle ? 78 : 62);
     this.doc
@@ -125,7 +125,7 @@ export class Layout {
       .text(text, MARGIN, this.doc.y, { width: CONTENT_WIDTH, lineGap: 1.5 });
   }
 
-  /** "Nothing to report" — stated, never left as an empty gap under a heading. */
+  /** "Nothing to report" - stated, never left as an empty gap under a heading. */
   emptyNote(text: string): void {
     this.ensureSpace(26);
     this.doc
@@ -150,7 +150,7 @@ export function fmt(value: number): string {
  *
  * pdfkit's own `ellipsis` option is not dependable here. With `lineBreak: false`
  * it still breaks a platform summary at its middot separators, and the overflow
- * line lands on top of the next table row — a defect that reads as corrupted
+ * line lands on top of the next table row - a defect that reads as corrupted
  * output rather than as truncation. Measuring and cutting the string ourselves is
  * the only way to guarantee a single-line cell.
  *
@@ -176,9 +176,9 @@ export function fit(doc: Doc, text: string, width: number): string {
 }
 
 export function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return " - ";
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return " - ";
   // Fixed en-GB style rather than the server's locale: a report archived on one
   // machine and read on another must not change meaning, and 11/08/2026 is
   // ambiguous in a way "11 Aug 2026" is not.
@@ -186,9 +186,9 @@ export function fmtDate(iso: string | null): string {
 }
 
 export function fmtDateTime(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return " - ";
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return " - ";
   return `${fmtDate(iso)}, ${d.toISOString().slice(11, 16)} UTC`;
 }
 

@@ -33,11 +33,11 @@
   before_script:
     - |
       if [ -z "${SBOM_IMAGE:-}" ]; then
-        echo "SBOM_IMAGE is not set — point it at the image this pipeline just built." >&2
+        echo "SBOM_IMAGE is not set - point it at the image this pipeline just built." >&2
         exit 1
       fi
       if [ -z "${SBOM_INGEST_TOKEN:-}" ]; then
-        echo "SBOM_INGEST_TOKEN is not set — add it as a masked group-level CI/CD variable." >&2
+        echo "SBOM_INGEST_TOKEN is not set - add it as a masked group-level CI/CD variable." >&2
         exit 1
       fi
   script:
@@ -75,7 +75,7 @@
 
       if [ "$UPLOAD_STATUS" -ne 0 ]; then
         if [ "${SBOM_REQUIRED}" = "true" ]; then
-          echo "SBOM upload failed and SBOM_REQUIRED=true — failing the job." >&2
+          echo "SBOM upload failed and SBOM_REQUIRED=true - failing the job." >&2
           exit "$UPLOAD_STATUS"
         fi
         echo "SBOM upload failed (exit ${UPLOAD_STATUS}). SBOM_REQUIRED is not true, so the job is allowed to pass." >&2

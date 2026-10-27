@@ -87,7 +87,7 @@ export function AdminAuditPage() {
     <Card>
       <CardHeader
         title="Audit log"
-        subtitle="Every administrative change, oldest entries retained indefinitely. Ingest activity is not recorded here — scans are their own history."
+        subtitle="Every administrative change, oldest entries retained indefinitely. Ingest activity is not recorded here - scans are their own history."
       />
 
       <div className="flex flex-wrap items-center gap-2 border-b border-border-base px-4 py-2.5">
@@ -206,7 +206,7 @@ function AuditTarget({ entry }: { entry: AuditLogEntry }) {
     );
   }
 
-  return <span className="text-text-base">{name ?? entry.targetId?.slice(0, 8) ?? "—"}</span>;
+  return <span className="text-text-base">{name ?? entry.targetId?.slice(0, 8) ?? " - "}</span>;
 }
 
 /** One line of the most useful field for each action type. */
@@ -260,8 +260,8 @@ function AuditDetail({ entry }: { entry: AuditLogEntry }) {
   }
 
   if (entry.action.startsWith("application.alias")) {
-    return <code className="font-mono text-xs">{str(m.aliasName) ?? "—"}</code>;
+    return <code className="font-mono text-xs">{str(m.aliasName) ?? " - "}</code>;
   }
 
-  return <span className="text-text-faint">—</span>;
+  return <span className="text-text-faint">-</span>;
 }

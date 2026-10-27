@@ -27,7 +27,7 @@ import { NOT_SUPPRESSED } from "../vulnerabilities/scope.js";
  * ## The counting rule, and why it is not the dashboard's
  *
  * Everything here counts **distinct advisories**; the dashboard sums **findings**. Both are
- * right, and they answer different questions — see the note on `schemas/group.ts`. The
+ * right, and they answer different questions - see the note on `schemas/group.ts`. The
  * consequence for this file is that none of these queries can use `scan_vuln_summary`, which
  * is pre-aggregated per scan and cannot be summed without counting a shared base image once
  * per member. They join `scan_component` live instead.
@@ -157,7 +157,7 @@ export class GroupsService {
           Sorts on member count, not on advisories, and says so in the UI.
 
           Ordering by the real figure would mean computing it for every group in the table
-          before the LIMIT can be applied — the exact whole-estate join this file is shaped
+          before the LIMIT can be applied - the exact whole-estate join this file is shaped
           to avoid. Member count is the honest available proxy, and a silent fallback to
           name order would be worse: the header would look like it did nothing.
         */

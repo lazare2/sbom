@@ -4,7 +4,7 @@ import { applicationNameSchema } from "./application.js";
 /**
  * Metadata fields accepted alongside the `sbom` file part on
  * `POST /api/v1/scans`. Sent as `multipart/form-data`, so every value arrives
- * as a string and empty strings must be treated as absent — CI templates
+ * as a string and empty strings must be treated as absent - CI templates
  * routinely interpolate unset variables into empty form fields.
  */
 const optionalFormString = (max: number) =>
@@ -41,7 +41,7 @@ export type IngestScanFields = z.infer<typeof ingestScanFieldsSchema>;
 
 /**
  * Metadata accepted alongside the `sbom` file part on
- * `POST /api/v1/applications/:id/scans` — a signed-in user uploading an SBOM by
+ * `POST /api/v1/applications/:id/scans` - a signed-in user uploading an SBOM by
  * hand from an application's scan history.
  *
  * Deliberately the same field names as the CI form, minus `app_name` (the
@@ -61,7 +61,7 @@ export const manualUploadFieldsSchema = z.object({
    * Set to `true` to store an SBOM this application has already received.
    *
    * Without it, a byte-identical re-upload is refused with a 409 rather than
-   * silently creating a second identical build — a double-click on the upload
+   * silently creating a second identical build - a double-click on the upload
    * button is far more likely than a genuine need for the duplicate.
    */
   allow_duplicate: z
@@ -91,8 +91,8 @@ export interface ManualUploadResponse extends IngestScanResponse {
   /**
    * True when this scan is now the application's current build.
    *
-   * Effectively always true — a manual upload is stamped `now()`, and the latest
-   * pointer only moves forward — but reported rather than assumed, because the
+   * Effectively always true - a manual upload is stamped `now()`, and the latest
+   * pointer only moves forward - but reported rather than assumed, because the
    * pointer is advanced by SQL that a concurrent CI push also competes in.
    */
   becameLatest: boolean;

@@ -14,7 +14,7 @@ import { USER_APPLICATION_GRANT_LIMIT, USER_GROUP_GRANT_LIMIT } from "./applicat
  * ## How a squad grant composes with the account's own
  *
  * It adds. Whatever an account reaches through its own environment and application grants it
- * still reaches, and each squad it is on contributes its applications on top — including the
+ * still reaches, and each squad it is on contributes its applications on top - including the
  * estates those applications live in, so an administrator does not have to remember to grant
  * production separately for a squad that owns a production service. The estate comes along for
  * the squad's applications only; it does not open the rest of that estate to the member.
@@ -22,13 +22,19 @@ import { USER_APPLICATION_GRANT_LIMIT, USER_GROUP_GRANT_LIMIT } from "./applicat
  * Administrators are unaffected either way: they reach everything by role.
  */
 
-/** Squad names follow group names: short, human, unique without regard to case. */
-const squadNameSchema = z
+/**
+ * Squad and tribe names follow group names: short, human, unique without regard to case.
+ *
+ * No commas: an application's "squad" and "tribe" attributes hold several names separated by
+ * commas, so a name containing one would read back as two.
+ */
+export const teamNameSchema = z
   .string()
   .trim()
   .min(1, "required")
   .max(120)
-  .regex(/^[^\p{C}]+$/u, "must not contain control characters");
+  .regex(/^[^\p{C}]+$/u, "must not contain control characters")
+  .regex(/^[^,]+$/, "must not contain a comma");
 
 /**
  * The team's own address.
@@ -36,7 +42,7 @@ const squadNameSchema = z
  * Not a login identifier, unlike an account's: this one is meant to receive mail, so it is
  * checked as an address. Blank clears it.
  */
-const squadEmailSchema = z
+export const teamEmailSchema = z
   .string()
   .trim()
   .max(320)
@@ -44,35 +50,49 @@ const squadEmailSchema = z
   .pipe(z.string().email("must be an email address").nullable())
   .nullable();
 
-const descriptionSchema = z
+export const teamDescriptionSchema = z
   .string()
   .trim()
   .max(2000)
   .transform((v) => (v === "" ? null : v))
   .nullable();
 
+/** A squad can sit under several tribes; the cap is generous rather than a design limit. */
+const tribeIdsSchema = z
+  .array(uuidSchema)
+  .max(50)
+  .transform((v) => [...new Set(v)]);
+
 export const createSquadSchema = z.object({
-  name: squadNameSchema,
-  email: squadEmailSchema.optional(),
-  description: descriptionSchema.optional(),
+  name: teamNameSchema,
+  email: teamEmailSchema.optional(),
+  description: teamDescriptionSchema.optional(),
+  /** Optional unless an administrator has made a tribe required for every squad. */
+  tribeIds: tribeIdsSchema.optional(),
 });
 export type CreateSquad = z.infer<typeof createSquadSchema>;
 
 export const updateSquadSchema = z
   .object({
-    name: squadNameSchema.optional(),
-    email: squadEmailSchema.optional(),
-    description: descriptionSchema.optional(),
+    name: teamNameSchema.optional(),
+    email: teamEmailSchema.optional(),
+    description: teamDescriptionSchema.optional(),
+    tribeIds: tribeIdsSchema.optional(),
   })
-  .refine((v) => v.name !== undefined || v.email !== undefined || v.description !== undefined, {
-    message: "nothing to change",
-  });
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.email !== undefined ||
+      v.description !== undefined ||
+      v.tribeIds !== undefined,
+    { message: "nothing to change" },
+  );
 export type UpdateSquad = z.infer<typeof updateSquadSchema>;
 
 /** A squad is people, and a few hundred is already a department rather than a team. */
 export const SQUAD_MEMBER_LIMIT = 500;
 
-/** The complete member list, not a delta — the screen edits a checklist. */
+/** The complete member list, not a delta - the screen edits a checklist. */
 export const setSquadMembersSchema = z
   .object({ userIds: z.array(uuidSchema).max(SQUAD_MEMBER_LIMIT) })
   .transform((v) => ({ userIds: [...new Set(v.userIds)] }));
@@ -96,17 +116,33 @@ export const setUserSquadsSchema = z
   .transform((v) => ({ squadIds: [...new Set(v.squadIds)] }));
 export type SetUserSquads = z.infer<typeof setUserSquadsSchema>;
 
+/** Squad-wide settings. */
+export const squadSettingsSchema = z.object({
+  /** When on, a squad cannot be created or saved without at least one tribe. Off by default. */
+  requireTribe: z.boolean(),
+});
+export type SquadSettings = z.infer<typeof squadSettingsSchema>;
+
+/** A squad or tribe by name, for the lists that show which ones something belongs to. */
+export interface TeamRef {
+  id: string;
+  name: string;
+}
+
 export interface SquadSummary {
   id: string;
   name: string;
   email: string | null;
   description: string | null;
+  /** The tribes this squad sits under, by name. */
+  tribes: TeamRef[];
   memberCount: number;
   groupCount: number;
   /** Directly granted applications, not the applications reached through groups. */
   applicationCount: number;
   /**
-   * Distinct applications the squad reaches, through groups and directly.
+   * Distinct applications the squad reaches: through groups, directly, and through the
+   * applications assigned to its tribes.
    *
    * The figure an administrator actually wants from the list. Groups overlap with each other
    * and with direct grants, so the two counts beside it do not add up to this.

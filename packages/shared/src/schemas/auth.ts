@@ -5,7 +5,7 @@ import { authProviderNameSchema, userRoleSchema } from "../enums.js";
  * The login identifier.
  *
  * Deliberately NOT `z.string().email()`. These are usernames that happen to be
- * written in email form — the platform never sends mail to them, so there is
+ * written in email form - the platform never sends mail to them, so there is
  * nothing to deliver and no reason to reject an identifier that a directory
  * accepts but a strict RFC parser does not. `admin@localhost` and `svc-ci` are
  * both legitimate here; requiring a TLD would refuse an account the operator

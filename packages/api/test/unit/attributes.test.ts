@@ -11,6 +11,8 @@ function def(overrides: Partial<AttributeDefinitionRow> & { key: string }): Attr
     options: overrides.options ?? null,
     sortOrder: overrides.sortOrder ?? 0,
     isActive: overrides.isActive ?? true,
+    isRequired: overrides.isRequired ?? false,
+    linkedTo: overrides.linkedTo ?? null,
     createdAt: new Date(),
   };
 }
@@ -44,7 +46,7 @@ describe("validateAttributes", () => {
 
   /**
    * Field-level messages live in `details`, keyed by field, not in the
-   * top-level message — that is the shape the whole API validates with, and
+   * top-level message - that is the shape the whole API validates with, and
    * what lets the edit form render an error under the offending input rather
    * than one banner for the whole dialog.
    */

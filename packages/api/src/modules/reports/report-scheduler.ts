@@ -19,7 +19,7 @@ import type { ReportService } from "./report.service.js";
  *
  * Correctness against restarts does not live in this file. It lives in the unique index on
  * `(kind, period_start)` and in the conditional claim on `sent_at`, both of which are in the
- * database — because a process that is restarting is precisely the process that cannot be
+ * database - because a process that is restarting is precisely the process that cannot be
  * trusted to remember what it already did.
  */
 

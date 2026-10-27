@@ -12,7 +12,7 @@ import {
  * Server-side rather than in the browser for three reasons: the rules become part
  * of the API contract and are testable in isolation; `curl --data-binary @list.txt`
  * works for scripting; and the response can echo back how every line was read.
- * That echo is the important one — silently misreading one line of a 200-line
+ * That echo is the important one - silently misreading one line of a 200-line
  * audit is the failure nobody notices.
  *
  * Accepted per line, because these are the forms people actually have on their
@@ -53,7 +53,7 @@ const SPACED_OPERATOR = /\s*(===|==|>=|<=|!=|~=)\s*/;
 /**
  * A plausible version string.
  *
- * Deliberately loose — it has to accept `1:1.2.13.dfsg-1` (deb epoch),
+ * Deliberately loose - it has to accept `1:1.2.13.dfsg-1` (deb epoch),
  * `3.0.14-1~deb12u2`, `33.3.1-jre`, and `4.5.0-rc.1`. The one thing it insists on
  * is a leading digit, which is what separates a version from a package name in
  * the ambiguous whitespace and comma forms.
@@ -129,7 +129,7 @@ export function parseBulkInput(input: string): ParsedBulkInput {
  * The key two entries must share to be considered the same query.
  *
  * A `version-ignored` entry matches on name alone, so it collapses with a bare
- * name for the same package — `express` and `express@^4` ask the same question of
+ * name for the same package - `express` and `express@^4` ask the same question of
  * the database.
  */
 export function matchKeyOf(entry: BulkEntry): string {
@@ -153,7 +153,7 @@ function parseLine(raw: string, line: number): LineResult {
 
   const fields = cleaned.split(/[\s,\t]+/).filter((f) => f !== "");
   if (fields.length > 2) {
-    return { reason: "more than two fields — put one package on each line" };
+    return { reason: "more than two fields - put one package on each line" };
   }
 
   if (fields.length === 2) {
@@ -164,8 +164,8 @@ function parseLine(raw: string, line: number): LineResult {
 
     /*
      * The second field must actually look like a version specifier. Unlike the
-     * `@` form — where `express@latest` is a legitimate dist-tag worth echoing
-     * back — two bare words are far more likely a sentence than a package and a
+     * `@` form - where `express@latest` is a legitimate dist-tag worth echoing
+     * back - two bare words are far more likely a sentence than a package and a
      * version, so `my package` is reported rather than read as `my` at version
      * `package`.
      */
@@ -179,7 +179,7 @@ function parseLine(raw: string, line: number): LineResult {
   return parseNameAndSpecifier(cleaned, raw, line);
 }
 
-/** `pkg:npm/@scope/name@1.0.0` — the one input form that names its own ecosystem. */
+/** `pkg:npm/@scope/name@1.0.0` - the one input form that names its own ecosystem. */
 function tryPurl(value: string, line: number): BulkEntry | null {
   const match = PURL_PATTERN.exec(value);
   if (!match) return null;
@@ -204,7 +204,7 @@ function tryPurl(value: string, line: number): BulkEntry | null {
  * Reads a token as a name plus an optional version specifier.
  *
  * Order matters. The `@` separator is resolved *before* any operator, because
- * `express@^1.2.3` is a name, a separator, and a constrained version — reading
+ * `express@^1.2.3` is a name, a separator, and a constrained version - reading
  * the `^` as the separator would leave the name as `express@`.
  */
 function parseNameAndSpecifier(token: string, raw: string, line: number): LineResult {
@@ -270,8 +270,8 @@ function splitTrailingAt(token: string): { name: string; rest: string | null } {
  * Interprets the part after the separator.
  *
  * Returns null when there is nothing usable, which the caller turns into a
- * name-only match. `version` is always populated for display — the UI shows what
- * was asked for — while `kind` alone decides how it is matched.
+ * name-only match. `version` is always populated for display - the UI shows what
+ * was asked for - while `kind` alone decides how it is matched.
  */
 function readVersionSpec(input: string): { version: string; kind: BulkEntryVersionKind } | null {
   let value = input.trim();

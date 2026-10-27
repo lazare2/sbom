@@ -10,7 +10,7 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:cr
  *
  * A JFrog Xray API token breaks that pattern for an unavoidable reason: the platform has to
  * present it to Xray on every scan, so it must be recoverable. The rule it was protecting is
- * still honoured by other means — the ciphertext is never returned by any endpoint, never
+ * still honoured by other means - the ciphertext is never returned by any endpoint, never
  * logged, and never written to an audit row; the admin screen shows whether a token is
  * configured, not what it is.
  *
@@ -18,7 +18,7 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:cr
  *
  * Storing the key beside the ciphertext protects against nothing. It lives in the
  * environment, which is where this codebase already keeps every other secret, so reading the
- * database — a backup, a replica, a support dump — is not enough to recover the token.
+ * database - a backup, a replica, a support dump - is not enough to recover the token.
  *
  * ## Why AES-256-GCM
  *
@@ -41,7 +41,7 @@ const ENVELOPE_PREFIX = "v1";
  *
  * HKDF rather than using the secret directly, with a fixed `info` label: the same
  * environment secret can then be reused for another purpose later without the two sharing a
- * key. Not a password KDF — the input is required to be high-entropy, so there is nothing to
+ * key. Not a password KDF - the input is required to be high-entropy, so there is nothing to
  * slow an attacker down over.
  */
 function keyFrom(secret: string): Buffer {
@@ -74,7 +74,7 @@ export function sealSecret(plaintext: string, secret: string): string {
  * Recovers a stored secret.
  *
  * Throws rather than returning null on every failure, and the caller is expected to catch.
- * The three ways this fails — a rotated key, a truncated value, a tampered ciphertext — are
+ * The three ways this fails - a rotated key, a truncated value, a tampered ciphertext - are
  * indistinguishable by design, and all of them mean the same thing operationally: the stored
  * credential cannot be used and has to be entered again.
  */
@@ -102,7 +102,7 @@ export function openSecret(envelope: string, secret: string): string {
     /*
       Deliberately not re-thrown with the underlying reason. Node's message here distinguishes
       a bad tag from a bad key, and that difference is only useful to somebody probing the
-      key — an administrator can act on "re-enter the token" and on nothing finer.
+      key - an administrator can act on "re-enter the token" and on nothing finer.
     */
     throw new SecretBoxError(
       "Stored secret could not be decrypted. If the encryption key changed, re-enter the credential.",

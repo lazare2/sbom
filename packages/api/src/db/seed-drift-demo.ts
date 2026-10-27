@@ -18,7 +18,7 @@ import { closeDb, getDb } from "./client.js";
  * Re-runnable: it deletes the application first, so a second run replaces the
  * history rather than doubling it.
  *
- * Scans go through the real IngestionService, then timestamps are backdated —
+ * Scans go through the real IngestionService, then timestamps are backdated -
  * ingestion legitimately stamps everything `now()`, and a history where every
  * build happened in the same second exercises none of the date ordering the
  * views depend on.
@@ -144,8 +144,8 @@ function syftTypeFor(ecosystem: string): string {
  * The base image also drifts across the history: Alpine 3.19 with Node 20 for
  * the first three builds, then Alpine 3.20 with Node 22.
  *
- * Emitted the way Syft does — an `operating-system` component carrying
- * `syft:distro:*`, and runtimes marked `syft:package:type=binary` — so the same
+ * Emitted the way Syft does - an `operating-system` component carrying
+ * `syft:distro:*`, and runtimes marked `syft:package:type=binary` - so the same
  * detection code path runs as for a real scan.
  */
 function platformFor(buildIndex: number): { distro: { id: string; version: string; pretty: string }; runtimes: Pkg[] } {
@@ -240,7 +240,7 @@ function expectedRemoved(): Array<{ label: string; lastSeen: string; gone: boole
     .map(([, v]) => ({
       label: `${v.pkg.name} ${v.pkg.version}`,
       lastSeen: v.build,
-      // True when no version of this package remains — survives the
+      // True when no version of this package remains - survives the
       // "hide version upgrades" filter.
       gone: !namesInLatest.has(nameKey(v.pkg)),
     }))

@@ -5,7 +5,7 @@ import { defineSortTable } from "./sort.js";
 // --- audit trail ------------------------------------------------------------
 
 /**
- * Sortable columns of the audit trail. Newest first by default — an audit log is read
+ * Sortable columns of the audit trail. Newest first by default - an audit log is read
  * from the top, and "what just happened" is the question it is usually opened for.
  *
  * `metadata` is deliberately not sortable: it is a jsonb blob whose shape differs per
@@ -62,7 +62,7 @@ export const listApiErrorsQuerySchema = paginationQuerySchema
     code: z.string().trim().max(64).optional(),
     /** Exact status, e.g. 400. */
     statusCode: z.coerce.number().int().min(400).max(599).optional(),
-    /** Only 5xx — the platform's own failures, as opposed to a rejected request. */
+    /** Only 5xx - the platform's own failures, as opposed to a rejected request. */
     serverOnly: z.coerce.boolean().optional(),
     /** Substring match on the path, for narrowing to one screen's endpoint. */
     path: z.string().trim().max(200).optional(),
@@ -79,7 +79,7 @@ export interface ApiErrorEntry {
   code: string;
   message: string;
   /**
-   * Field path to the reasons it was rejected. Null when the failure had no fields — a 500,
+   * Field path to the reasons it was rejected. Null when the failure had no fields - a 500,
    * or a refusal that is about the request as a whole rather than one value in it.
    */
   details: Record<string, string[]> | null;
@@ -133,7 +133,7 @@ export interface IngestTokenSummary {
   tokenSuffix: string;
   isActive: boolean;
   /**
-   * `env` tokens come from configuration and cannot be revoked through the UI —
+   * `env` tokens come from configuration and cannot be revoked through the UI -
    * they exist as a break-glass path for when every database token is revoked.
    */
   source: "db" | "env";
@@ -237,7 +237,7 @@ export const updatePlatformSettingsSchema = z.object({
 });
 export type UpdatePlatformSettings = z.infer<typeof updatePlatformSettingsSchema>;
 
-/** Packages present in the most applications right now — the blast-radius list. */
+/** Packages present in the most applications right now - the blast-radius list. */
 export interface TopComponentEntry {
   componentId: string;
   name: string;
@@ -259,7 +259,7 @@ export interface TopComponentEntry {
  *
  * The upgrade-planning view: "nine applications on Node 22, three still on Node
  * 18" is the number that decides whether an upgrade is a ticket or a programme.
- * Counted over each application's current build only — a runtime that was
+ * Counted over each application's current build only - a runtime that was
  * dropped six months ago is not something anyone needs to plan around.
  */
 export interface PlatformBreakdown {

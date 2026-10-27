@@ -72,7 +72,7 @@ async function main(): Promise<void> {
       // clearly that it is unavailable.
       app.log.warn(
         { attempts: availability.attempts },
-        "vulnerability scanning is enabled but the grype binary was not found — scanning is unavailable",
+        "vulnerability scanning is enabled but the grype binary was not found - scanning is unavailable",
       );
     } else {
       app.log.info(
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
     app.ctx.reportScheduler.stop();
     try {
       // Closes the server first so in-flight ingests finish before the pool goes
-      // away — a half-committed scan would be worse than a slow shutdown.
+      // away - a half-committed scan would be worse than a slow shutdown.
       await app.close();
       await closeDb();
       process.exit(0);

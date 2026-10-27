@@ -13,19 +13,20 @@ import type { UserRow } from "../../db/schema.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../lib/errors.js";
 import { rowsOf, type Row } from "../../lib/rows.js";
 import { visibleApplications, visibleGroups } from "../access/application-access.service.js";
+import { SQUAD_APPLICATIONS } from "../squads/reach.js";
 
 /**
  * One estate, resolved and checked, together with how much of it the viewer may see.
  *
  * Services take this rather than a bare id string on purpose. A `string` parameter is easy
- * to satisfy with the wrong string — a request's raw query value, an application's id, an
- * empty default — and every one of those silently reads somebody else's estate. A nominal
+ * to satisfy with the wrong string - a request's raw query value, an application's id, an
+ * empty default - and every one of those silently reads somebody else's estate. A nominal
  * type means the only way to obtain one is to go through `resolve` or `requireDefault`,
  * both of which check access first.
  *
  * ## Why the viewer's visibility rides along
  *
- * These are two different restrictions — which estate, and which applications within it —
+ * These are two different restrictions - which estate, and which applications within it -
  * and they were nearly modelled as two parameters. One value instead, because they have to
  * be applied at exactly the same forty-odd sites, and two parameters is an invitation to
  * apply one and forget the other. There is no way to filter by estate here without also
@@ -95,13 +96,13 @@ export const UNRESTRICTED_READ: ReadAccess = readAccessOf(
 /**
  * The three scoping helpers, and why there are three rather than one.
  *
- * There used to be one `inScope(column, scope)` taking a column name — `a.environment_id`,
+ * There used to be one `inScope(column, scope)` taking a column name - `a.environment_id`,
  * `g.environment_id`, `sup.environment_id`. That was fine while the only restriction was the
  * estate, because every one of those columns means the same thing. It stopped being fine the
  * moment a second restriction arrived that applies to *applications* and not to the other
  * two: a helper deriving an alias from `g.environment_id` would happily emit a predicate
  * comparing a group's id against granted application ids, which is not wrong in a way
- * anything would catch — it would simply return the wrong rows.
+ * anything would catch - it would simply return the wrong rows.
  *
  * So the kind of thing being scoped is now named by the function rather than implied by a
  * string, and each one takes a table alias. Choosing the wrong one is visible when reading
@@ -113,7 +114,7 @@ export const UNRESTRICTED_READ: ReadAccess = readAccessOf(
 /**
  * An `application` row: in this estate, and visible to this viewer.
  *
- * For lists, aggregates, and anything that produces a number — the cases where "never mixed"
+ * For lists, aggregates, and anything that produces a number - the cases where "never mixed"
  * is the whole promise, and now also the cases where one account's dashboard must not count
  * services it cannot open.
  */
@@ -127,7 +128,7 @@ export function applicationInScope(alias: string, scope: ReadScope): SQL {
  *
  * For package search, the one view that deliberately spans environments. Spanning estates
  * must never widen what may be seen *inside* one: without the visibility half, this would be
- * the way to enumerate the names of applications an account was deliberately not granted —
+ * the way to enumerate the names of applications an account was deliberately not granted -
  * ask which packages exist and read the application column.
  *
  * Every scope in the list is produced from one `readAccess` call, so they carry the same
@@ -166,7 +167,7 @@ export function estateInScope(column: string, scope: ReadScope): SQL {
  * environment would be wrong: opening a link to an application while the switcher happens
  * to sit on another estate would 404 on a perfectly valid URL. The caller is still confined
  * to what they are granted, so this is forgiving about which estate is selected, never about
- * who may look — and under application access, never about which applications either.
+ * who may look - and under application access, never about which applications either.
  *
  * An administrator matches everything, including estates created after this request.
  */
@@ -255,7 +256,7 @@ export class EnvironmentService {
       UNION
       SELECT a.environment_id
         FROM squad_member sm
-        JOIN squad_application sa ON sa.squad_id = sm.squad_id
+        JOIN ${SQUAD_APPLICATIONS} sa ON sa.squad_id = sm.squad_id
         JOIN application a ON a.id = sa.application_id
        WHERE sm.user_id = ${user.id}::uuid
       UNION
@@ -271,8 +272,8 @@ export class EnvironmentService {
   /**
    * True when this access grants the environment. The single place that decision is made.
    *
-   * Takes the environment half alone, deliberately. This answers one question — may the
-   * caller reach this estate — and handing it the whole `ReadAccess` would invite a later
+   * Takes the environment half alone, deliberately. This answers one question - may the
+   * caller reach this estate - and handing it the whole `ReadAccess` would invite a later
    * edit to fold the application restriction in here, where it would silently become a
    * second, different answer to "can you see this environment".
    */
@@ -456,7 +457,7 @@ export class EnvironmentService {
     );
     if (Number(rowsOf(total)[0]?.count ?? 0) <= 1) {
       throw new ConflictError(
-        "This is the only environment. Create another before deleting this one — the platform needs somewhere for an upload to land.",
+        "This is the only environment. Create another before deleting this one - the platform needs somewhere for an upload to land.",
       );
     }
 

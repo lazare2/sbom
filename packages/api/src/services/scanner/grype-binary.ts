@@ -13,10 +13,10 @@ import process from "node:process";
  * Four rules, first match wins. They are ordered by how specific the intent is,
  * so an operator who has said exactly where the binary lives is never second-guessed:
  *
- *   1. `GRYPE_PATH`  — explicit. Air-gapped, distro-packaged, or anywhere unusual.
- *   2. bundled       — `var/bin/grype`, where the dev install script puts it, and
+ *   1. `GRYPE_PATH`  - explicit. Air-gapped, distro-packaged, or anywhere unusual.
+ *   2. bundled       - `var/bin/grype`, where the dev install script puts it, and
  *                      the path the container image uses.
- *   3. PATH          — a development machine, and whatever `brew`/`scoop`/`apt` did.
+ *   3. PATH          - a development machine, and whatever `brew`/`scoop`/`apt` did.
  *
  * Notably absent: any rule that reads a path out of the database. The path decides
  * which executable the server runs, so it stays in the environment where changing it
@@ -47,7 +47,7 @@ const EXECUTABLE = process.platform === "win32" ? "grype.exe" : "grype";
 /** True when the path exists and is executable by this process. */
 async function isExecutable(candidate: string): Promise<boolean> {
   try {
-    // X_OK is not meaningful on Windows — every readable file reports executable —
+    // X_OK is not meaningful on Windows - every readable file reports executable -
     // so the existence check is what actually matters there, and the spawn attempt
     // is the real test on both platforms.
     await access(candidate, constants.F_OK | (process.platform === "win32" ? 0 : constants.X_OK));
@@ -109,7 +109,7 @@ export async function resolveGrypeBinary(explicitPath?: string | undefined): Pro
   attempts.push({
     strategy: "bundled",
     location: path.join("var", "bin", EXECUTABLE),
-    reason: "not present — run `npm run grype:install` to fetch the pinned build",
+    reason: "not present - run `npm run grype:install` to fetch the pinned build",
   });
 
   // --- 3. PATH -------------------------------------------------------------

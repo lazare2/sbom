@@ -20,7 +20,7 @@ import type { SettingsService } from "../settings/settings.service.js";
  * The governing rule for this whole class is that **nothing here may break anything
  * else**. A missing binary, an unreachable listing URL, a corrupt archive and an
  * expired database are all states to report, never exceptions to propagate. Ingest
- * still returns 201, search still works, and the dashboards still render — the only
+ * still returns 201, search still works, and the dashboards still render - the only
  * thing affected by a failure here is vulnerability data itself.
  */
 
@@ -92,14 +92,14 @@ export class VulnDbService {
        * Whether a scan is currently holding the database open.
        *
        * Installing a database means deleting the old file, and on Windows a file with an
-       * open handle cannot be unlinked — grype's purge fails with "being used by another
+       * open handle cannot be unlinked - grype's purge fails with "being used by another
        * process", and it fails *after* removing import.json, which leaves a database
        * that is present but unreadable. That is worse than not updating at all: a
        * previously working installation becomes invalid because an update was attempted
        * at an unlucky moment.
        *
        * POSIX unlink-while-open would let this succeed, so the Linux container never
-       * showed it — but even there a sweep would go on matching against a file being
+       * showed it - but even there a sweep would go on matching against a file being
        * swapped underneath it and attribute the results to the wrong database build.
        * Worth excluding on every platform, not just the one that reports it.
        */
@@ -138,8 +138,8 @@ export class VulnDbService {
   /**
    * The complete picture for the admin panel.
    *
-   * Assembled from four independent sources — the settings row, the binary, the
-   * database on disk, and the update history — and reported separately rather than
+   * Assembled from four independent sources - the settings row, the binary, the
+   * database on disk, and the update history - and reported separately rather than
    * reduced to a single "healthy" flag, because an administrator needs to know
    * *which* of them to fix.
    */
@@ -175,7 +175,7 @@ export class VulnDbService {
     /*
      * The next check is derived from the last attempt rather than tracked, so it
      * cannot drift from reality after a restart. Null when scanning is off, because
-     * the scheduler genuinely is not running — showing a future time for something
+     * the scheduler genuinely is not running - showing a future time for something
      * that will not happen would be a lie.
      */
     let nextCheckAt: string | null = null;
@@ -290,8 +290,8 @@ export class VulnDbService {
    * Closes out update attempts left unfinished by a crash or restart.
    *
    * Called once at boot. An attempt with no `finished_at` holds the claim that stops
-   * another update starting, so a process killed mid-download — which `tsx watch` does on
-   * every edit, and a container restart does in production — would otherwise block the
+   * another update starting, so a process killed mid-download - which `tsx watch` does on
+   * every edit, and a container restart does in production - would otherwise block the
    * Update button for the full hour of the in-progress cutoff. That is a genuinely
    * confusing state: the panel says an update is running when nothing is.
    *
@@ -304,7 +304,7 @@ export class VulnDbService {
       UPDATE vuln_db_update
       SET finished_at = now(),
           outcome = 'failed',
-          message = COALESCE(message, 'Interrupted — the service restarted while this update was running.')
+          message = COALESCE(message, 'Interrupted - the service restarted while this update was running.')
       WHERE finished_at IS NULL
       RETURNING id
     `);

@@ -53,7 +53,7 @@ export class LocalPasswordProvider implements AuthProvider {
     }
 
     // Opportunistic upgrade if the cost parameters have been raised since this
-    // hash was written. Best-effort — a failure here must not fail the login.
+    // hash was written. Best-effort - a failure here must not fail the login.
     if (needsRehash(row.passwordHash)) {
       try {
         const rehashed = await hashPassword(credentials.password);

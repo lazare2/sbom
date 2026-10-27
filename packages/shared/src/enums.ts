@@ -21,7 +21,7 @@ export type UserRole = z.infer<typeof userRoleSchema>;
  * `ci` is a pipeline posting to `POST /api/v1/scans` with an ingest token; `manual`
  * is a signed-in user uploading a file from the application's scan history.
  *
- * Every read path — search, diffs, analytics, the estate totals — treats the two
+ * Every read path - search, diffs, analytics, the estate totals - treats the two
  * identically, and that is the point: a manually uploaded SBOM *is* the
  * application's current build. This column exists for provenance only, because a
  * hand-uploaded build that cannot be told apart from a pipeline-produced one is a
@@ -38,7 +38,7 @@ export type ScanSource = z.infer<typeof scanSourceSchema>;
 /**
  * Which auth backend owns a given user's credentials.
  *
- * `oidc` covers any OpenID Connect provider — Entra ID, Keycloak, Okta, Google — because the
+ * `oidc` covers any OpenID Connect provider - Entra ID, Keycloak, Okta, Google - because the
  * implementation reads the issuer's discovery document rather than hardcoding one vendor's
  * endpoints. Naming it after a vendor would have made the second deployment a code change.
  *

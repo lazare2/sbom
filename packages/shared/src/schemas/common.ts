@@ -40,8 +40,8 @@ export interface ApiErrorBody {
  *
  * Applies to every "count that opens to show what it counted" in the product: affected
  * packages, affected applications, applications shipping a package, applications on an OS.
- * One constant because the reader learns the rule once — a list that stops has a note
- * saying so — and because a per-table cap is a per-table surprise.
+ * One constant because the reader learns the rule once - a list that stops has a note
+ * saying so - and because a per-table cap is a per-table surprise.
  *
  * The lists ride along with every row of a page, so this is bounded for payload rather than
  * for query cost: the aggregates run either way. Generous enough that expanding a row

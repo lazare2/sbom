@@ -1,4 +1,4 @@
-# SBOM Platform — build from source.
+# SBOM Platform - build from source.
 #
 # This file builds the images from this checkout, which is what a `git clone`
 # deployment and local Docker development both want:
@@ -7,7 +7,7 @@
 #
 # deploy/docker-compose.yml is the other half of the pair: it never builds, and
 # pulls published images instead. Both declare `name: sbom-platform` and the same
-# three volumes, so they attach to the same data — you can switch between
+# three volumes, so they attach to the same data - you can switch between
 # building here and pulling there without losing anything.
 name: sbom-platform
 
@@ -23,7 +23,7 @@ services:
       POSTGRES_DB: sbom
     ports:
       # Bound to loopback deliberately. Publishing 5432 on all interfaces would
-      # expose the database to the whole network — with the default password
+      # expose the database to the whole network - with the default password
       # above, to anyone on it. Local tools (psql, drizzle-kit, the smoke test)
       # reach it on localhost exactly as before.
       # Host port from .env, because Windows reserves scattered ranges for Hyper-V and
@@ -40,7 +40,7 @@ services:
       retries: 10
 
   # No mail service. User "emails" are login identifiers rather than mailboxes,
-  # so nothing is ever sent — password recovery is an admin issuing a credential
+  # so nothing is ever sent - password recovery is an admin issuing a credential
   # through the admin panel. An earlier revision ran mailpit here to catch
   # reset links; there are none to catch.
 
@@ -76,7 +76,7 @@ services:
       BLOB_STORE_FS_ROOT: /data/sboms
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
-      # Vulnerability scanning. Grype ships in the image; the database does not — it is
+      # Vulnerability scanning. Grype ships in the image; the database does not - it is
       # ~1.9 GB expanded, so it lives on the volume below and is fetched at runtime when
       # an administrator enables scanning. Nothing is downloaded on a fresh start.
       # Outbound proxy, for "Update now" on a network that requires one.

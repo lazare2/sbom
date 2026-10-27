@@ -8,7 +8,7 @@ import { Button, FormError, Modal, Mono } from "./ui.tsx";
  * A plain confirmation rather than the type-the-name gate used for deleting an
  * application. That gate exists because deleting an application destroys its entire
  * scan record at once; this destroys one build, and the routine reason to reach for
- * it — an SBOM uploaded against the wrong application, minutes earlier — should not
+ * it - an SBOM uploaded against the wrong application, minutes earlier - should not
  * be made tedious. What the dialog owes the reader instead is precision about which
  * build is selected and what changes when it goes, both of which the history table
  * itself cannot show.
@@ -60,7 +60,7 @@ export function DeleteScanModal({
             <dt className="text-text-faint">Scanned</dt>
             <dd className="text-text-base">{formatDateTime(scan.createdAt)}</dd>
             <dt className="text-text-faint">Build</dt>
-            <dd className="text-text-base">{scan.buildNumber ?? "—"}</dd>
+            <dd className="text-text-base">{scan.buildNumber ?? " - "}</dd>
             <dt className="text-text-faint">Commit</dt>
             <dd>
               <Mono>{shortSha(scan.commitSha)}</Mono>
@@ -74,7 +74,7 @@ export function DeleteScanModal({
               <p>
                 This is the only build{" "}
                 <strong className="text-text-base">{applicationName}</strong> has. Deleting it
-                returns the application to never scanned — it keeps its name, attributes and
+                returns the application to never scanned - it keeps its name, attributes and
                 group membership, but has no components, no findings and no current state until
                 something uploads an SBOM again.
               </p>

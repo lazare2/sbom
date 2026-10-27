@@ -59,7 +59,7 @@ describe("explaining why the sweep cannot run", () => {
     );
 
     // Without this the administrator learns that something is unreachable but not whether
-    // it was refused, timed out, or rejected the credential — three different next steps.
+    // it was refused, timed out, or rejected the credential - three different next steps.
     expect(message).toContain("connect ETIMEDOUT 10.0.0.5:80");
   });
 

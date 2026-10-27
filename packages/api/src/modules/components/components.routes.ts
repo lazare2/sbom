@@ -16,7 +16,7 @@ import { renderBulkXlsx } from "./bulk-xlsx.js";
  * Rows the Excel export will include on its Matches sheet.
  *
  * A spreadsheet is the one consumer that wants the whole result set rather than a
- * page of it, but "whole" still needs a ceiling — a 1000-entry list against a
+ * page of it, but "whole" still needs a ceiling - a 1000-entry list against a
  * large estate could otherwise build a workbook in memory that nobody can open.
  * Exceeding it is stated on the sheet rather than silently trimmed.
  */
@@ -42,7 +42,7 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
     "/suggest",
     {
       // Fires on keystrokes, so it gets a higher ceiling than the default but is
-      // still bounded — a held-down key should not become a load generator.
+      // still bounded - a held-down key should not become a load generator.
       config: { rateLimit: { max: 600, timeWindow: "1 minute" } },
     },
     async (request, reply) => {
@@ -72,7 +72,7 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
    * Search a pasted list of packages.
    *
    * POST rather than GET because a list of several hundred packages does not fit
-   * in a request line — nginx caps it around 8 KB. The response carries a
+   * in a request line - nginx caps it around 8 KB. The response carries a
    * `queryId` for the saved list, which is what gives the results an address
    * despite the body-bearing request.
    */
@@ -102,7 +102,7 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
     const scope = await requireScope(request);
     const result = await bulkSearch.rerun({ queryId: id, query, scope });
     // The raw text goes back too, so opening a shared link repopulates the input
-    // box — including the lines that failed to parse, which are the ones the
+    // box - including the lines that failed to parse, which are the ones the
     // recipient will want to fix.
     return reply.send({ ...result, input: await bulkSearch.savedInput(id) });
   });

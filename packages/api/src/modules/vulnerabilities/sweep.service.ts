@@ -22,9 +22,9 @@ import { SCOPE_GROUP_EXPR } from "./scope.js";
  *   OR vuln_db_built_at IS NULL        -- matched before provenance was recorded
  *   OR vuln_db_built_at < <db build>   -- matched against an older database
  *
- * That single predicate covers every case that needs work — a newly ingested package,
+ * That single predicate covers every case that needs work - a newly ingested package,
  * the first time scanning is enabled, a freshly published database, and a sweep that
- * was killed halfway — and it is why a restart needs no recovery logic: there was
+ * was killed halfway - and it is why a restart needs no recovery logic: there was
  * never a queue to lose, only a fact to recompute.
  *
  * It is also why "when the database updates, every package gets rescanned" costs
@@ -105,7 +105,7 @@ export interface SweepProgress {
   batches: number;
   componentsScanned: number;
   findingsStored: number;
-  /** Non-zero means grype attributed findings to ids we never submitted — see the parser. */
+  /** Non-zero means grype attributed findings to ids we never submitted - see the parser. */
   unmapped: number;
 }
 
@@ -148,7 +148,7 @@ export class SweepService {
        *
        * The mirror of VulnDbService's `scanBusy`: that stops an update starting while a
        * sweep holds the database open, this stops a sweep starting while the file is
-       * being swapped. Both directions are needed — without this one the collision just
+       * being swapped. Both directions are needed - without this one the collision just
        * moves to the other ordering.
        */
       dbReplacing: () => boolean;
@@ -167,7 +167,7 @@ export class SweepService {
    * Brings the component set up to date, in batches, until nothing is pending.
    *
    * `maxBatches` bounds one invocation so an ingest-triggered sweep of a huge new
-   * application cannot run for an unbounded time — the scheduler picks up whatever is
+   * application cannot run for an unbounded time - the scheduler picks up whatever is
    * left. Returning a status rather than throwing is deliberate: every caller is a
    * background trigger that must not fail because scanning happens to be off.
    */
@@ -180,7 +180,7 @@ export class SweepService {
 
     /*
       Reuses the `already-running` status rather than adding a case every consumer would
-      have to learn: to every caller this is the same situation — come back later, nothing
+      have to learn: to every caller this is the same situation - come back later, nothing
       is wrong. The message carries the distinction for anyone reading it.
 
       Deliberately after the re-entrancy check and before the enabled check, so the
@@ -333,7 +333,7 @@ export class SweepService {
    * The pending predicate, in one place.
    *
    * Shared by the claim query and the pending count so the number an administrator
-   * sees is the same set the sweep will actually process — two hand-written variants
+   * sees is the same set the sweep will actually process - two hand-written variants
    * of this expression would eventually disagree.
    */
   /**
@@ -422,7 +422,7 @@ export class SweepService {
    *
    * Advisory rows are written first because `component_vulnerability` has a foreign
    * key to them. Both writes are upserts keyed on natural identity, which is what
-   * makes the whole sweep safely repeatable — re-running it against the same database
+   * makes the whole sweep safely repeatable - re-running it against the same database
    * produces no change rather than duplicate findings.
    */
   private async storeFindings(findings: readonly ParsedFinding[]): Promise<void> {
@@ -431,7 +431,7 @@ export class SweepService {
     /*
      * One advisory can affect many packages in a batch, so the same id arrives
      * repeatedly. Collapsing first keeps the upsert proportional to distinct
-     * advisories rather than to findings — a batch of 5,000 packages routinely
+     * advisories rather than to findings - a batch of 5,000 packages routinely
      * carries thousands of findings across a few hundred advisories.
      */
     const advisories = new Map<string, ParsedFinding>();
@@ -487,7 +487,7 @@ export class SweepService {
            * empty array, so an advisory with no aliases at all violated the NOT NULL
            * constraint. That is not a rare case: OS advisories are reported with the CVE
            * as the primary id and therefore carry no aliases, so this broke every
-           * estate containing deb, rpm or apk packages — which is nearly all of them.
+           * estate containing deb, rpm or apk packages - which is nearly all of them.
            */
           aliases = COALESCE((
             SELECT array_agg(DISTINCT a ORDER BY a)

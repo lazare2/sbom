@@ -13,7 +13,7 @@ import type { ScannablePackage } from "../../src/services/scanner/grype-output.j
  *
  * Get that wrong and the platform records "we asked Xray about this package and it had
  * nothing" for a package that was never sent. There is no error, no empty state and no way
- * for a reader to tell — the component simply joins the clean ones. On a container image the
+ * for a reader to tell - the component simply joins the clean ones. On a container image the
  * packages most likely to be unmappable are the operating-system ones, which is most of the
  * image.
  */
@@ -147,7 +147,7 @@ describe("what the scanner reports about the database", () => {
   it("never invents a database build date", async () => {
     /*
       Xray publishes no build timestamp. Using the time of the last successful call would put
-      a date on the admin screen that reads as a database age and is not one — and under
+      a date on the admin screen that reads as a database age and is not one - and under
       Grype that same figure decides whether the estate needs re-scanning.
     */
     const status = await scannerWith(EMPTY).dbStatus();
@@ -180,7 +180,7 @@ describe("probing what this Xray actually covers", () => {
 
     const coverage = await scanner.probeCoverage();
     expect(coverage.covered).toContain("maven");
-    // Everything else went unanswered, so it is uncovered — not clean.
+    // Everything else went unanswered, so it is uncovered - not clean.
     expect(coverage.uncovered).toContain("npm");
     expect(coverage.uncovered).toContain("deb");
   });

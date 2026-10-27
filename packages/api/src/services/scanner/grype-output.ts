@@ -20,7 +20,7 @@ import type { FixState, VulnSeverity } from "@sbom/shared";
 
 /** One advisory affecting one package, mapped back to the component we submitted. */
 export interface ParsedFinding {
-  /** The `component.id` this finding belongs to, recovered exactly — see `readArtifactId`. */
+  /** The `component.id` this finding belongs to, recovered exactly - see `readArtifactId`. */
   componentId: number;
   vulnerabilityId: string;
   severity: VulnSeverity;
@@ -51,7 +51,7 @@ export interface ParsedReport {
    *
    * Should always be zero. Counted rather than ignored because a non-zero value
    * means findings are being dropped, and a silent drop here would understate every
-   * count on every dashboard — the one failure mode that looks like good news.
+   * count on every dashboard - the one failure mode that looks like good news.
    */
   unmappedFindings: number;
 }
@@ -131,7 +131,7 @@ function asFiniteNumber(value: unknown): number | null {
 /**
  * Highest-versioned CVSS score on the advisory.
  *
- * Grype can report several — a v2 alongside a v3.1, `Primary` alongside
+ * Grype can report several - a v2 alongside a v3.1, `Primary` alongside
  * `Secondary`. Taking the highest *version* rather than the highest *score* is
  * deliberate: the newest metric is the most current assessment, whereas picking the
  * largest number would systematically inflate scores by always preferring whichever
@@ -164,7 +164,7 @@ export function pickCvss(raw: unknown): { baseScore: number | null; vector: stri
  * EPSS probability and percentile, if present.
  *
  * An array in Grype's output, one entry per CVE the advisory covers. The highest
- * probability is the right pick here — unlike CVSS, these are all the same metric on
+ * probability is the right pick here - unlike CVSS, these are all the same metric on
  * the same scale, so "the worst of the CVEs this advisory covers" is a coherent
  * answer rather than a scale mix-up.
  */
@@ -187,7 +187,7 @@ export function pickEpss(raw: unknown): { score: number | null; percentile: numb
  * CVE ids for the same advisory, gathered from `relatedVulnerabilities`.
  *
  * This is what makes a CVE search work at all. Grype's primary id for a language
- * package is usually a GHSA — Log4Shell is `GHSA-jfh8-c2jp-5v3q`, with
+ * package is usually a GHSA - Log4Shell is `GHSA-jfh8-c2jp-5v3q`, with
  * `CVE-2021-44228` only appearing as a related entry. Someone searching for the CVE
  * number they read in the news has to reach the same row, and storing the aliases is
  * the only way that happens.
@@ -219,7 +219,7 @@ export function collectAliases(match: unknown): string[] {
  * Verified against Grype 0.115.0: the `bom-ref` set on each component of the
  * synthetic SBOM is echoed back verbatim as `artifact.id`. That gives an exact
  * one-to-one mapping and removes the whole class of mis-attribution bugs that
- * matching on purl or name+version invites — two components can share a name and
+ * matching on purl or name+version invites - two components can share a name and
  * version while differing by ecosystem, and a package with no purl has no other
  * stable key at all.
  *
@@ -267,7 +267,7 @@ function readDescriptor(doc: {
 /**
  * Parse one Grype JSON report.
  *
- * Never throws on a malformed individual match — the surrounding sweep processes
+ * Never throws on a malformed individual match - the surrounding sweep processes
  * thousands and one odd entry must not discard the batch. A payload that is not a
  * Grype report at all does throw, because continuing would silently record an empty
  * result as "no vulnerabilities found".
@@ -295,7 +295,7 @@ export function parseGrypeReport(raw: string): ParsedReport {
   /**
    * One row per (component, advisory).
    *
-   * Grype can report the same pairing more than once when several match rules fire —
+   * Grype can report the same pairing more than once when several match rules fire -
    * a direct purl match and a CPE match, say. Those are one finding, and letting
    * both through would double-count it in every severity total.
    */
@@ -393,7 +393,7 @@ export interface ScannablePackage {
  *
  * This is the other half of the component-keyed design. Rather than re-scanning each
  * application's SBOM, the platform's globally deduplicated component set is fed
- * through in batches — so a package shared by forty applications is matched once, and
+ * through in batches - so a package shared by forty applications is matched once, and
  * re-evaluating the whole estate after a database update is one pass over distinct
  * packages instead of one Grype run per application.
  *

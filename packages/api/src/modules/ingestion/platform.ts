@@ -4,7 +4,7 @@
  *
  * This information is already in every SBOM the platform receives and was
  * previously discarded. It is the difference between "this app has 400 packages"
- * and "this app runs Node 22.11 on Alpine 3.20" — the second is what someone
+ * and "this app runs Node 22.11 on Alpine 3.20" - the second is what someone
  * planning a base-image upgrade actually needs.
  *
  * What this deliberately does NOT claim to know is the base image *name*. An
@@ -34,7 +34,7 @@ export interface ScanPlatformData {
  * application server, mapped to a canonical name.
  *
  * A closed list, not "anything Syft found as a binary". A container image
- * contains dozens of binaries — `busybox`, `openssl`, `bash`, `coreutils` — and
+ * contains dozens of binaries - `busybox`, `openssl`, `bash`, `coreutils` - and
  * listing them all as "the runtime" would bury the one fact this feature exists
  * to surface. Names here are the ones that answer "what does this application
  * execute on".
@@ -208,7 +208,7 @@ export function detectPlatform(candidates: readonly PlatformCandidate[]): ScanPl
     // --- language runtimes and app servers --------------------------------
     // Only binary-cataloged components are considered. A `node` entry from the
     // npm cataloger is a package named "node" in someone's dependency tree, not
-    // the interpreter the image runs — treating those as the runtime would
+    // the interpreter the image runs - treating those as the runtime would
     // report a Java service as running Node.
     const isBinary = c.syftType === "binary" || (c.purl?.startsWith("pkg:generic/") ?? false);
     if (!isBinary) continue;
@@ -282,7 +282,7 @@ export function runtimeLabel(name: string): string {
  * One-line summary: `Alpine 3.20.3 · Node.js 22.11.0`.
  *
  * Returns null rather than a placeholder when nothing was detected, so callers
- * decide how to render "unknown" — a distroless or scratch image legitimately
+ * decide how to render "unknown" - a distroless or scratch image legitimately
  * has no OS packages and no runtime binary, and that is information, not a gap.
  */
 export function platformSummary(platform: ScanPlatformData): string | null {

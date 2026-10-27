@@ -6,15 +6,15 @@ import type { Database } from "../../src/db/client.js";
 /**
  * Converting an account between a local password and the directory.
  *
- * The property worth protecting is not that the conversion works — it is that one of the two
+ * The property worth protecting is not that the conversion works - it is that one of the two
  * directions is refused in a specific case. An estate where *every* administrator signs in
  * through the directory has no way into its own admin screens when the directory is
  * unreachable, and that is not hypothetical: it happened during this platform's rollout, and
  * the page that would have explained the outage was behind it.
  *
  * So one active administrator must keep a password. Everything else here guards the two
- * credential edits that make the conversion destructive in each direction — discarding a hash
- * going one way, issuing a password coming back — and the stale directory identity that is
+ * credential edits that make the conversion destructive in each direction - discarding a hash
+ * going one way, issuing a password coming back - and the stale directory identity that is
  * easy to leave behind.
  */
 

@@ -76,7 +76,7 @@ export function AdminApplicationsPage() {
   });
   const sort = useServerSort(applicationSort, state, setState);
 
-  /* Attribute columns share one sort field — see the applications list for why. */
+  /* Attribute columns share one sort field - see the applications list for why. */
   function sortByAttribute(key: string) {
     const active = state.sortBy === "attribute" && state.sortAttribute === key;
     if (active) setState({ sortDir: state.sortDir === "asc" ? "desc" : "asc" });
@@ -186,7 +186,7 @@ export function AdminApplicationsPage() {
                       {attributeColumns.map((d) => (
                         <Td key={d.key} className="text-text-muted">
                           {app.attributes[d.key] === undefined || app.attributes[d.key] === null
-                            ? "—"
+                            ? " - "
                             : String(app.attributes[d.key])}
                         </Td>
                       ))}
@@ -269,7 +269,7 @@ export function AdminApplicationsPage() {
         </p>
         <p>
           If the application is simply no longer built, mark it{" "}
-          <strong className="text-text-base">inactive</strong> instead — it disappears from the default
+          <strong className="text-text-base">inactive</strong> instead - it disappears from the default
           list while keeping the history that answers "did we ever ship this package".
         </p>
       </ConfirmDeleteModal>

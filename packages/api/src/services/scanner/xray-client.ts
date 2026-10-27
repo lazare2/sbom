@@ -6,14 +6,14 @@ import { URL } from "node:url";
  * The HTTP conversation with a JFrog Xray server.
  *
  * Separated from the scanner that uses it so the coordinate mapping, the polling loop and the
- * response translation can each be tested without a network — and so the operational quirks
+ * response translation can each be tested without a network - and so the operational quirks
  * below sit in one place instead of being rediscovered.
  *
  * ## Why the graph scan and not the component summary
  *
  * `POST /xray/api/v1/summary/component` is the obvious endpoint and the wrong one. It answers
  * from the platform's configured Watches and Policies: a component outside any active watch
- * comes back with its licences populated and its vulnerabilities **empty**. Not an error —
+ * comes back with its licences populated and its vulnerabilities **empty**. Not an error -
  * an empty list, which this platform would faithfully record as "assessed, clean".
  *
  * `POST /xray/api/v1/scan/graph?scan_type=dependency` is what the IDE plugins use. It audits
@@ -27,7 +27,7 @@ import { URL } from "node:url";
  * fails in a way that looks like bad credentials.
  *
  * Internal Artifactory instances routinely present a certificate from a private authority.
- * That is a real deployment, not a misconfiguration, so `allowSelfSigned` exists — and it is
+ * That is a real deployment, not a misconfiguration, so `allowSelfSigned` exists - and it is
  * off by default, surfaced in the admin screen, and never assumed.
  */
 
@@ -82,7 +82,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
  *
  * A dependency scan is asynchronous: the POST registers a job and the result is polled. Five
  * minutes is far longer than a batch of a few hundred coordinates should ever need, and the
- * ceiling exists so a wedged job cannot hold a sweep open indefinitely — the sweep runs on a
+ * ceiling exists so a wedged job cannot hold a sweep open indefinitely - the sweep runs on a
  * timer with nothing watching it.
  */
 const SCAN_TIMEOUT_MS = 5 * 60_000;
@@ -106,7 +106,7 @@ export class XrayClient {
    * One request, with the platform's own error vocabulary.
    *
    * Every network-level failure is turned into an `XrayError` carrying a code, because the
-   * layer above reports which of a handful of things went wrong rather than a raw message —
+   * layer above reports which of a handful of things went wrong rather than a raw message -
    * the same treatment the SMTP client got, for the same reason: "connection refused" and
    * "wrong credentials" send an administrator to completely different places.
    */

@@ -18,7 +18,7 @@ import type { VulnerabilityScanner } from "../../src/services/scanner/index.js";
  *
  * The damaging part is what that leaves behind. grype's purge had already deleted
  * import.json before it reached the file it could not unlink, so the installation was
- * left present-but-invalid — a working database broken by an update that never landed.
+ * left present-but-invalid - a working database broken by an update that never landed.
  *
  * Windows reports it; POSIX unlink-while-open hides it, but a sweep reading a file being
  * swapped underneath it is wrong on Linux too, so both directions are excluded on every
@@ -130,7 +130,7 @@ describe("vulnerability database / sweep mutual exclusion", () => {
       expect(result.message).toMatch(/sweep is in progress/i);
     });
 
-    it("refuses an archive import too — the same purge runs on that path", async () => {
+    it("refuses an archive import too - the same purge runs on that path", async () => {
       const result = await vulnDbWith(() => true).importArchive("/tmp/vulnerability-db.tar.zst", null);
 
       expect(result.outcome).toBe("busy");
@@ -162,12 +162,12 @@ describe("vulnerability database / sweep mutual exclusion", () => {
   });
 
   describe("with neither in progress", () => {
-    it("gets past the guard — proving the tests above assert the guard and not some earlier check", async () => {
+    it("gets past the guard - proving the tests above assert the guard and not some earlier check", async () => {
       /*
         Without this the suite would pass even if the guard were unreachable: every
         assertion above would still hold if, say, the scanner were reported unavailable.
         Here the guard lets the call through, so it reaches the untouchable database and
-        throws — which is the evidence that the guard, and nothing before it, is what
+        throws - which is the evidence that the guard, and nothing before it, is what
         produced `busy` above.
       */
       await expect(vulnDbWith(() => false).update("manual", null)).rejects.toThrow(

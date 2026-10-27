@@ -57,7 +57,7 @@ function describeChange(value: number): string {
 
 /** A signed count, so a table column reads as movement rather than as a total. */
 function signed(value: number): string {
-  if (value === 0) return "—";
+  if (value === 0) return " - ";
   return value > 0 ? `+${fmt(value)}` : `-${fmt(Math.abs(value))}`;
 }
 
@@ -72,7 +72,7 @@ const SEVERITY_LABELS: Record<string, string> = {
 
 export async function renderMonthlyReportPdf(view: MonthlyReportView): Promise<Buffer> {
   const period = monthName(view.run.periodLabel);
-  const title = `${TITLE} — ${period}`;
+  const title = `${TITLE} - ${period}`;
 
   const doc = new PDFDocument({
     size: [PAGE.width, PAGE.height],
@@ -260,7 +260,7 @@ function movementSection(ctx: Layout, view: MonthlyReportView): void {
 
   ctx.heading(
     "What changed, and why",
-    "Findings are matched against the vulnerability database as it stands today. A count that fell can mean the estate improved or that an advisory changed, and those deserve different responses — so each is attributed separately.",
+    "Findings are matched against the vulnerability database as it stands today. A count that fell can mean the estate improved or that an advisory changed, and those deserve different responses - so each is attributed separately.",
   );
 
   ctx.paragraph("Findings resolved", { size: 9.5 });
@@ -424,7 +424,7 @@ function packageSection(ctx: Layout, view: MonthlyReportView): void {
 
   const columns: readonly Column<PackageExposure>[] = [
     { header: "Package", width: 0.27, value: (r) => r.name },
-    { header: "Version", width: 0.19, mono: true, value: (r) => r.version ?? "—" },
+    { header: "Version", width: 0.19, mono: true, value: (r) => r.version ?? " - " },
     { header: "Source", width: 0.14, value: (r) => (r.scope === "os" ? "Base image" : "Dependency") },
     { header: "Applications", width: 0.14, align: "right", value: (r) => fmt(r.applications) },
     { header: "Findings", width: 0.13, align: "right", value: (r) => fmt(r.findings) },
@@ -484,7 +484,7 @@ function methodologySection(ctx: Layout, view: MonthlyReportView): void {
 
   const notes: string[] = [
     "Figures cover every application the platform tracks, using each application's most recent build. An application that was not rebuilt this period still appears, with the findings from the build it last submitted.",
-    "A finding is one vulnerability in one package in one application. The same vulnerability in a package shared by five applications counts five times, because it has to be resolved in five places — unless the package comes from a shared base image, in which case one rebuild resolves all five.",
+    "A finding is one vulnerability in one package in one application. The same vulnerability in a package shared by five applications counts five times, because it has to be resolved in five places - unless the package comes from a shared base image, in which case one rebuild resolves all five.",
     "Comparison is against the previous monthly report, not against a fixed date. Reports generated on demand between monthly reports do not move that comparison point.",
   ];
 

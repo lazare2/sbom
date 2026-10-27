@@ -13,8 +13,8 @@ import { buildOpenApiDocument } from "./openapi.service.js";
  * mostly prose.
  *
  * So the page below is generated from the document, server-side, as self-contained HTML with no
- * script and no external request. It is less capable than Swagger UI — there is no "try it"
- * button — and it works on the machine this is actually installed on, which is the trade worth
+ * script and no external request. It is less capable than Swagger UI - there is no "try it"
+ * button - and it works on the machine this is actually installed on, which is the trade worth
  * making. The document itself is served as JSON for anyone who wants to point a real tool at it.
  *
  * ## Both are public
@@ -33,7 +33,7 @@ export async function openapiRoutes(fastify: FastifyInstance): Promise<void> {
     Built once, on the first request, and then reused.
 
     The route table cannot change after the server is ready, so there is nothing to invalidate
-    — and building it per request would mean running every Zod schema through a JSON Schema
+    - and building it per request would mean running every Zod schema through a JSON Schema
     conversion on a public endpoint, which is a free denial of service.
   */
   let cached: Record<string, unknown> | null = null;
@@ -72,7 +72,7 @@ function esc(value: unknown): string {
 /**
  * Renders the document as a single self-contained page.
  *
- * Markdown in the descriptions is not parsed — only the two things that actually appear are
+ * Markdown in the descriptions is not parsed - only the two things that actually appear are
  * handled: fenced code blocks and `inline code`. A full Markdown renderer here would be a
  * dependency and an injection surface for the sake of prose this file also writes.
  */
@@ -157,7 +157,7 @@ function renderReference(doc: Record<string, unknown>): string {
             }
             <h4>Responses</h4>
             <ul>${Object.entries(op.responses as Record<string, { description: string }>)
-              .map(([code, r]) => `<li><code>${esc(code)}</code> — ${esc(r.description)}</li>`)
+              .map(([code, r]) => `<li><code>${esc(code)}</code> - ${esc(r.description)}</li>`)
               .join("")}</ul>
           </div>
         </details>`;
@@ -181,7 +181,7 @@ function renderReference(doc: Record<string, unknown>): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(info.title)} — reference</title>
+<title>${esc(info.title)} - reference</title>
 <style>
   /* Self-contained on purpose: this has to render on an air-gapped host. */
   :root { color-scheme: light dark;

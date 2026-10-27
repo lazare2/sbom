@@ -46,12 +46,13 @@ const DIRECTIONS = sortDirections;
 /**
  * Default status filter mirrors the API's own default: active plus unconfirmed.
  * Inactive applications are excluded until asked for, but unconfirmed ones are
- * visible to everyone — a scan from an unrecognised repo should be discoverable
+ * visible to everyone - a scan from an unrecognised repo should be discoverable
  * immediately rather than waiting on an admin.
  */
 const DEFAULTS = {
   search: "",
   status: ["active", "pending_confirmation"] as ApplicationStatus[],
+  tribe: "",
   squad: "",
   owner: "",
   severity: "",
@@ -77,6 +78,7 @@ const urlSpec = {
   parse: (params: URLSearchParams) => ({
     search: readString(params, "search"),
     status: readEnumList(params, "status", ALL_STATUSES, DEFAULTS.status),
+    tribe: readString(params, "tribe"),
     squad: readString(params, "squad"),
     owner: readString(params, "owner"),
     severity: readString(params, "severity"),
@@ -125,6 +127,7 @@ export function ApplicationsPage() {
     return {
       search: state.search || undefined,
       status: state.status,
+      tribe: state.tribe || undefined,
       squad: state.squad || undefined,
       owner: state.owner || undefined,
       severity: state.severity || undefined,
@@ -143,6 +146,7 @@ export function ApplicationsPage() {
 
   const { data, isLoading, isFetching, error, refetch } = useApplications(queryParams);
   const { data: definitions } = useAttributeDefinitions();
+  const tribes = useAttributeValues("tribe");
   const squads = useAttributeValues("squad");
   const owners = useAttributeValues("owner");
   const severities = useAttributeValues("severity");
@@ -200,6 +204,7 @@ export function ApplicationsPage() {
 
   const hasFilters =
     state.search !== "" ||
+    state.tribe !== "" ||
     state.squad !== "" ||
     state.owner !== "" ||
     state.severity !== "" ||
@@ -232,6 +237,18 @@ export function ApplicationsPage() {
               value={searchInput}
               onChange={setSearchInput}
               placeholder="payments-api"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="f-tribe" className="mb-1 block text-[11px] font-medium text-text-muted">
+              {labelFor("tribe")}
+            </label>
+            <Select
+              id="f-tribe"
+              value={state.tribe}
+              onChange={(v) => setState({ tribe: v })}
+              options={[{ value: "", label: "Any" }, ...(tribes.data ?? []).map((v) => ({ value: v, label: v }))]}
             />
           </div>
 
@@ -284,7 +301,7 @@ export function ApplicationsPage() {
               onChange={(v) => setState({ group: v, page: 1 })}
               /*
                 Options carry the member count so an empty group is visibly empty before it is
-                selected — otherwise picking one returns no rows and reads as a broken filter
+                selected - otherwise picking one returns no rows and reads as a broken filter
                 rather than as a group nobody has filled in yet.
               */
               options={[
@@ -439,7 +456,7 @@ export function ApplicationsPage() {
                                 Clicking a chip filters this list to that group rather than
                                 opening it. The reader is already looking at applications, and
                                 "show me the rest of these" is the next question far more often
-                                than "take me to the group's own page" — which the Groups nav
+                                than "take me to the group's own page" - which the Groups nav
                                 item and the group name on the detail page both still offer.
                               */
                               <button
@@ -468,8 +485,8 @@ export function ApplicationsPage() {
                           ) : null}
                         </div>
                       </Td>
-                      <Td className="text-text-muted">{String(app.attributes.squad ?? "—")}</Td>
-                      <Td className="text-text-muted">{String(app.attributes.owner ?? "—")}</Td>
+                      <Td className="text-text-muted">{String(app.attributes.squad ?? " - ")}</Td>
+                      <Td className="text-text-muted">{String(app.attributes.owner ?? " - ")}</Td>
                       <Td>
                         <SeverityCell value={app.attributes.severity} />
                       </Td>
@@ -534,7 +551,7 @@ function osFilterOptions(
   }
 
   for (const [name, info] of [...byName.entries()].sort((a, b) => b[1].total - a[1].total)) {
-    options.push({ value: name, label: `${osLabel(name)} — any (${info.total})` });
+    options.push({ value: name, label: `${osLabel(name)} - any (${info.total})` });
     for (const v of info.versions.sort((a, b) => b.count - a.count)) {
       options.push({ value: `${name}|${v.version}`, label: `  ${osLabel(name)} ${v.version} (${v.count})` });
     }
@@ -557,7 +574,7 @@ function runtimeFilterOptions(
   }
 
   for (const [name, info] of [...byName.entries()].sort((a, b) => b[1].total - a[1].total)) {
-    options.push({ value: name, label: `${runtimeLabel(name)} — any (${info.total})` });
+    options.push({ value: name, label: `${runtimeLabel(name)} - any (${info.total})` });
     for (const v of info.versions.sort((a, b) => b.count - a.count)) {
       options.push({
         value: `${name}|${v.version}`,
@@ -593,7 +610,7 @@ function FindingsCell({ app }: { app: ApplicationSummary }) {
 
   if (counts === null) {
     return app.latestScanId === null ? (
-      <span className="text-text-faint">—</span>
+      <span className="text-text-faint">-</span>
     ) : (
       <span
         className="text-xs text-text-faint"
@@ -624,7 +641,7 @@ function FindingsCell({ app }: { app: ApplicationSummary }) {
 /** Severity is a known select attribute, so it gets meaningful colour. */
 function SeverityCell({ value }: { value: unknown }) {
   if (value === null || value === undefined || value === "") {
-    return <span className="text-text-faint">—</span>;
+    return <span className="text-text-faint">-</span>;
   }
   const text = String(value);
   const tone =

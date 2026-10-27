@@ -19,7 +19,7 @@ import { escapeLikeTerm } from "../../src/modules/components/bulk-search.service
 /**
  * Table sorting: the shared declarations, and the client-side comparator.
  *
- * The server-side ORDER BY construction is not unit-testable without a database — it
+ * The server-side ORDER BY construction is not unit-testable without a database - it
  * produces SQL, and asserting on generated SQL strings tests the formatter rather than the
  * behaviour. What *is* covered here is the layer both ends validate against, plus the two
  * properties whose absence produces silent wrongness rather than an error:
@@ -29,7 +29,7 @@ import { escapeLikeTerm } from "../../src/modules/components/bulk-search.service
  *   - the comparator puts missing values last in both directions, ranks numerically, and
  *     is deterministic under ties.
  *
- * Stable pagination — the reason `orderBy` demands a unique tiebreaker — is asserted
+ * Stable pagination - the reason `orderBy` demands a unique tiebreaker - is asserted
  * end-to-end in scripts/smoke-test.ps1 against real data, where page boundaries exist.
  */
 
@@ -111,7 +111,7 @@ describe("sort table declarations", () => {
   });
 
   it("refuses a default field that is not declared", () => {
-    // Catches the likely edit — renaming a column and forgetting the default — at module
+    // Catches the likely edit - renaming a column and forgetting the default - at module
     // load rather than as an ORDER BY that silently falls through to its else branch.
     expect(() => defineSortTable({ name: "text" } as const, "nope" as never)).toThrow(/not one of/);
   });
@@ -146,7 +146,7 @@ describe("sortRows", () => {
   it("sorts text case-insensitively", () => {
     const mixed = [{ name: "Zebra" }, { name: "apple" }, { name: "Banana" }];
     const asc = sortRows(mixed, (r) => r.name, "asc").map((r) => r.name);
-    // Not ["Banana", "Zebra", "apple"], which is what a naive comparison gives — all
+    // Not ["Banana", "Zebra", "apple"], which is what a naive comparison gives - all
     // capitals ahead of all lowercase reads as a broken sort.
     expect(asc).toEqual(["apple", "Banana", "Zebra"]);
   });
@@ -230,7 +230,7 @@ describe("escapeLikeTerm", () => {
    * The list search's substring mode builds `ILIKE '%' || term || '%'`, so LIKE
    * metacharacters in a pasted package name have to be neutralised. Unescaped, an entry of
    * `%` matches every package in the estate while looking like an ordinary line in the
-   * input — a wrong answer that reports itself as a very successful search.
+   * input - a wrong answer that reports itself as a very successful search.
    */
   it("escapes the LIKE wildcards", () => {
     expect(escapeLikeTerm("foo_bar")).toBe("foo\\_bar");
@@ -239,7 +239,7 @@ describe("escapeLikeTerm", () => {
   });
 
   it("escapes the escape character first, so the escaping cannot be escaped away", () => {
-    // `\%` must become `\\\%` — a literal backslash then a literal percent. Doing the
+    // `\%` must become `\\\%` - a literal backslash then a literal percent. Doing the
     // wildcards first would produce `\\%`, which is a literal backslash followed by a live
     // wildcard.
     expect(escapeLikeTerm("\\%")).toBe("\\\\\\%");
@@ -247,7 +247,7 @@ describe("escapeLikeTerm", () => {
   });
 
   it("leaves ordinary package names untouched", () => {
-    // Every character real package names use — scopes, dots, dashes, slashes, plus signs —
+    // Every character real package names use - scopes, dots, dashes, slashes, plus signs -
     // has to survive verbatim, or exact-looking searches would quietly stop matching.
     for (const name of ["react", "@lit/reactive-element", "log4j-core", "libstdc++6", "django", "gopkg.in/yaml.v2"]) {
       expect(escapeLikeTerm(name)).toBe(name);

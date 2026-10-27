@@ -81,7 +81,7 @@ export function MaliciousDetailModal({
             <p className="font-semibold">Removing the package is not sufficient on its own.</p>
             <p className="mt-1">
               Package managers run install scripts, so this executed on every machine that
-              installed it — developer laptops and CI runners alike — before it was reported.
+              installed it - developer laptops and CI runners alike - before it was reported.
               Treat every credential those machines could read as compromised and rotate it: CI
               tokens, registry credentials, cloud keys.
             </p>
@@ -101,7 +101,7 @@ export function MaliciousDetailModal({
             </Field>
             <Field label="Ever shipped by">{formatNumber(finding.affectedApplications)}</Field>
             <Field label="Versions seen here">
-              {finding.observedVersions.length > 0 ? finding.observedVersions.join(", ") : "—"}
+              {finding.observedVersions.length > 0 ? finding.observedVersions.join(", ") : " - "}
             </Field>
             <Field label="Report covers">
               {/*
@@ -116,7 +116,7 @@ export function MaliciousDetailModal({
                   : "A version range"}
             </Field>
             <Field label="Reported">
-              {finding.publishedAt ? formatDateTime(finding.publishedAt) : "—"}
+              {finding.publishedAt ? formatDateTime(finding.publishedAt) : " - "}
             </Field>
             <Field label="Evidence">
               {/*
@@ -277,12 +277,12 @@ function ImpactTable({
                   {/*
                     The question this whole column answers is "is this in our code or in the
                     image underneath it", which decides who has to fix it. The origin badge is
-                    the short answer and the paths under it are the evidence — shown together
+                    the short answer and the paths under it are the evidence - shown together
                     so a misclassification is visible rather than authoritative.
                   */}
                   <ComponentLocationCell location={impact.location} />
                 </Td>
-                <Td className="text-text-muted">{impact.versions.join(", ") || "—"}</Td>
+                <Td className="text-text-muted">{impact.versions.join(", ") || " - "}</Td>
                 <Td align="right" className="nums text-text-muted">
                   {formatNumber(impact.builds)}
                 </Td>
@@ -365,7 +365,7 @@ export function AcknowledgeModal({
         <div className="space-y-3 text-sm text-text-muted">
           <FormError error={acknowledge.error} />
           <p>
-            <strong className="text-text-base">{finding.packageName}</strong> —{" "}
+            <strong className="text-text-base">{finding.packageName}</strong> -{" "}
             <span className="text-xs"><Mono>{finding.id}</Mono></span>
           </p>
           <p className="text-xs">
@@ -388,7 +388,7 @@ export function AcknowledgeModal({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={4}
-              placeholder="What was done — e.g. removed in build 418, npm and AWS tokens rotated 14:20."
+              placeholder="What was done - e.g. removed in build 418, npm and AWS tokens rotated 14:20."
               className="w-full rounded-md border border-border-strong bg-bg-raised px-2 py-1.5 text-sm text-text-base focus:border-accent"
             />
           </FormRow>

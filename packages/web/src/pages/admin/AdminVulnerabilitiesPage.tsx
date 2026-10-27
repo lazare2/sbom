@@ -66,7 +66,7 @@ import { useClientSort } from "../../lib/useSort.ts";
  *
  * Answers four questions, in the order an administrator asks them: is scanning on, does
  * the scanner work, how old is the data, and what happened the last time it tried to
- * update. Each is reported separately because they fail independently — a working binary
+ * update. Each is reported separately because they fail independently - a working binary
  * with no database and a current database with no binary need different fixes, and one
  * "healthy" light would hide which.
  *
@@ -110,7 +110,7 @@ export function AdminVulnerabilitiesPage() {
  * ## The coverage result is the point of the test button
  *
  * Xray answers an ecosystem it holds no data for exactly the way it answers a package it
- * checked and found safe — with nothing. So the test submits a known-vulnerable package in
+ * checked and found safe - with nothing. So the test submits a known-vulnerable package in
  * each ecosystem and reports which came back. Without that, a base-image figure of zero
  * would be unreadable: it could mean a clean image or an unasked question, and on a typical
  * container image two thirds of the packages are operating-system ones.
@@ -174,7 +174,7 @@ function ProviderCard() {
     <Card>
       <CardHeader
         title="Vulnerability database"
-        subtitle="Which database findings are matched against. One at a time — the two identify the same advisory differently, so their numbers are never mixed."
+        subtitle="Which database findings are matched against. One at a time - the two identify the same advisory differently, so their numbers are never mixed."
       />
       <div className="space-y-4 p-4">
         <div className="flex flex-col gap-1.5">
@@ -182,7 +182,7 @@ function ProviderCard() {
             checked={active === "grype"}
             onChange={() => setProvider.mutate("grype")}
             disabled={setProvider.isPending}
-            label="Grype — a local database this platform downloads and keeps"
+            label="Grype - a local database this platform downloads and keeps"
           />
           <Checkbox
             checked={active === "xray"}
@@ -193,7 +193,7 @@ function ProviderCard() {
               why it is unavailable.
             */
             disabled={setProvider.isPending || !connection?.tokenConfigured}
-            label="JFrog Xray — your organisation's own database, queried over the network"
+            label="JFrog Xray - your organisation's own database, queried over the network"
           />
         </div>
 
@@ -206,7 +206,7 @@ function ProviderCard() {
         <p className="text-xs text-text-muted">
           Switching re-assesses every package against the new database. Existing findings are
           kept but not counted while the other database is active, so figures read “not
-          assessed” until the sweep catches up — and switching back restores them.
+          assessed” until the sweep catches up - and switching back restores them.
         </p>
 
         <div className="space-y-3 border-t border-border-base pt-4">
@@ -238,14 +238,14 @@ function ProviderCard() {
                 The token *type* is named because getting it wrong produces a message that
                 blames the credential rather than the way it was sent. An enterprise reference
                 token is not a JWT, so a client that presents it as a bearer token is told the
-                token is invalid — which reads as "wrong token", not "wrong scheme". This
+                token is invalid - which reads as "wrong token", not "wrong scheme". This
                 platform always sends it as a password, so either kind works, and saying so is
                 what stops someone going to look for a different token they do not need.
               */
               hint={
                 connection?.tokenConfigured
                   ? "A token is stored. Leave blank to keep it."
-                  : "An access token or a reference token — either works. Stored encrypted, and never shown again."
+                  : "An access token or a reference token - either works. Stored encrypted, and never shown again."
               }
             >
               <TextInput
@@ -269,7 +269,7 @@ function ProviderCard() {
           {xrayUrlIsPlaintext(baseUrl) ? (
             /*
               Stated, not enforced. Refusing http here is what previously made this feature
-              unusable against an Artifactory published on port 80 — which is a common way to
+              unusable against an Artifactory published on port 80 - which is a common way to
               run it inside a corporate network, and the exact server this was built for. The
               administrator can see their own network; this validator cannot.
             */
@@ -343,7 +343,7 @@ function XrayTestResult({ diagnosis }: { diagnosis: XrayDiagnosis | null }) {
  * Which ecosystems this Xray answered for.
  *
  * Rendered as two lists rather than a percentage, because the useful question is never "how
- * much is covered" but "is the thing I care about covered" — and for a container estate the
+ * much is covered" but "is the thing I care about covered" - and for a container estate the
  * thing that matters is whether `deb`, `rpm` or `apk` is in the second list.
  */
 function CoverageSummary({ coverage }: { coverage: XrayCoverage }) {
@@ -363,7 +363,7 @@ function CoverageSummary({ coverage }: { coverage: XrayCoverage }) {
         ))}
         {coverage.uncovered.map((eco) => (
           <span key={eco} className="rounded bg-warn-subtle px-1.5 py-0.5 text-warn">
-            {eco} — no data
+            {eco} - no data
           </span>
         ))}
       </div>
@@ -395,13 +395,13 @@ function EnableCard({ status }: { status: VulnScanStatus }) {
         <Checkbox
           checked={status.enabled}
           onChange={(enabled) => update.mutate({ enabled })}
-          label={status.enabled ? "Enabled — packages are matched against the database" : "Enable Grype scan"}
+          label={status.enabled ? "Enabled - packages are matched against the database" : "Enable Grype scan"}
         />
 
         {status.enabled ? (
           <p className="text-xs text-text-muted">
             Newly ingested SBOMs are matched within seconds of arriving. Ingestion never waits for
-            it — a build's <Mono>curl -f</Mono> returns as soon as the SBOM is stored.
+            it - a build's <Mono>curl -f</Mono> returns as soon as the SBOM is stored.
           </p>
         ) : (
           <p className="text-xs text-text-muted">
@@ -458,11 +458,11 @@ function ScannerCard({ status }: { status: VulnScanStatus }) {
         }
       />
       <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-        <Field label="Version">{scanner.version ?? "—"}</Field>
-        <Field label="Resolved by">{scanner.resolvedBy ?? "—"}</Field>
+        <Field label="Version">{scanner.version ?? " - "}</Field>
+        <Field label="Resolved by">{scanner.resolvedBy ?? " - "}</Field>
         <div className="col-span-2">
           <Field label="Path">
-            <Mono title={scanner.path ?? undefined}>{scanner.path ?? "—"}</Mono>
+            <Mono title={scanner.path ?? undefined}>{scanner.path ?? " - "}</Mono>
           </Field>
         </div>
       </dl>
@@ -471,7 +471,7 @@ function ScannerCard({ status }: { status: VulnScanStatus }) {
         <div className="border-t border-border-base px-4 py-3">
           {/*
             Every rule that was tried and why it failed. This is the difference between a
-            setup someone completes in two minutes and one they give up on — "not found"
+            setup someone completes in two minutes and one they give up on - "not found"
             alone tells nobody where to put the binary.
           */}
           <p className="mb-2 text-xs font-medium text-text-muted">Where it was looked for</p>
@@ -479,7 +479,7 @@ function ScannerCard({ status }: { status: VulnScanStatus }) {
             {scanner.attempts.map((attempt) => (
               <li key={attempt.strategy} className="text-xs text-text-muted">
                 <span className="font-medium text-text-base">{attempt.strategy}</span>{" "}
-                <Mono>{attempt.location}</Mono> — {attempt.reason}
+                <Mono>{attempt.location}</Mono> - {attempt.reason}
               </li>
             ))}
           </ul>
@@ -515,7 +515,7 @@ function DatabaseCard({ status }: { status: VulnScanStatus }) {
     <Card>
       <CardHeader
         title="Vulnerability database"
-        subtitle="Downloaded from Anchore at runtime, not shipped in the image — it is about 1.9 GB expanded and is rebuilt daily, so a bundled copy would arrive stale."
+        subtitle="Downloaded from Anchore at runtime, not shipped in the image - it is about 1.9 GB expanded and is rebuilt daily, so a bundled copy would arrive stale."
         actions={
           database.present ? (
             stale ? (
@@ -538,11 +538,11 @@ function DatabaseCard({ status }: { status: VulnScanStatus }) {
             <span className="text-text-faint">never</span>
           )}
         </Field>
-        <Field label="Built">{database.builtAt ? formatDateTime(database.builtAt) : "—"}</Field>
-        <Field label="Schema">{database.schemaVersion ?? "—"}</Field>
+        <Field label="Built">{database.builtAt ? formatDateTime(database.builtAt) : " - "}</Field>
+        <Field label="Schema">{database.schemaVersion ?? " - "}</Field>
         <Field label="Age">
           {database.ageHours === null
-            ? "—"
+            ? " - "
             : database.ageHours < 48
               ? `${Math.round(database.ageHours)} hours`
               : `${Math.round(database.ageHours / 24)} days`}
@@ -592,7 +592,7 @@ function DatabaseCard({ status }: { status: VulnScanStatus }) {
           }}
         />
         <p className="text-xs text-text-faint">
-          Import is for machines with no internet access — download the archive elsewhere and upload
+          Import is for machines with no internet access - download the archive elsewhere and upload
           it here.
         </p>
       </div>
@@ -625,9 +625,9 @@ function UpdateOutcome({ result }: { result: { outcome: string; message: string 
 
   const heading =
     result.outcome === "updated"
-      ? "Database updated — every package will be rematched"
+      ? "Database updated - every package will be rematched"
       : result.outcome === "imported"
-        ? "Database imported — every package will be rematched"
+        ? "Database imported - every package will be rematched"
         : result.outcome === "already-current"
           ? "Already up to date"
           : result.outcome === "unreachable"
@@ -665,7 +665,7 @@ function CoverageCard({ status }: { status: VulnScanStatus }) {
     <Card>
       <CardHeader
         title="Match coverage"
-        subtitle="Packages matched against the installed database. Anything pending is work the background sweep has still to do — a new database makes every package pending again."
+        subtitle="Packages matched against the installed database. Anything pending is work the background sweep has still to do - a new database makes every package pending again."
         actions={
           coverage.sweeping ? <Badge tone="info">Sweeping…</Badge> : <Badge tone="neutral">Idle</Badge>
         }
@@ -742,7 +742,7 @@ function HistoryCard() {
     <Card>
       <CardHeader
         title="Update history"
-        subtitle="Every attempt, including the ones that found no route to the internet — that is how an old database becomes explainable rather than mysterious."
+        subtitle="Every attempt, including the ones that found no route to the internet - that is how an old database becomes explainable rather than mysterious."
       />
       {isLoading ? (
         <LoadingBlock label="Loading history" />
@@ -778,7 +778,7 @@ function HistoryCard() {
                     <OutcomeBadge attempt={attempt} />
                   </Td>
                   <Td className="max-w-[520px] truncate text-text-muted" title={attempt.message ?? undefined}>
-                    {attempt.message ?? "—"}
+                    {attempt.message ?? " - "}
                   </Td>
                   <Td className="text-text-muted">{attempt.actorEmail ?? "scheduled"}</Td>
                 </Tr>
@@ -848,7 +848,7 @@ function SuppressionsCard() {
     <Card>
       <CardHeader
         title="Accepted risks"
-        subtitle="Findings an administrator has assessed and excluded from every count. Excluded, never deleted — so the decision stays auditable."
+        subtitle="Findings an administrator has assessed and excluded from every count. Excluded, never deleted - so the decision stays auditable."
       />
       {unclassified > 0 ? (
         <div
@@ -912,7 +912,7 @@ function SuppressionsCard() {
                       <Mono>{s.vulnerabilityId}</Mono>
                     </Link>
                   </Td>
-                  <Td>{s.severity ? <SeverityBadge severity={s.severity} /> : "—"}</Td>
+                  <Td>{s.severity ? <SeverityBadge severity={s.severity} /> : " - "}</Td>
                   <Td className="text-xs text-text-muted">
                     {/* Spelled out: an estate-wide suppression is a much bigger decision than a
                         per-package one, and the table has to make the difference obvious. */}
@@ -949,7 +949,7 @@ function SuppressionsCard() {
                       </Button>
                     )}
                   </Td>
-                  <Td className="text-text-muted">{s.createdByEmail ?? "—"}</Td>
+                  <Td className="text-text-muted">{s.createdByEmail ?? " - "}</Td>
                   <Td className="text-text-muted">
                     {s.expiresAt ? (
                       s.expired ? (
@@ -1052,7 +1052,7 @@ function ClassifySuppressionModal({
         </div>
 
         <p className="text-xs text-text-muted">
-          This changes nothing about what is counted — the finding is already excluded. It
+          This changes nothing about what is counted - the finding is already excluded. It
           decides what a VEX document tells other organisations about it.
         </p>
 

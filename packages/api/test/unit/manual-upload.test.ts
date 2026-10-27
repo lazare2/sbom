@@ -25,7 +25,7 @@ describe("manualUploadFieldsSchema", () => {
 
   it("rejects a value it cannot interpret rather than guessing", () => {
     // `1`, `yes` and `TRUE` all mean true to a human, and all of them would be
-    // read as false by a looser `=== "true"` check — an opt-in that silently does
+    // read as false by a looser `=== "true"` check - an opt-in that silently does
     // not opt in. A 400 tells the caller instead.
     for (const value of ["1", "yes", "TRUE", "on"]) {
       expect(manualUploadFieldsSchema.safeParse({ allow_duplicate: value }).success, value).toBe(false);
@@ -64,7 +64,7 @@ describe("manualUploadFieldsSchema", () => {
   it("does not accept an app_name", () => {
     /*
      * The target application comes from the URL. A stray `app_name` field must not
-     * become a second, competing way to choose it — that would reintroduce the CI
+     * become a second, competing way to choose it - that would reintroduce the CI
      * path's name resolution (aliases, auto-creation) on a route whose whole point
      * is that the user already picked the application.
      *

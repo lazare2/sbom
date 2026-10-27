@@ -166,6 +166,16 @@ export class ScansAdminService {
       `);
 
       const row = rowsOf(updated)[0];
+
+      // The build promoted back to current is no longer a replaced one, so its frozen
+      // "when replaced" figures no longer describe anything.
+      if (scan.is_latest && row?.latest_scan_id) {
+        await tx.execute(sql`
+          UPDATE scan_vuln_summary SET superseded_at = NULL, superseded_counts = NULL
+           WHERE scan_id = ${row.latest_scan_id}::uuid
+        `);
+      }
+
       return {
         currentScanId: row?.latest_scan_id ?? null,
         remainingScanCount: Number(row?.scan_count ?? 0),

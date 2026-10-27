@@ -6,7 +6,7 @@ import { z } from "zod";
  * Configured by issuer URL rather than by vendor, and every endpoint is read from that
  * issuer's discovery document at `/.well-known/openid-configuration`. Entra ID was the
  * deployment this was written for, and hardcoding its endpoints would have made the second
- * organisation to adopt this platform a code change rather than a settings change — the same
+ * organisation to adopt this platform a code change rather than a settings change - the same
  * reasoning that keeps the provider enum's value `oidc` instead of a vendor name.
  *
  * ## Why this is a settings row and not environment variables
@@ -19,7 +19,7 @@ import { z } from "zod";
  * ## Accounts created on first sign-in
  *
  * With `provisionOnSignIn` on, somebody the directory authenticates and this platform has no
- * account for is given one on the spot — a read-only account, narrowed to nothing, in no
+ * account for is given one on the spot - a read-only account, narrowed to nothing, in no
  * environment. They can sign in and see that they are in; they cannot see a single application
  * until an administrator grants one or adds them to a squad. That is the line that makes
  * provisioning safe to switch on: the decision about what somebody may *read* is still made by
@@ -38,8 +38,8 @@ import { z } from "zod";
  *
  * https is required, and loopback is the only exception. An issuer reached over plain http
  * would carry the client secret and the authorization code across the network in the clear,
- * and unlike the Xray base URL — where plain http is a real internal deployment this platform
- * has to support — every OIDC provider worth integrating publishes TLS. The exception exists
+ * and unlike the Xray base URL - where plain http is a real internal deployment this platform
+ * has to support - every OIDC provider worth integrating publishes TLS. The exception exists
  * so a developer can run Keycloak on localhost without a certificate.
  */
 export const oidcIssuerUrlSchema = z
@@ -60,7 +60,7 @@ export const oidcIssuerUrlSchema = z
 
     const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1";
     if (url.protocol !== "https:" && !loopback) {
-      fail("must use https — the client secret and authorization code travel over this");
+      fail("must use https - the client secret and authorization code travel over this");
       return;
     }
     if (url.search || url.hash) fail("must not carry a query string or fragment");
@@ -82,7 +82,7 @@ export const oidcIssuerUrlSchema = z
  * The client secret is write-only across the whole API: accepted here, encrypted before
  * storage, never returned by any endpoint. `undefined` on an update means "leave the stored
  * one alone", which is what lets somebody correct a typo in the issuer without pasting the
- * secret again — and is why it is optional rather than defaulted to an empty string.
+ * secret again - and is why it is optional rather than defaulted to an empty string.
  */
 export const oidcConnectionInputSchema = z.object({
   issuerUrl: oidcIssuerUrlSchema,
@@ -100,7 +100,7 @@ export const oidcConnectionInputSchema = z.object({
   /**
    * The directory group whose members are expected to be able to sign in.
    *
-   * Recorded, never enforced — enforcement lives in the provider, where "user assignment
+   * Recorded, never enforced - enforcement lives in the provider, where "user assignment
    * required" is configured. It is here because the platform cannot read group membership
    * and nobody can otherwise answer "who is supposed to have access" six months later
    * without going back to the directory team.
@@ -208,7 +208,7 @@ export interface OidcDiagnosis {
    * Null when the question could not be reached. Established without a user present by
    * asking for a client-credentials grant: a wrong secret is refused as `invalid_client`,
    * while a correct secret on an app holding no application permissions is refused for a
-   * different reason entirely. That distinction is the whole test — it separates "your
+   * different reason entirely. That distinction is the whole test - it separates "your
    * secret is wrong" from "your secret is fine and this app simply cannot do that", which
    * are the two answers an administrator needs told apart.
    */

@@ -6,7 +6,7 @@ import { LoadingBlock } from "../components/ui.tsx";
 /**
  * Gate for authenticated routes.
  *
- * This is a UX guard, not a security boundary — every protected endpoint
+ * This is a UX guard, not a security boundary - every protected endpoint
  * enforces its own auth server-side. Its job is to avoid rendering a shell full
  * of failed requests, and to send the user back where they were headed after
  * signing in.

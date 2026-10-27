@@ -10,7 +10,7 @@ import { readAccessOf, type ReadAccess, type ReadScope } from "./environment.ser
  * needs one cannot be called without it, and the only supplier checks access first.
  *
  * Two restrictions are resolved here, not one. Which estates the caller may reach, and which
- * applications within them — and they are combined into a single value before any service
+ * applications within them - and they are combined into a single value before any service
  * sees them, so that no call site can apply one and forget the other.
  *
  * Both results are memoised per request. A handler may ask several services for data and
@@ -20,7 +20,7 @@ import { readAccessOf, type ReadAccess, type ReadScope } from "./environment.ser
 
 declare module "fastify" {
   interface FastifyRequest {
-    /** Memoised by `readAccess`. Never read directly — it is unset before the call. */
+    /** Memoised by `readAccess`. Never read directly - it is unset before the call. */
     resolvedAccess?: ReadAccess;
     /** Memoised by `requireScope`. */
     resolvedScope?: ReadScope;
@@ -60,7 +60,7 @@ function requestedRef(request: FastifyRequest): string | null {
 /**
  * The estate this request is about, and how much of it the caller may see.
  *
- * An explicit `?environment=` wins and is checked against the caller's grants — an
+ * An explicit `?environment=` wins and is checked against the caller's grants - an
  * environment they cannot reach reads as absent rather than as forbidden, so the response
  * does not confirm that an estate they are not allowed to know about exists.
  *
@@ -89,7 +89,7 @@ export async function requireScope(request: FastifyRequest): Promise<ReadScope> 
  *
  * Used by package search alone. It is the one place a single response mixes environments,
  * and it stays honest by labelling every row with the estate it came from and never summing
- * across them — see the note in `schemas/environment.ts`.
+ * across them - see the note in `schemas/environment.ts`.
  *
  * Each scope carries the caller's application visibility, so spanning estates never widens
  * what may be seen inside one. Without that, this would be the way to enumerate the names of

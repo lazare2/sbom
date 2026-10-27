@@ -48,8 +48,8 @@ import { formatNumber } from "../../lib/format.ts";
  * Every value an administrator sets once and forgets, in one place.
  *
  * The line this page draws is between *configuration* and *operation*, not between
- * settings and everything else. A tuning knob — how many days is stale, how often to check
- * for a database, which relay to mail through — is set during setup and rarely touched
+ * settings and everything else. A tuning knob - how many days is stale, how often to check
+ * for a database, which relay to mail through - is set during setup and rarely touched
  * again, and gathering those makes "what is this deployment configured to do" answerable on
  * one screen.
  *
@@ -60,7 +60,7 @@ import { formatNumber } from "../../lib/format.ts";
  * the knobs, and this page links back for the switches.
  *
  * Every section saves independently. One button spanning three endpoints would produce
- * partial failures — the relay saved, the threshold rejected — with no way to report which.
+ * partial failures - the relay saved, the threshold rejected - with no way to report which.
  */
 export function AdminConfigurationPage() {
   return (
@@ -137,7 +137,7 @@ function SbomBackfillCard() {
               <>
                 {" "}
                 <span className="text-warn">
-                  {formatNumber(backfill.data.unreadable)} could not be read — the raw SBOM is no
+                  {formatNumber(backfill.data.unreadable)} could not be read - the raw SBOM is no
                   longer in storage, so those builds cannot be backfilled.
                 </span>
               </>
@@ -202,7 +202,7 @@ function StaleThresholdCard() {
             is the right number for how often your teams actually build: weekly releases and
             quarterly releases disagree about it by an order of magnitude. Changing it takes
             effect immediately across the overview, the applications list and the analytics
-            report — no scan has to run, and none of the underlying data changes.
+            report - no scan has to run, and none of the underlying data changes.
           </p>
           {!valid && days.trim() !== "" ? (
             <p className="text-xs text-danger">
@@ -273,14 +273,14 @@ function VulnIntervalCard() {
             <FormRow
               label="Check for updates every"
               htmlFor="vuln-interval"
-              hint={`Hours. ${VULN_DB_INTERVAL_MIN_HOURS}–${VULN_DB_INTERVAL_MAX_HOURS} allowed.`}
+              hint={`Hours. ${VULN_DB_INTERVAL_MIN_HOURS}-${VULN_DB_INTERVAL_MAX_HOURS} allowed.`}
             >
               <TextInput id="vuln-interval" value={hours} onChange={setHours} />
             </FormRow>
           </div>
           {/*
             Anchore rebuilds roughly daily, so a 3-hour check is a cheap listing request that
-            usually finds nothing — worth saying, because "every 3 hours" otherwise sounds
+            usually finds nothing - worth saying, because "every 3 hours" otherwise sounds
             like eight 141 MB downloads a day.
           */}
           <p className="text-xs text-text-muted">
@@ -311,7 +311,7 @@ function VulnIntervalCard() {
             {status && !status.enabled ? (
               <span className="text-xs text-text-faint">
                 Scanning is off, so no checks are scheduled.{" "}
-                <Link to="/admin/vulnerabilities" className="text-accent hover:underline">
+                <Link to="/admin/scanners/vulnerabilities" className="text-accent hover:underline">
                   Vulnerability scanning
                 </Link>
               </span>
@@ -526,7 +526,7 @@ function ReportDeliveryCard() {
 
           {/*
             Advice, never a block. An unusual pairing is somebody's deliberate choice often
-            enough that refusing it would be this page being wrong about their network — but
+            enough that refusing it would be this page being wrong about their network - but
             it is a mistake often enough to be worth saying out loud, because the symptom is
             a timeout that reads as "the relay is down".
           */}
@@ -631,7 +631,7 @@ function ReportDeliveryCard() {
 
         {/*
           Two tests, and the order is the point. Checking the connection costs nobody an
-          email, and it catches every failure except a refused recipient — so it is the one
+          email, and it catches every failure except a refused recipient - so it is the one
           to reach for while a setting is still being guessed at. Sending is the
           confirmation afterwards.
 
@@ -692,7 +692,7 @@ function ReportDeliveryCard() {
         </div>
 
         {/*
-          These two remain error banners because they are genuine request failures — the API
+          These two remain error banners because they are genuine request failures - the API
           was unreachable, or refused the body. A relay that declines to talk is not one of
           them: it comes back as a normal answer and is rendered by `SmtpResult` above.
         */}
@@ -712,7 +712,7 @@ function ReportDeliveryCard() {
  * the relay is not, sending whoever reads it to the wrong system entirely.
  *
  * So the summary says what happened, the hint says what to change, and the relay's own words
- * are kept verbatim underneath — that last part is not for the administrator to interpret,
+ * are kept verbatim underneath - that last part is not for the administrator to interpret,
  * it is for them to paste to whoever runs the mail server.
  */
 function SmtpResult({ diagnosis }: { diagnosis: SmtpDiagnosis | null }) {

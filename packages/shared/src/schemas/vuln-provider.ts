@@ -12,7 +12,7 @@ import { z } from "zod";
  * ## What switching means
  *
  * Every component carries the provider that last assessed it. The sweep's work queue is
- * derived rather than stored — `vuln_scanned_at IS NULL OR vuln_provider <> <active>` — so
+ * derived rather than stored - `vuln_scanned_at IS NULL OR vuln_provider <> <active>` - so
  * changing this setting re-queues the whole estate automatically, with nothing to migrate
  * and no findings to wipe. Until a component is re-assessed it reads as *not assessed*,
  * which is the honest state: the old finding was produced by a database that is no longer
@@ -40,7 +40,7 @@ export const VULN_PROVIDER_LABELS: Record<VulnProvider, string> = {
  * should not cross a network in the clear. That reasoning is sound and the rule was still
  * wrong: Artifactory is very commonly published inside a corporate network on plain port 80,
  * which is exactly the deployment this provider was written for. The rule did not protect
- * that token, because there was no https listener to fall back to — it just made the feature
+ * that token, because there was no https listener to fall back to - it just made the feature
  * unusable and reported the refusal as "validation failed".
  *
  * So the scheme is accepted and the exposure is *stated*, on the screen where the URL is
@@ -64,7 +64,7 @@ export const xrayBaseUrlSchema = z
     }
 
     if (url.protocol !== "https:" && url.protocol !== "http:") {
-      fail(`Must be an http or https URL — "${url.protocol}" is not supported.`);
+      fail(`Must be an http or https URL - "${url.protocol}" is not supported.`);
       return;
     }
     if (url.username || url.password) {
@@ -95,7 +95,7 @@ export function xrayUrlIsPlaintext(value: string): boolean {
  * The token is write-only across the whole API: it is accepted here, encrypted before
  * storage, and never returned by any endpoint. `undefined` on an update means "leave the
  * stored one alone", which is what lets an administrator correct a typo in the URL without
- * having to paste the token again — and is why it is optional rather than defaulted to "".
+ * having to paste the token again - and is why it is optional rather than defaulted to "".
  */
 export const xrayConnectionInputSchema = z.object({
   baseUrl: xrayBaseUrlSchema,
@@ -106,7 +106,7 @@ export const xrayConnectionInputSchema = z.object({
    *
    * Present because internal Artifactory instances routinely use a private certificate
    * authority, and the alternative to this checkbox is an administrator who cannot connect
-   * at all. Off by default, and the admin screen says plainly what it gives up — a setting
+   * at all. Off by default, and the admin screen says plainly what it gives up - a setting
    * that silently disabled verification would be worse than not offering it.
    */
   allowSelfSignedCertificate: z.boolean().default(false),
@@ -128,7 +128,7 @@ export interface XrayConnection {
  * Not a guess, and not a constant. Xray's graph scan is documented for application
  * dependencies, and whether a given deployment also returns findings for operating-system
  * packages depends on its version and configuration. That distinction decides whether a
- * base-image figure of zero is a clean bill of health or a question nobody asked — and on a
+ * base-image figure of zero is a clean bill of health or a question nobody asked - and on a
  * typical container image the OS packages are two thirds of the component list.
  *
  * So it is measured: the connection test submits one known-vulnerable canary per ecosystem
@@ -160,7 +160,7 @@ export interface XrayDiagnosis {
   summary: string;
   hint: string | null;
   detail: string | null;
-  /** Populated on success — Xray's reported version, proving it is Xray and reachable. */
+  /** Populated on success - Xray's reported version, proving it is Xray and reachable. */
   version: string | null;
   /** Populated when the probe ran, so an administrator sees coverage before switching. */
   coverage: XrayCoverage | null;

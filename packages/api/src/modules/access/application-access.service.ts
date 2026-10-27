@@ -14,17 +14,18 @@ import {
 import type { Database } from "../../db/client.js";
 import type { UserRow } from "../../db/schema.js";
 import { rowsOf, type Row } from "../../lib/rows.js";
+import { SQUAD_APPLICATIONS } from "../squads/reach.js";
 
 /**
  * The second access axis: which applications a read-only account may see.
  *
  * Environments decide which estate; this decides how much of that estate. The two are applied
  * together at every site that reads application data, and the reason they are never applied
- * separately is in `ReadScope` — the estate and the viewer's visibility travel as one value
+ * separately is in `ReadScope` - the estate and the viewer's visibility travel as one value
  * so that a query cannot honour one and forget the other.
  *
  * Nothing here restricts an administrator. That is not a shortcut: it is what keeps every
- * admin write path — merges, suppressions, tokens, report delivery — completely outside this
+ * admin write path - merges, suppressions, tokens, report delivery - completely outside this
  * feature's blast radius. A narrowing that only ever applies to reads by non-admins cannot
  * corrupt data by being wrong; it can only hide something, which is recoverable.
  */
@@ -32,7 +33,7 @@ import { rowsOf, type Row } from "../../lib/rows.js";
 /**
  * SQL restricting a query to the applications this caller may see.
  *
- * `alias` is the application table's alias at the call site, written as a literal — never
+ * `alias` is the application table's alias at the call site, written as a literal - never
  * user input. The predicate is deliberately a single expression that is valid in every
  * position, including `TRUE`, so a call site interpolates it unconditionally and one that
  * forgot is a compile error rather than a silently unfiltered figure.
@@ -75,7 +76,7 @@ export function visibleApplications(access: ApplicationAccess, alias: string): S
  * broken data rather than as a permission.
  *
  * Groups reached only through a direct application grant are deliberately NOT included. The
- * account can see that application, not the group — a group whose other members are invisible
+ * account can see that application, not the group - a group whose other members are invisible
  * would report member counts and advisory totals that do not match what the account can open.
  */
 export function visibleGroups(access: ApplicationAccess, alias: string): SQL {
@@ -175,7 +176,7 @@ export class ApplicationAccessService {
        WHERE sm.user_id = ${user.id}::uuid
       UNION ALL
       SELECT 'squad_application' AS kind, sa.application_id AS id
-        FROM squad_member sm JOIN squad_application sa ON sa.squad_id = sm.squad_id
+        FROM squad_member sm JOIN ${SQUAD_APPLICATIONS} sa ON sa.squad_id = sm.squad_id
        WHERE sm.user_id = ${user.id}::uuid
     `);
 
@@ -205,8 +206,8 @@ export class ApplicationAccessService {
       SELECT 'group' AS kind, group_id AS id FROM squad_group
        WHERE squad_id = ANY(${sql.param([...squadIds])}::uuid[])
       UNION
-      SELECT 'application' AS kind, application_id AS id FROM squad_application
-       WHERE squad_id = ANY(${sql.param([...squadIds])}::uuid[])
+      SELECT 'application' AS kind, sa.application_id AS id FROM ${SQUAD_APPLICATIONS} sa
+       WHERE sa.squad_id = ANY(${sql.param([...squadIds])}::uuid[])
     `);
     const rows = rowsOf(result);
     return {
@@ -382,6 +383,7 @@ export class ApplicationAccessService {
         direct: boolean;
         via_groups: string[] | null;
         via_squads: string[] | null;
+        via_tribes: string[] | null;
       }>
     >(sql`
       SELECT a.id,
@@ -404,13 +406,21 @@ export class ApplicationAccessService {
                  FROM squad s
                 WHERE s.id = ANY(${sql.param([...squadIds])}::uuid[])
                   AND (
-                    EXISTS (SELECT 1 FROM squad_application sa
+                    EXISTS (SELECT 1 FROM ${SQUAD_APPLICATIONS} sa
                              WHERE sa.squad_id = s.id AND sa.application_id = a.id)
                     OR EXISTS (SELECT 1 FROM squad_group sg
                                  JOIN application_group_member sgm ON sgm.group_id = sg.group_id
                                 WHERE sg.squad_id = s.id AND sgm.application_id = a.id)
                   )
-             ), '{}') AS via_squads
+             ), '{}') AS via_squads,
+             COALESCE((
+               SELECT array_agg(DISTINCT t.name ORDER BY t.name)
+                 FROM tribe t
+                 JOIN squad_tribe st ON st.tribe_id = t.id
+                 JOIN tribe_application ta ON ta.tribe_id = t.id
+                WHERE st.squad_id = ANY(${sql.param([...squadIds])}::uuid[])
+                  AND ta.application_id = a.id
+             ), '{}') AS via_tribes
         FROM application a
         JOIN environment e ON e.id = a.environment_id
         /*
@@ -436,6 +446,7 @@ export class ApplicationAccessService {
       direct: row.direct === true,
       viaGroups: row.via_groups ?? [],
       viaSquads: row.via_squads ?? [],
+      viaTribes: row.via_tribes ?? [],
     }));
   }
 
@@ -507,7 +518,7 @@ export class ApplicationAccessService {
    * Counted in one round trip rather than checked one at a time, and returned as counts
    * rather than as the missing ids: the caller only needs to know whether to refuse, and
    * echoing back which ids were unknown would confirm the existence of everything it did
-   * not name — a way to probe for group ids by elimination.
+   * not name - a way to probe for group ids by elimination.
    */
   async countKnown(
     groupIds: string[],
@@ -527,8 +538,8 @@ export class ApplicationAccessService {
   /**
    * Replaces an account's grants with exactly this set.
    *
-   * One transaction, because the two lists and the flag are one decision. A partial apply —
-   * the flag on, the groups not yet written — is an account that can see nothing, and it
+   * One transaction, because the two lists and the flag are one decision. A partial apply -
+   * the flag on, the groups not yet written - is an account that can see nothing, and it
    * would sit that way until somebody noticed and reported it as the platform being broken.
    */
   async setForUser(userId: string, input: SetUserApplicationAccess): Promise<void> {

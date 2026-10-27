@@ -4,8 +4,8 @@ import type { UserRow } from "../../db/schema.js";
 /**
  * THE AUTH ABSTRACTION.
  *
- * Everything above this interface — the login route, session creation, RBAC
- * guards — is provider-agnostic. Adding LDAP later means writing one class that
+ * Everything above this interface - the login route, session creation, RBAC
+ * guards - is provider-agnostic. Adding LDAP later means writing one class that
  * implements `AuthProvider` and registering it; no route, session, or
  * permission code changes.
  *
@@ -29,7 +29,7 @@ export interface AuthContext {
 }
 
 export type AuthFailureReason =
-  /** Wrong password, unknown user, or a bind rejection — deliberately not distinguished. */
+  /** Wrong password, unknown user, or a bind rejection - deliberately not distinguished. */
   | "invalid_credentials"
   /** Credentials were correct but the account is deactivated. */
   | "account_inactive"
@@ -49,7 +49,7 @@ export interface AuthProvider {
 
   /**
    * True if this provider may create a local `user` row the first time an
-   * identity authenticates successfully. Local password auth: false — accounts
+   * identity authenticates successfully. Local password auth: false - accounts
    * are admin-created only. A future LDAP provider: true, so directory members
    * don't each need manual pre-registration.
    */
@@ -63,7 +63,7 @@ export interface AuthProvider {
 
   /**
    * Verify credentials. Must not create a session, set a cookie, or record a
-   * login timestamp — the caller owns all of that, which is what keeps session
+   * login timestamp - the caller owns all of that, which is what keeps session
    * handling identical across providers.
    */
   authenticate(credentials: AuthCredentials, ctx: AuthContext): Promise<AuthResult>;
@@ -77,7 +77,7 @@ export interface AuthProvider {
  *      migrated to LDAP keeps working without touching the login route.
  *   2. Otherwise, offer the attempt to each provider that can provision on
  *      login, in configured priority order.
- *   3. If nothing handles it, the caller reports `invalid_credentials` — never
+ *   3. If nothing handles it, the caller reports `invalid_credentials` - never
  *      "no such user", which would turn the login form into an account oracle.
  */
 export class AuthProviderRegistry {

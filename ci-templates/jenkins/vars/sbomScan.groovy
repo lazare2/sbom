@@ -18,7 +18,7 @@
 def call(Map config = [:]) {
     String image = config.image
     if (!image) {
-        error "sbomScan: 'image' is required — pass the image reference that was just built"
+        error "sbomScan: 'image' is required - pass the image reference that was just built"
     }
 
     String appName       = config.app ?: defaultAppName()
@@ -86,7 +86,7 @@ def call(Map config = [:]) {
             throw err
         }
         // Visible in the build result without failing it.
-        unstable("sbomScan: SBOM upload failed — ${err.message}")
+        unstable("sbomScan: SBOM upload failed - ${err.message}")
     } finally {
         sh "rm -f '${sbomFile}' || true"
     }
@@ -102,7 +102,7 @@ def call(Map config = [:]) {
 private String defaultAppName() {
     List<String> parts = (env.JOB_NAME ?: '').split('/').findAll { it }
     if (!parts) {
-        error "sbomScan: could not derive an app name from JOB_NAME — pass app: '<name>' explicitly"
+        error "sbomScan: could not derive an app name from JOB_NAME - pass app: '<name>' explicitly"
     }
     if (env.BRANCH_NAME && parts.size() > 1 && parts[-1] == env.BRANCH_NAME) {
         return parts[-2]

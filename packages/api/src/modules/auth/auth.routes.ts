@@ -58,7 +58,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     const token = request.cookies[config.SESSION_COOKIE_NAME];
     if (token) await auth.logout(token);
     reply.clearCookie(config.SESSION_COOKIE_NAME, { path: "/" });
-    // 204 whether or not a session existed — logging out is idempotent.
+    // 204 whether or not a session existed - logging out is idempotent.
     return reply.status(204).send();
   });
 

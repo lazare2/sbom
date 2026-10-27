@@ -10,7 +10,7 @@ import { getConfig } from "../config.js";
  * Drizzle records applied migrations in `drizzle.__drizzle_migrations` and runs
  * each file in a transaction, so this is safe to run on every deploy and safe to
  * run twice. Schema changes are always generated as files (`npm run db:generate`)
- * and reviewed — never applied by pushing the schema directly.
+ * and reviewed - never applied by pushing the schema directly.
  */
 async function main(): Promise<void> {
   const config = getConfig();

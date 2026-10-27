@@ -6,7 +6,7 @@ import { z } from "zod";
  * Attribute definitions, read side.
  *
  * The UI needs these to render labels, input types, and select options for the
- * per-application attributes rather than hardcoding "squad / owner / severity" —
+ * per-application attributes rather than hardcoding "squad / owner / severity" -
  * that is the whole point of keeping them as data. Writing them is an admin
  * action and lives under `/admin/attribute-definitions`.
  */

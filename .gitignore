@@ -25,11 +25,11 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Offline deployment bundles — hundreds of MB of container images.
+# Offline deployment bundles - hundreds of MB of container images.
 dist-offline/
 
 # Generated on the target machine by deploy/start.*, never committed. Not anchored
-# to deploy/ — a bundle test-run from anywhere writes the same two files, and one
+# to deploy/ - a bundle test-run from anywhere writes the same two files, and one
 # committed CREDENTIALS.txt would publish a deployment's admin password.
 **/.env
 **/CREDENTIALS.txt

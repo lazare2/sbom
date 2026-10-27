@@ -65,7 +65,7 @@ const urlSpec = {
 /**
  * One group: what is in it, and what it is exposed to.
  *
- * The page is built around a single question the applications list cannot answer — "is this
+ * The page is built around a single question the applications list cannot answer - "is this
  * advisory everywhere in the product, or in one corner of it". A CVE in one of eight images is
  * a rebuild; the same CVE in eight of eight is a base image nobody has updated. Severity does
  * not distinguish those, so the member spread is given its own column rather than being left
@@ -126,7 +126,7 @@ export function GroupDetailPage() {
                   </span>
                 </>
               ) : (
-                <span className="text-text-faint">—</span>
+                <span className="text-text-faint">-</span>
               )}
             </Field>
           </dl>
@@ -181,7 +181,7 @@ export function GroupDetailPage() {
         {group.members.length === 0 ? (
           <EmptyState
             title="No applications yet"
-            hint="An admin can add applications to this group under Admin → Groups."
+            hint="An admin can add applications to this group under Admin → Access → Groups."
           />
         ) : (
           <TableWrap>
@@ -341,7 +341,7 @@ export function GroupDetailPage() {
                             <Badge tone="ok">Fix available</Badge>
                           ) : (
                             <span className="text-[11px] text-text-faint">
-                              —
+                              -
                             </span>
                           )}
                         </Td>

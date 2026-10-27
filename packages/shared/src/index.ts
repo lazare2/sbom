@@ -23,6 +23,7 @@ export * from "./schemas/oidc.js";
 export * from "./schemas/access-request.js";
 export * from "./schemas/api-token.js";
 export * from "./schemas/squad.js";
+export * from "./schemas/tribe.js";
 export * from "./schemas/fix-recommendation.js";
 export * from "./schemas/environment.js";
 export * from "./schemas/vuln-provider.js";

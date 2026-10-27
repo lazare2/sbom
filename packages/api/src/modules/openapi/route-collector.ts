@@ -4,7 +4,7 @@
  * Collected from Fastify's own `onRoute` hook rather than listed by hand, which is the one
  * thing that makes "the document describes the whole API" true by construction instead of by
  * diligence. A hand-maintained list drifts the first time somebody adds an endpoint and does
- * not think of the spec — and the spec is the half people read.
+ * not think of the spec - and the spec is the half people read.
  *
  * The companion guarantee is in the catalog: a route collected here with no entry there fails
  * a test. Between them, an endpoint cannot exist undocumented and cannot be documented without

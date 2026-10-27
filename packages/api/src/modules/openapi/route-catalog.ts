@@ -20,6 +20,11 @@ import {
   setGroupMembersRequestSchema,
   setSignInMethodSchema,
   setSquadAccessSchema,
+  squadSettingsSchema,
+  createTribeSchema,
+  updateTribeSchema,
+  setTribeSquadsSchema,
+  setTribeApplicationsSchema,
   setSquadMembersSchema,
   setUserApplicationAccessSchema,
   setUserSquadsSchema,
@@ -48,19 +53,19 @@ import type { ZodTypeAny } from "zod";
  *
  * ## What `auth` means
  *
- * - `public`   — no credential. The sign-in endpoints and the health probes.
- * - `session`  — a signed-in account, but *not* gated on the forced-password-change flag.
+ * - `public`   - no credential. The sign-in endpoints and the health probes.
+ * - `session`  - a signed-in account, but *not* gated on the forced-password-change flag.
  *                Exactly three routes need this, and they are the three that let somebody
  *                clear that flag.
- * - `user`     — any signed-in account, by session cookie or personal API token.
- * - `admin`    — an account whose role is `admin`.
- * - `ingest`   — a CI ingest token, which is a different credential from a personal one: it
+ * - `user`     - any signed-in account, by session cookie or personal API token.
+ * - `admin`    - an account whose role is `admin`.
+ * - `ingest`   - a CI ingest token, which is a different credential from a personal one: it
  *                belongs to an environment rather than a person and may only submit scans.
  *
  * ## What is deliberately not here
  *
  * Response schemas. The responses are TypeScript interfaces rather than Zod, so there is
- * nothing to convert — hand-writing a hundred of them would produce a second description of
+ * nothing to convert - hand-writing a hundred of them would produce a second description of
  * the same shapes, free to drift from the first, which is the problem this file exists to
  * avoid. Status codes and their meanings are documented per operation; the response bodies are
  * described by the types in `@sbom/shared`, which the UI is built against.
@@ -131,7 +136,7 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
       "enumerate who works here.",
   },
   "POST /api/v1/auth/logout": {
-    summary: "End the calling session. Idempotent — 204 whether or not one existed.",
+    summary: "End the calling session. Idempotent - 204 whether or not one existed.",
     tag: "Authentication",
     auth: "public",
   },
@@ -156,7 +161,7 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     tag: "Authentication",
     auth: "public",
     notes:
-      "Anonymous by necessity — the sign-in page renders before anybody is authenticated — so " +
+      "Anonymous by necessity - the sign-in page renders before anybody is authenticated - so " +
       "it never reveals the issuer, the client id or anything else about the directory.",
   },
   "GET /api/v1/auth/oidc/start": {
@@ -178,7 +183,7 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     auth: "user",
   },
   "GET /api/v1/auth/api-tokens": {
-    summary: "Your own API tokens. Never the secrets — only hashes are stored.",
+    summary: "Your own API tokens. Never the secrets - only hashes are stored.",
     tag: "API tokens",
     auth: "user",
   },
@@ -267,7 +272,7 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     auth: "user",
     notes:
       "Refused with 409 `vuln_scanning_disabled` while scanning is off, rather than returning " +
-      "an empty list — an empty list would read as a clean bill of health.",
+      "an empty list - an empty list would read as a clean bill of health.",
   },
   "GET /api/v1/applications/attribute-values/:key": {
     summary: "Distinct values in use for one attribute, for building a filter.",
@@ -317,7 +322,7 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     summary: "The original SBOM as submitted, decompressed.",
     tag: "Scans",
     auth: "user",
-    notes: "The stored bytes, not a re-rendering — so it round-trips to what the tool produced.",
+    notes: "The stored bytes, not a re-rendering - so it round-trips to what the tool produced.",
   },
   "GET /api/v1/scans/:id/vulnerabilities": {
     summary: "Findings for one build.",
@@ -487,7 +492,7 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     auth: "user",
     notes:
       "The inventory flavour carries no `vulnerabilities` array at all, rather than an empty " +
-      "one — an empty array would claim the document had been checked.",
+      "one - an empty array would claim the document had been checked.",
   },
   "GET /api/v1/exports/scans/:id": {
     summary: "One build's inventory as CycloneDX JSON.",
@@ -586,6 +591,10 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     tag: "Admin: applications",
     auth: "admin",
     body: updateApplicationRequestSchema,
+    notes:
+      "`squad` and `tribe` take comma-separated names and assign the application to exactly " +
+      "those squads or tribes; a name that does not exist is refused (400) rather than created. " +
+      "Clearing a required attribute is refused too.",
   },
   "DELETE /api/v1/admin/applications/:id": {
     summary: "Delete an application and its scan history.",
@@ -787,6 +796,66 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     tag: "Admin: squads",
     auth: "admin",
     body: setSquadAccessSchema,
+    notes:
+      "The applications granted directly are what each application's `squad` attribute lists, " +
+      "so this rewrites those attributes too. Group grants give access but are not listed there.",
+  },
+  "GET /api/v1/admin/squads/settings": {
+    summary: "Squad-wide rules: whether every squad must belong to a tribe.",
+    tag: "Admin: squads",
+    auth: "admin",
+  },
+  "PUT /api/v1/admin/squads/settings": {
+    summary: "Change the squad-wide rules.",
+    tag: "Admin: squads",
+    auth: "admin",
+    body: squadSettingsSchema,
+    notes:
+      "With `requireTribe` on, creating a squad or saving its tribes needs at least one tribe. " +
+      "Squads that already have none are left alone until their tribes are edited.",
+  },
+  "GET /api/v1/admin/tribes": {
+    summary: "Every tribe, with squad, application and member counts.",
+    tag: "Admin: tribes",
+    auth: "admin",
+  },
+  "GET /api/v1/admin/tribes/:id": {
+    summary: "One tribe, with its squads and the applications assigned to it.",
+    tag: "Admin: tribes",
+    auth: "admin",
+  },
+  "POST /api/v1/admin/tribes": {
+    summary: "Create a tribe.",
+    tag: "Admin: tribes",
+    auth: "admin",
+    body: createTribeSchema,
+  },
+  "PATCH /api/v1/admin/tribes/:id": {
+    summary: "Rename a tribe, or change its address or description.",
+    tag: "Admin: tribes",
+    auth: "admin",
+    body: updateTribeSchema,
+  },
+  "DELETE /api/v1/admin/tribes/:id": {
+    summary: "Delete a tribe. Its squads stay; their members lose only the tribe's applications.",
+    tag: "Admin: tribes",
+    auth: "admin",
+  },
+  "PUT /api/v1/admin/tribes/:id/squads": {
+    summary: "Replace the squads under a tribe.",
+    tag: "Admin: tribes",
+    auth: "admin",
+    body: setTribeSquadsSchema,
+    notes: "A squad can sit under several tribes. Members of every squad listed see the tribe's applications.",
+  },
+  "PUT /api/v1/admin/tribes/:id/applications": {
+    summary: "Replace the applications assigned to a tribe directly.",
+    tag: "Admin: tribes",
+    auth: "admin",
+    body: setTribeApplicationsSchema,
+    notes:
+      "Every member of every squad in the tribe sees these applications. Each application's " +
+      "`tribe` attribute is rewritten to match.",
   },
   "GET /api/v1/admin/access-requests": {
     summary: "People the directory authenticated who have no account here.",
@@ -794,7 +863,7 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     auth: "admin",
     notes:
       "Carries `signOnEnabled`, because an empty queue means 'nobody was refused' only when " +
-      "sign-on is on — with it off, nothing can ever arrive.",
+      "sign-on is on - with it off, nothing can ever arrive.",
   },
   "POST /api/v1/admin/access-requests/:id/resolve": {
     summary: "Mark a request dealt with, naming the account created for it.",

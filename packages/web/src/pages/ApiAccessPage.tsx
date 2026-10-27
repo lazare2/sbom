@@ -32,7 +32,7 @@ import {
  * is worth saying on the page, because the first question a developer asks is "what can I get
  * at", and the honest answer is "whatever you can see".
  *
- * Reachable by every signed-in account, not just administrators. Self-service is the point —
+ * Reachable by every signed-in account, not just administrators. Self-service is the point -
  * a queue behind an administrator is how four engineers end up sharing one credential.
  */
 export function ApiAccessPage() {
@@ -78,12 +78,12 @@ function EndpointCard({
     <Card>
       <CardHeader
         title="Where the API is"
-        subtitle="Every response is JSON. Authentication is a bearer token on each request — there is no sign-in step and no cookie."
+        subtitle="Every response is JSON. Authentication is a bearer token on each request - there is no sign-in step and no cookie."
       />
       <div className="space-y-4 p-4 pt-0">
         <FormRow
           label="Base URL"
-          hint="Taken from this deployment's configured public address, not from your browser — so it is the address a script on another machine should use."
+          hint="Taken from this deployment's configured public address, not from your browser - so it is the address a script on another machine should use."
         >
           <Mono>{baseUrl}</Mono>
         </FormRow>
@@ -121,7 +121,7 @@ function EndpointCard({
 
         <p className="text-xs text-text-faint">
           A token acts as you. It reaches exactly the environments, groups and applications your
-          account reaches — resolved on every request, so a change to your access applies to your
+          account reaches - resolved on every request, so a change to your access applies to your
           tokens immediately.
         </p>
       </div>
@@ -171,7 +171,7 @@ function TokenCard({
     <Card>
       <CardHeader
         title="Your tokens"
-        subtitle="Shown once at creation and stored only as a hash — a lost token cannot be recovered, only replaced."
+        subtitle="Shown once at creation and stored only as a hash - a lost token cannot be recovered, only replaced."
       />
 
       <div className="space-y-4 p-4 pt-0">
@@ -231,7 +231,7 @@ function TokenCard({
 
         {/*
           Said at the point the choice is made, not in documentation nobody opens. A write
-          token can do anything its owner can, which for an administrator is everything —
+          token can do anything its owner can, which for an administrator is everything -
           and the common reason to want a token needs no write access at all.
         */}
         {scope === "write" ? (

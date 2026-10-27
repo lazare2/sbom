@@ -11,13 +11,13 @@ type HitSortField = (typeof componentSearchSort)["fields"][number];
  *
  * Shared by the single search and the bulk list search. Both produce the same
  * `ComponentSearchHit`, and rendering them through one component is what stops the
- * two views drifting apart in how they describe a hit — "current" meaning one
+ * two views drifting apart in how they describe a hit - "current" meaning one
  * thing on one screen and something subtly different on the other is the kind of
  * inconsistency that makes people stop trusting a search.
  *
  * `sort` is optional so a caller that renders an unpaginated excerpt can omit it and get
  * plain headers. Where it is passed, both callers page server-side and the sort goes with
- * the query — sorting a page in the browser would reorder the rows on screen while leaving
+ * the query - sorting a page in the browser would reorder the rows on screen while leaving
  * the rest of the result set untouched.
  */
 export function ComponentHitsTable({
@@ -88,7 +88,7 @@ export function ComponentHitsTable({
                 ) : (
                   <Badge
                     tone="warn"
-                    title="Present in an earlier build but absent from the latest scan — removed or upgraded away."
+                    title="Present in an earlier build but absent from the latest scan - removed or upgraded away."
                   >
                     removed
                   </Badge>

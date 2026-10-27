@@ -199,7 +199,7 @@ export function VulnerabilitiesPage() {
 
         <div className="border-b border-border-base px-4 py-2 text-xs text-text-muted">
           {state.currentOnly
-            ? "Showing advisories against packages in some application's current build — what is shipping now."
+            ? "Showing advisories against packages in some application's current build - what is shipping now."
             : "Including packages an application shipped at some point but no longer does. Useful when checking historical exposure."}
         </div>
 
@@ -283,7 +283,7 @@ export function VulnerabilitiesPage() {
                         </div>
                       </Td>
                       <Td className="max-w-[520px] truncate text-text-muted" title={advisory.description ?? undefined}>
-                        {advisory.description ?? "—"}
+                        {advisory.description ?? " - "}
                       </Td>
                       <AdvisoryPackagesCell advisory={advisory} />
                       <AdvisoryApplicationsCell advisory={advisory} />
@@ -378,14 +378,14 @@ export function AdvisoryDetailPage() {
         <CardHeader title="Advisory" />
         <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
           <Field label="Severity">{advisory.severity}</Field>
-          <Field label="CVSS base score">{advisory.cvssBaseScore?.toFixed(1) ?? "—"}</Field>
+          <Field label="CVSS base score">{advisory.cvssBaseScore?.toFixed(1) ?? " - "}</Field>
           <Field label="EPSS">
             {/* Shown as a percentage because a raw 0.99999 reads as a score rather than a
                 probability, and this one genuinely means "almost certainly exploited". */}
-            {advisory.epssScore === null ? "—" : `${(advisory.epssScore * 100).toFixed(1)}%`}
+            {advisory.epssScore === null ? " - " : `${(advisory.epssScore * 100).toFixed(1)}%`}
           </Field>
           <Field label="Also known as">
-            {advisory.aliases.length > 0 ? <Mono>{advisory.aliases.join(", ")}</Mono> : "—"}
+            {advisory.aliases.length > 0 ? <Mono>{advisory.aliases.join(", ")}</Mono> : " - "}
           </Field>
           {advisory.description ? (
             <div className="col-span-2 sm:col-span-4">
@@ -436,7 +436,7 @@ export function AdvisoryDetailPage() {
 
       {data.truncated ? (
         <p className="mt-3 text-xs text-warn">
-          Only the first 500 applications are listed — this advisory affects more than that.
+          Only the first 500 applications are listed - this advisory affects more than that.
         </p>
       ) : null}
     </>

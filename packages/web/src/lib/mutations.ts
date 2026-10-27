@@ -52,9 +52,13 @@ import type {
   UpdatePlatformSettings,
   UpdateReportSettings,
   CreateSquad,
+  CreateTribe,
   SetSquadAccess,
   SquadDetail,
+  SquadSettings,
+  TribeDetail,
   UpdateSquad,
+  UpdateTribe,
 } from "@sbom/shared";
 import { api } from "./api.ts";
 import { queryKeys } from "./queries.ts";
@@ -63,8 +67,8 @@ import { queryKeys } from "./queries.ts";
  * Admin write hooks.
  *
  * Every one of these invalidates broadly rather than surgically patching the
- * cache. An admin write is rare and its effects are wide — a merge rewrites two
- * applications' scan history and the global package search at once — so
+ * cache. An admin write is rare and its effects are wide - a merge rewrites two
+ * applications' scan history and the global package search at once - so
  * refetching is both cheaper to reason about and impossible to get subtly wrong.
  */
 
@@ -76,6 +80,10 @@ function invalidateApplications(qc: QueryClient): Promise<unknown> {
     qc.invalidateQueries({ queryKey: ["components"] }),
     qc.invalidateQueries({ queryKey: ["dashboard"] }),
     qc.invalidateQueries({ queryKey: ["admin", "audit-log"] }),
+    // Squad and tribe attributes are assignments: a save can change what a squad or tribe
+    // holds, and the access its members have.
+    qc.invalidateQueries({ queryKey: ["admin", "squads"] }),
+    qc.invalidateQueries({ queryKey: ["admin", "tribes"] }),
   ]);
 }
 
@@ -100,7 +108,7 @@ export interface UploadSbomVars {
  * correct rather than lazy: this scan becomes the application's current build, so
  * its component list, its removed-packages view, every global package search that
  * might now hit it, the dashboard counts and the analytics report are all stale in
- * one stroke. It is exactly as wide-reaching as a CI push — the difference is only
+ * one stroke. It is exactly as wide-reaching as a CI push - the difference is only
  * that a CI push happens while nobody is looking at a cache.
  */
 export function useUploadSbom() {
@@ -171,7 +179,7 @@ export function useDeleteScan() {
  *
  * Registers the list and returns its id, which the caller navigates to. The POST
  * response is seeded into the cache under the GET's key so the results render
- * immediately without a second round trip — the extra request would otherwise be
+ * immediately without a second round trip - the extra request would otherwise be
  * the price of making every search shareable, and it does not have to be.
  */
 export function useSubmitPackageList() {
@@ -187,7 +195,7 @@ export function useSubmitPackageList() {
         pageSize: 100,
       };
       // `input` is not in the POST response but is in the GET's, and the caller
-      // already has it — so the seeded entry matches the GET shape exactly rather
+      // already has it - so the seeded entry matches the GET shape exactly rather
       // than being a near-miss that forces a refetch.
       qc.setQueryData(queryKeys.bulkSearch(result.queryId, params), { ...result, input: body.input });
       void qc.invalidateQueries({ queryKey: queryKeys.bulkSearchLists });
@@ -378,7 +386,7 @@ export function useTestXrayConnection() {
 /**
  * Mints a personal API token.
  *
- * The secret comes back exactly once and is never written into the query cache — it is
+ * The secret comes back exactly once and is never written into the query cache - it is
  * returned to the caller, which shows it and then forgets it. Caching it would leave a
  * credential in memory for as long as the tab stayed open, and in any devtools snapshot of it.
  */
@@ -685,13 +693,20 @@ export function useDeleteIngestToken() {
   Every squad write invalidates the whole admin namespace, not only the squad keys. Membership
   and grants are access: they change the Users list's Access column and any open access
   preview, and a narrower invalidation would leave those describing yesterday's reach.
+
+  Grants, renames and deletes also rewrite applications' "squad" and "tribe" attributes, so the
+  application lists are refreshed with them.
 */
+function invalidateTeams(qc: ReturnType<typeof useQueryClient>): void {
+  void qc.invalidateQueries({ queryKey: ["admin"] });
+  void qc.invalidateQueries({ queryKey: ["applications"] });
+}
 
 export function useCreateSquad() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateSquad) => api.post<{ squad: SquadDetail }>("/admin/squads", body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+    onSuccess: () => invalidateTeams(qc),
   });
 }
 
@@ -700,7 +715,7 @@ export function useUpdateSquad() {
   return useMutation({
     mutationFn: (vars: { id: string; body: UpdateSquad }) =>
       api.patch<{ squad: SquadDetail }>(`/admin/squads/${vars.id}`, vars.body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+    onSuccess: () => invalidateTeams(qc),
   });
 }
 
@@ -708,7 +723,7 @@ export function useDeleteSquad() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete<void>(`/admin/squads/${id}`),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+    onSuccess: () => invalidateTeams(qc),
   });
 }
 
@@ -728,7 +743,63 @@ export function useSetSquadAccess() {
   return useMutation({
     mutationFn: (vars: { id: string; body: SetSquadAccess }) =>
       api.put<{ squad: SquadDetail }>(`/admin/squads/${vars.id}/access`, vars.body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+    onSuccess: () => invalidateTeams(qc),
+  });
+}
+
+export function useUpdateSquadSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SquadSettings) =>
+      api.put<{ settings: SquadSettings }>("/admin/squads/settings", body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin", "squad-settings"] }),
+  });
+}
+
+// --- tribes -----------------------------------------------------------------
+
+export function useCreateTribe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateTribe) => api.post<{ tribe: TribeDetail }>("/admin/tribes", body),
+    onSuccess: () => invalidateTeams(qc),
+  });
+}
+
+export function useUpdateTribe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; body: UpdateTribe }) =>
+      api.patch<{ tribe: TribeDetail }>(`/admin/tribes/${vars.id}`, vars.body),
+    onSuccess: () => invalidateTeams(qc),
+  });
+}
+
+export function useDeleteTribe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/admin/tribes/${id}`),
+    onSuccess: () => invalidateTeams(qc),
+  });
+}
+
+export function useSetTribeSquads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; squadIds: string[] }) =>
+      api.put<{ tribe: TribeDetail }>(`/admin/tribes/${vars.id}/squads`, { squadIds: vars.squadIds }),
+    onSuccess: () => invalidateTeams(qc),
+  });
+}
+
+export function useSetTribeApplications() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; applicationIds: string[] }) =>
+      api.put<{ tribe: TribeDetail }>(`/admin/tribes/${vars.id}/applications`, {
+        applicationIds: vars.applicationIds,
+      }),
+    onSuccess: () => invalidateTeams(qc),
   });
 }
 
@@ -892,7 +963,7 @@ export function useUpdateVulnDb() {
   });
 }
 
-/** Installs a database from an uploaded archive — the air-gapped path. */
+/** Installs a database from an uploaded archive - the air-gapped path. */
 export function useImportVulnDb() {
   const qc = useQueryClient();
   return useMutation({
@@ -977,7 +1048,7 @@ export function useChangePassword() {
       api.post<{ message: string }>("/auth/change-password", vars),
     onSuccess: () => {
       // `mustChangePassword` lives on the session user, and clearing it is what
-      // unlocks the rest of the app — so this refetch is load-bearing, not
+      // unlocks the rest of the app - so this refetch is load-bearing, not
       // cosmetic.
       void qc.invalidateQueries({ queryKey: queryKeys.me });
     },
@@ -990,8 +1061,8 @@ export function useChangePassword() {
  * Group writes invalidate applications and the dashboard as well as groups.
  *
  * Not over-cautious. A group's membership decides which applications carry which chips, what
- * the `?group=` filter returns, and — because the dashboard and analytics accept a group
- * scope — what every aggregate on those pages describes. Invalidating only `["groups"]` would
+ * the `?group=` filter returns, and - because the dashboard and analytics accept a group
+ * scope - what every aggregate on those pages describes. Invalidating only `["groups"]` would
  * leave a stale scoped dashboard on screen showing figures for a membership that no longer
  * exists, which is the one failure mode this feature can produce that looks like data rather
  * than like a bug.
@@ -1107,7 +1178,7 @@ export function useUpdateMaliciousSettings() {
  * recorded them.
  *
  * Invalidates every view that shows a path, because a successful run changes what those
- * screens can say — not merely the admin panel that triggered it. Scan and application
+ * screens can say - not merely the admin panel that triggered it. Scan and application
  * component lists, findings and malicious impacts all read the same columns.
  */
 export function useBackfillSbom() {

@@ -59,7 +59,10 @@ import type {
   ReportSettings,
   FixRecommendationReport,
   SquadDetail,
+  SquadSettings,
   SquadSummary,
+  TribeDetail,
+  TribeSummary,
 } from "@sbom/shared";
 import type { componentSearchSort } from "@sbom/shared";
 import { api, toQueryString } from "./api.ts";
@@ -152,6 +155,9 @@ export const queryKeys = {
     ["applications", id, "vulnerabilities", "recommendations", params] as const,
   squads: ["admin", "squads"] as const,
   squad: (id: string) => ["admin", "squads", id] as const,
+  squadSettings: ["admin", "squad-settings"] as const,
+  tribes: ["admin", "tribes"] as const,
+  tribe: (id: string) => ["admin", "tribes", id] as const,
   userSquads: (id: string) => ["admin", "user-squads", id] as const,
 };
 
@@ -225,7 +231,7 @@ export function useApplications(params: Record<string, unknown>) {
  * Every group, for the list page and for the filter dropdowns that offer them.
  *
  * A larger page size than the tables use, because the common caller is a `<select>` that has
- * to contain every option to be correct — a paginated dropdown silently omitting the group
+ * to contain every option to be correct - a paginated dropdown silently omitting the group
  * someone is looking for is worse than a long one.
  */
 export function useGroups(params: Record<string, unknown> = { pageSize: 200 }) {
@@ -456,7 +462,7 @@ export interface BulkSearchOptions {
   scope: "current" | "historical" | "all";
   view: "rollup" | "matches";
   includeInactive: boolean;
-  /** Exact by default here, unlike the single search — see bulkOptionsSchema. */
+  /** Exact by default here, unlike the single search - see bulkOptionsSchema. */
   match: NameMatchMode;
   sortBy: (typeof componentSearchSort)["fields"][number];
   sortDir: SortDirection;
@@ -479,7 +485,7 @@ function bulkParams(options: BulkSearchOptions): Record<string, unknown> {
 /**
  * Results for a saved list.
  *
- * Always a GET against the stored list, never the POST response — which is why
+ * Always a GET against the stored list, never the POST response - which is why
  * submitting navigates to `/search/list/:id` first. One read path means a freshly
  * submitted list and a link opened by a colleague render through identical code,
  * so the shared case cannot rot while the fresh one keeps working.
@@ -522,15 +528,15 @@ export function bulkSearchXlsxUrl(id: string, options: BulkSearchOptions): strin
  * Deliberately not ten separate hooks. The PDF is rendered from a single
  * `analytics.report()` call, and if the page assembled itself from independent
  * requests then a scan arriving mid-load would give the screen a mix of two
- * moments — and the printed report a third. One payload, one instant.
+ * moments - and the printed report a third. One payload, one instant.
  */
 export function useAnalyticsReport(periodDays: number, vulnFilter: Record<string, string> = {}) {
   return useQuery({
     queryKey: queryKeys.analyticsReport(periodDays, vulnFilter),
     queryFn: () =>
       api.get<AnalyticsReport>(`/analytics/report${toQueryString({ periodDays, ...vulnFilter })}`),
-    // Heavier than the dashboard's aggregates — the churn section compares two
-    // builds per application — so it is cached longer. Changing the period is a
+    // Heavier than the dashboard's aggregates - the churn section compares two
+    // builds per application - so it is cached longer. Changing the period is a
     // different key and refetches immediately.
     staleTime: 5 * 60 * 1000,
     placeholderData: (previous) => previous,
@@ -662,7 +668,7 @@ export function useApplicationAccessPreview(
  * The groups and applications an administrator can grant, gathered per environment.
  *
  * One request per estate rather than one for all of them, because both list endpoints are
- * scoped to a single environment by design — that scoping is the feature the rest of this
+ * scoped to a single environment by design - that scoping is the feature the rest of this
  * platform rests on, and adding a cross-estate mode to it so one admin screen could avoid a
  * few requests would be widening a boundary to save a round trip.
  *
@@ -756,7 +762,7 @@ export function useApiAccess() {
   });
 }
 
-/** The caller's own tokens. Never the secrets — the server stores only hashes. */
+/** The caller's own tokens. Never the secrets - the server stores only hashes. */
 export function useApiTokens() {
   return useQuery({
     queryKey: queryKeys.apiTokens,
@@ -772,7 +778,7 @@ export function useAllApiTokens() {
   });
 }
 
-/** Every estate's figures side by side. Admin only, and never summed — see the API. */
+/** Every estate's figures side by side. Admin only, and never summed - see the API. */
 export function useEnvironmentComparison() {
   return useQuery({
     queryKey: queryKeys.environmentComparison,
@@ -914,7 +920,7 @@ export function useVulnAdminStatus(options: { refetchWhileBusy?: boolean } = {})
     /*
      * Polls only while something is actually happening. A sweep or a 141 MB download
      * takes minutes and an administrator watching a static page cannot tell progress
-     * from a hang — but polling a settled page every few seconds would spawn a grype
+     * from a hang - but polling a settled page every few seconds would spawn a grype
      * subprocess on the server each time, since the status reads the binary and the
      * database directly.
      */
@@ -946,7 +952,7 @@ export function useVulnSuppressions() {
 /**
  * Estate vulnerability posture for the overview page.
  *
- * `vulnerabilities` is null when scanning is disabled — deliberately null rather than a
+ * `vulnerabilities` is null when scanning is disabled - deliberately null rather than a
  * zeroed object, so a caller cannot accidentally render "0 vulnerabilities" for an estate
  * that was never assessed.
  */
@@ -981,7 +987,7 @@ export function useAdvisorySearch(params: Record<string, unknown>, enabled = tru
  * How many scans have never had a location pass.
  *
  * Polled only while a run is in progress, so an idle admin page is not a permanent source of
- * requests — the same rule the malicious settings page follows.
+ * requests - the same rule the malicious settings page follows.
  */
 export function useSbomBackfillStatus() {
   return useQuery({
@@ -1084,6 +1090,31 @@ export function useSquad(id: string | null) {
   return useQuery({
     queryKey: queryKeys.squad(id ?? ""),
     queryFn: () => api.get<{ squad: SquadDetail }>(`/admin/squads/${id}`),
+    enabled: id !== null,
+  });
+}
+
+/** Squad-wide rules: whether every squad needs a tribe. Admin only. */
+export function useSquadSettings() {
+  return useQuery({
+    queryKey: queryKeys.squadSettings,
+    queryFn: () => api.get<{ settings: SquadSettings }>("/admin/squads/settings"),
+  });
+}
+
+// --- tribes -------------------------------------------------------------------
+
+export function useTribes() {
+  return useQuery({
+    queryKey: queryKeys.tribes,
+    queryFn: () => api.get<{ tribes: TribeSummary[] }>("/admin/tribes"),
+  });
+}
+
+export function useTribe(id: string | null) {
+  return useQuery({
+    queryKey: queryKeys.tribe(id ?? ""),
+    queryFn: () => api.get<{ tribe: TribeDetail }>(`/admin/tribes/${id}`),
     enabled: id !== null,
   });
 }

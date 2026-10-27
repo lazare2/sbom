@@ -7,7 +7,7 @@ function parse(doc: unknown) {
   return parseCycloneDx(Buffer.from(JSON.stringify(doc), "utf8"));
 }
 
-describe("parseCycloneDx — document metadata", () => {
+describe("parseCycloneDx - document metadata", () => {
   it("reads spec version, serial number, and the CycloneDX 1.5 tools shape", () => {
     const result = parse(syftCycloneDxSbom);
     expect(result.specVersion).toBe("1.5");
@@ -28,7 +28,7 @@ describe("parseCycloneDx — document metadata", () => {
   });
 });
 
-describe("parseCycloneDx — component extraction", () => {
+describe("parseCycloneDx - component extraction", () => {
   it("collapses duplicates rather than letting them break the scan_component insert", () => {
     const result = parse(syftCycloneDxSbom);
 
@@ -40,7 +40,7 @@ describe("parseCycloneDx — component extraction", () => {
     expect(names.filter((n) => n === "express")).toHaveLength(1);
     expect(names.filter((n) => n === "libc6")).toHaveLength(1);
 
-    // Every identity hash in the output is unique — this is the invariant that
+    // Every identity hash in the output is unique - this is the invariant that
     // the (scan_id, component_id) primary key depends on.
     const hashes = result.components.map((c) => c.identityHash);
     expect(new Set(hashes).size).toBe(hashes.length);
@@ -120,7 +120,7 @@ describe("parseCycloneDx — component extraction", () => {
   });
 });
 
-describe("parseCycloneDx — empty and edge-case documents", () => {
+describe("parseCycloneDx - empty and edge-case documents", () => {
   it("accepts an SBOM with no components (a scratch or distroless image)", () => {
     const result = parse({ bomFormat: "CycloneDX", specVersion: "1.5", components: [] });
     expect(result.components).toHaveLength(0);
@@ -140,12 +140,12 @@ describe("parseCycloneDx — empty and edge-case documents", () => {
   });
 });
 
-describe("parseCycloneDx — character encodings", () => {
+describe("parseCycloneDx - character encodings", () => {
   const doc = { bomFormat: "CycloneDX", specVersion: "1.5", components: [{ type: "library", name: "a", version: "1" }] };
 
   it("ignores a UTF-8 BOM instead of failing the upload", () => {
     // RFC 8259 permits ignoring a BOM, and anything post-processing an SBOM on
-    // Windows can add one — PowerShell's `Set-Content -Encoding utf8` does.
+    // Windows can add one - PowerShell's `Set-Content -Encoding utf8` does.
     const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify(doc), "utf8")]);
     const result = parseCycloneDx(withBom);
     expect(result.components).toHaveLength(1);
@@ -187,7 +187,7 @@ describe("parseCycloneDx — character encodings", () => {
   });
 });
 
-describe("parseCycloneDx — rejections", () => {
+describe("parseCycloneDx - rejections", () => {
   it("rejects invalid JSON as 422", () => {
     try {
       parseCycloneDx(Buffer.from("{not json", "utf8"));
@@ -221,7 +221,7 @@ describe("computeIdentityHash", () => {
   });
 
   it("distinguishes OS packages that differ only by purl qualifier", () => {
-    // Same name and version, different architecture — genuinely different
+    // Same name and version, different architecture - genuinely different
     // artifacts, and the reason identity is purl-based rather than a triple.
     const amd64 = computeIdentityHash({
       purl: "pkg:deb/debian/libc6@2.36?arch=amd64",

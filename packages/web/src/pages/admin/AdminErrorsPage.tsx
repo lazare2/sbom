@@ -48,7 +48,7 @@ const spec = {
  * How alarming a status should look.
  *
  * A 4xx is the platform refusing a request, which is usually correct behaviour and often the
- * reader's own doing — it is information, not a fault. A 5xx is the platform failing, which
+ * reader's own doing - it is information, not a fault. A 5xx is the platform failing, which
  * is always worth attention. Rendering both in the same red teaches an administrator to
  * ignore the colour.
  */
@@ -59,13 +59,13 @@ function toneFor(status: number): "warn" | "danger" | "neutral" {
 }
 
 /**
- * What failed, and why — readable on a machine with no developer tools.
+ * What failed, and why - readable on a machine with no developer tools.
  *
  * This page exists because of a specific failure. A rejected form said "Body validation
  * failed" and nothing else; the API had named the offending field, sent it, and every layer
  * above dropped it. On a locked-down server there was no network tab to fall back on and the
  * server log recorded only a status code, so a one-word configuration mistake was
- * undiagnosable. Both halves are fixed — the form now shows its field errors — and this is
+ * undiagnosable. Both halves are fixed - the form now shows its field errors - and this is
  * the record for everything that is not in front of you when it happens.
  */
 export function AdminErrorsPage() {
@@ -210,7 +210,7 @@ export function AdminErrorsPage() {
                   <Th onSort={() => sort.toggle("code")} sorted={sort.stateOf("code")}>
                     Code
                   </Th>
-                  {/* The reason. Not sortable — it is the free text the row exists to carry. */}
+                  {/* The reason. Not sortable - it is the free text the row exists to carry. */}
                   <Th>What went wrong</Th>
                   <Th>Who</Th>
                 </tr>
@@ -259,7 +259,7 @@ function ErrorRow({ entry }: { entry: ApiErrorEntry }) {
           <p>{entry.message}</p>
           {fields.length > 0 ? (
             /*
-              The field-level reasons — the half that was previously produced and then thrown
+              The field-level reasons - the half that was previously produced and then thrown
               away. `_` is the API's key for an issue about the request as a whole, which has
               no field to name.
             */
@@ -276,7 +276,7 @@ function ErrorRow({ entry }: { entry: ApiErrorEntry }) {
       </Td>
       {/* Null is not missing data: an unauthenticated or CI request genuinely has no actor,
           and that is itself worth being able to see. */}
-      <Td>{entry.actorEmail ?? <span className="text-text-muted">—</span>}</Td>
+      <Td>{entry.actorEmail ?? <span className="text-text-muted">-</span>}</Td>
     </Tr>
   );
 }

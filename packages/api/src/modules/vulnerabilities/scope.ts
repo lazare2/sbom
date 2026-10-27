@@ -22,7 +22,7 @@ import {
  *   distro marker, stored as `kind = 'os'`) and roughly fifteen hundred ordinary
  *   `library` components carrying `pkg:deb/debian/...` purls. Those fifteen hundred are
  *   the base image, and they are `kind = 'library'`. Splitting on `kind` alone would
- *   file all of them as application dependencies — and since base-image packages
+ *   file all of them as application dependencies - and since base-image packages
  *   outnumber real dependencies by around a hundred to one (measured: 2,817 of 2,845
  *   findings), the "application dependencies" ranking would become a base-image-age
  *   ranking wearing the wrong label. Which is the precise outcome the split exists to
@@ -71,7 +71,7 @@ export function severityBucketPredicate(buckets: readonly DashboardSeverityBucke
  * accepted risk is counted, and it is now asked by three independent readers: the sweep that
  * freezes per-scan summaries, the dashboard's findings-side figures, and a group's distinct
  * advisory count. Two hand-written copies is how a suppressed CVE ends up excluded from one
- * panel and included in the one beside it — which reads as a bug in the suppression feature
+ * panel and included in the one beside it - which reads as a bug in the suppression feature
  * rather than in the query, and sends whoever investigates to the wrong file.
  *
  * Nullable columns widen the scope rather than narrow it: both ids null suppresses estate-
@@ -98,8 +98,8 @@ export const NOT_SUPPRESSED: SQL = sql`NOT EXISTS (
  * inflate both. Membership is also indexed from the application side
  * (`application_group_member_application_idx`), so the EXISTS is a lookup rather than a scan.
  *
- * The alias is passed because these queries do not agree on one — the analytics estate query
- * self-joins as `a2` — and hardcoding `a` would produce a predicate that silently referenced
+ * The alias is passed because these queries do not agree on one - the analytics estate query
+ * self-joins as `a2` - and hardcoding `a` would produce a predicate that silently referenced
  * the wrong row.
  *
  * Renamed from `applicationScopePredicate` when environments arrived. The old name described half

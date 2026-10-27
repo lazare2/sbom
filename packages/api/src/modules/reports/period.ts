@@ -3,7 +3,7 @@
  *
  * All of this exists because the report's period is a *local* calendar month while every
  * timestamp in the database is UTC. Tbilisi is UTC+4, so a report generated at 09:00 local
- * on 1 September is 05:00 UTC — and a naive `new Date().getUTCMonth()` on a server running
+ * on 1 September is 05:00 UTC - and a naive `new Date().getUTCMonth()` on a server running
  * in UTC would still agree, right up until the organisation moves to a timezone west of
  * Greenwich or someone runs the job just after midnight. Getting this wrong shifts a whole
  * month of findings into the neighbouring report, which is invisible in testing and obvious
@@ -75,7 +75,7 @@ function partsIn(instant: Date, timeZone: string): LocalParts {
  * within an hour of the transition; re-measuring at the corrected instant fixes it. A third
  * pass would change nothing for any real zone, since no zone shifts twice in one hour.
  *
- * Ambiguous local times — the hour that repeats when clocks go back — resolve to the first
+ * Ambiguous local times - the hour that repeats when clocks go back - resolve to the first
  * occurrence. That is a one-hour difference once a year on a monthly boundary, and no zone
  * transitions at midnight on the first of a month.
  */
@@ -144,7 +144,7 @@ export function isWorkingDay(instant: Date, timeZone: string): boolean {
  * The first Monday-to-Friday day of the local month `instant` falls in, at `hour` local.
  *
  * Public holidays are not modelled. The platform has no holiday calendar, the set differs
- * per country, and a report arriving on a public holiday is read the next morning anyway —
+ * per country, and a report arriving on a public holiday is read the next morning anyway -
  * whereas a wrong holiday table would suppress the report entirely and silently.
  */
 export function firstWorkingDayOfMonth(instant: Date, timeZone: string, hour: number): Date {

@@ -207,7 +207,7 @@ describe("parseCycloneDx platform integration", () => {
 
     expect(parsed.platform.osName).toBe("alpine");
     expect(parsed.platform.runtimes).toEqual([{ name: "node", version: "22.11.0" }]);
-    // The OS and runtime entries are still stored as components too — the
+    // The OS and runtime entries are still stored as components too - the
     // platform columns are a denormalised summary, not a replacement.
     expect(parsed.components.map((c) => c.name).sort()).toEqual(["alpine", "express", "node"]);
   });

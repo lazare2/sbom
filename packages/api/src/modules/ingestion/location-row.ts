@@ -12,9 +12,9 @@ import { classifyComponentOrigin, type ComponentLocation } from "@sbom/shared";
  *    than a migration plus a re-sweep of the largest table in the database.
  *  - **Absent is null, never zero or empty.** `pathCount: 0` reads as "we looked everywhere and
  *    it is nowhere", which is the opposite of what an unrecorded path means. Three different
- *    reasons produce a null here — an OS package whose paths locate only the package manager's
+ *    reasons produce a null here - an OS package whose paths locate only the package manager's
  *    database, an SBOM from a tool that emits no locations, and a scan ingested before the
- *    columns existed — and `origin` is what tells the first of those apart from the other two.
+ *    columns existed - and `origin` is what tells the first of those apart from the other two.
  */
 
 /** The location columns as selected from `scan_component`, joined to `component`. */

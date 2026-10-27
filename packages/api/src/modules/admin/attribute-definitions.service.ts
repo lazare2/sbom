@@ -45,6 +45,7 @@ export class AttributeDefinitionsService {
           options: input.type === "select" ? input.options : null,
           sortOrder: input.sortOrder,
           isActive: input.isActive,
+          isRequired: input.isRequired,
         })
         .returning();
     } catch (err) {
@@ -72,7 +73,7 @@ export class AttributeDefinitionsService {
    * The key is immutable on purpose: it is the property name inside every
    * application's jsonb document, so renaming it here without rewriting all of
    * them would orphan every stored value at once. If a key is genuinely wrong,
-   * the honest path is create-new, re-tag, delete-old — visible in the audit
+   * the honest path is create-new, re-tag, delete-old - visible in the audit
    * trail instead of silently losing data.
    */
   async update(
@@ -81,6 +82,14 @@ export class AttributeDefinitionsService {
     actor: Actor,
   ): Promise<AttributeDefinition> {
     const existing = await this.require(id);
+
+    // A linked attribute's value is a list of squad or tribe names; any other type would stop
+    // it parsing as one. Label, order, active and required stay editable.
+    if (existing.linkedTo && input.type !== undefined && input.type !== existing.type) {
+      throw new BadRequestError(
+        `"${existing.label}" mirrors ${existing.linkedTo} assignments, so its type cannot change.`,
+      );
+    }
 
     const nextType = input.type ?? existing.type;
     const nextOptions = input.options !== undefined ? input.options : existing.options;
@@ -93,6 +102,7 @@ export class AttributeDefinitionsService {
     if (input.type !== undefined) patch.type = input.type;
     if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
     if (input.isActive !== undefined) patch.isActive = input.isActive;
+    if (input.isRequired !== undefined) patch.isRequired = input.isRequired;
     // Options only mean anything for a select; clearing them when the type
     // changes away keeps the row self-consistent.
     patch.options = nextType === "select" ? (nextOptions ?? null) : null;
@@ -111,8 +121,20 @@ export class AttributeDefinitionsService {
       targetId: id,
       metadata: {
         key: updated.key,
-        before: { label: existing.label, type: existing.type, options: existing.options, isActive: existing.isActive },
-        after: { label: updated.label, type: updated.type, options: updated.options, isActive: updated.isActive },
+        before: {
+          label: existing.label,
+          type: existing.type,
+          options: existing.options,
+          isActive: existing.isActive,
+          isRequired: existing.isRequired,
+        },
+        after: {
+          label: updated.label,
+          type: updated.type,
+          options: updated.options,
+          isActive: updated.isActive,
+          isRequired: updated.isRequired,
+        },
       },
     });
 
@@ -130,7 +152,7 @@ export class AttributeDefinitionsService {
   /**
    * Delete a definition.
    *
-   * Refuses while any application still carries the key, unless `purge` is set —
+   * Refuses while any application still carries the key, unless `purge` is set -
    * in which case the values are stripped from every application in the same
    * transaction. Deleting the definition alone would leave the values in the
    * jsonb documents where nothing renders or filters them: invisible data that
@@ -142,6 +164,13 @@ export class AttributeDefinitionsService {
    */
   async remove(id: string, opts: { purge: boolean }, actor: Actor): Promise<{ valuesPurged: number }> {
     const existing = await this.require(id);
+    if (existing.linkedTo) {
+      // Its values are access assignments, not free data, so purging them would quietly revoke
+      // every squad or tribe grant at once. Deactivating hides it from forms instead.
+      throw new BadRequestError(
+        `"${existing.label}" mirrors ${existing.linkedTo} assignments and cannot be deleted. Deactivate it to hide it.`,
+      );
+    }
     const inUse = await this.usageCount(existing.key);
 
     if (inUse > 0 && !opts.purge) {
@@ -205,6 +234,8 @@ function toDefinition(row: AttributeDefinitionRow): AttributeDefinition {
     options: row.options ?? null,
     sortOrder: row.sortOrder,
     isActive: row.isActive,
+    isRequired: row.isRequired,
+    linkedTo: row.linkedTo ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }

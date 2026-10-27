@@ -32,7 +32,7 @@ const LAST_USED_THROTTLE_MS = 60_000;
  * Bearer-token authentication for the CI/CD ingest endpoint.
  *
  * These tokens attest "a trusted CI system is calling", not which application is
- * being reported — application identity comes entirely from the `app_name` form
+ * being reported - application identity comes entirely from the `app_name` form
  * field, per the integration design. That means a leaked token can write a scan
  * for any application name, which is the accepted trade-off for a single
  * group-level CI variable; individually-named tokens exist so the blast radius
@@ -120,7 +120,7 @@ export class IngestTokenService {
    * Env tokens are included deliberately. Listing only the database rows would
    * tell an admin "there are no tokens" on a deployment where CI is
    * authenticating perfectly well through `INGEST_TOKENS`, and the natural next
-   * step from that — minting a replacement — is exactly the wrong move.
+   * step from that - minting a replacement - is exactly the wrong move.
    */
   async list(): Promise<IngestTokenSummary[]> {
     const rows = await this.deps.db.select().from(ingestToken).orderBy(desc(ingestToken.createdAt));
@@ -151,7 +151,7 @@ export class IngestTokenService {
   }
 
   /**
-   * Mint a new named token. The plaintext is returned exactly once — only its
+   * Mint a new named token. The plaintext is returned exactly once - only its
    * hash is stored, so it cannot be recovered afterwards.
    */
   /**

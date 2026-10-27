@@ -30,7 +30,7 @@ import {
 /**
  * Group administration: create, rename, set membership, delete.
  *
- * Membership is edited here and only here — ingest never writes to these tables. A pipeline
+ * Membership is edited here and only here - ingest never writes to these tables. A pipeline
  * declaring its own groups would be self-maintaining, but any holder of an ingest token could
  * then create one, and a typo would silently become a real group holding half the membership
  * with nothing on screen to say it was a mistake.
@@ -43,7 +43,7 @@ import {
  * action, the editor is a modal that cannot fall below the fold, and every row shows who is
  * actually in the group without opening anything.
  *
- * The other half of the problem was a Save button that is disabled until something changes —
+ * The other half of the problem was a Save button that is disabled until something changes -
  * correct behaviour, because an empty save writes an audit entry for a change that never
  * happened, but indistinguishable from a broken button. It now sits next to a running count of
  * what will be added and removed, so its state is explained rather than merely enforced.
@@ -146,8 +146,8 @@ export function AdminGroupsPage() {
 /**
  * Who is actually in the group, without opening anything.
  *
- * A bare count answers "how many" and leaves "which" — the question an admin checking their
- * work is actually asking — one click away for every row. Capped because a twenty-member group
+ * A bare count answers "how many" and leaves "which" - the question an admin checking their
+ * work is actually asking - one click away for every row. Capped because a twenty-member group
  * would otherwise own the table's height; the overflow is stated rather than silently trimmed.
  */
 function MemberPreview({ group }: { group: ApplicationGroupSummary }) {
@@ -521,13 +521,13 @@ function DeleteModal({
     >
       {/*
         Said plainly, because "delete" on something that contains things is the one place a
-        reader may reasonably fear the contents go with it. They do not — only the membership
-        rows are removed — and one sentence is cheaper than the hesitation.
+        reader may reasonably fear the contents go with it. They do not - only the membership
+        rows are removed - and one sentence is cheaper than the hesitation.
       */}
       <p className="text-sm text-text-muted">
         The {formatNumber(group.applicationCount)} application
         {group.applicationCount === 1 ? "" : "s"} in this group{" "}
-        {group.applicationCount === 1 ? "is" : "are"} not deleted — only the group itself and
+        {group.applicationCount === 1 ? "is" : "are"} not deleted - only the group itself and
         its membership.
       </p>
       {remove.error ? <ErrorBanner error={remove.error} /> : null}

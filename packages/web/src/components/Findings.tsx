@@ -246,7 +246,7 @@ export function FindingsTable({
               <Th onSort={on("package")} sorted={at("package")}>
                 Package
               </Th>
-              {/* Sorts on whether a fix exists — see findingOrderBy for why not the version. */}
+              {/* Sorts on whether a fix exists - see findingOrderBy for why not the version. */}
               <Th onSort={on("fixVersion")} sorted={at("fixVersion")} width="150px">
                 Fixed in
               </Th>
@@ -273,7 +273,7 @@ export function FindingsTable({
                       {finding.vulnerabilityId}
                     </Link>
                     {/* The CVE number is what people search for and quote, even when grype's
-                        primary id is a GHSA — so it has to be visible, not just indexed. */}
+                        primary id is a GHSA - so it has to be visible, not just indexed. */}
                     {finding.aliases.length > 0 ? (
                       <span className="font-mono text-[11px] text-text-faint">
                         {finding.aliases.slice(0, 2).join(", ")}
@@ -313,7 +313,7 @@ export function FindingsTable({
                   {/*
                     Inside the package cell rather than in a column of its own. The table is
                     already six columns wide, and the path belongs to this package rather than
-                    to the row as a whole — putting it directly underneath keeps the two
+                    to the row as a whole - putting it directly underneath keeps the two
                     together when the table wraps on a narrow screen.
                   */}
                   <div className="mt-1">
@@ -331,7 +331,7 @@ export function FindingsTable({
                     <span className="text-xs text-text-faint">no fix yet</span>
                   )}
                 </Td>
-                <Td className="nums text-text-muted">{finding.cvssBaseScore?.toFixed(1) ?? "—"}</Td>
+                <Td className="nums text-text-muted">{finding.cvssBaseScore?.toFixed(1) ?? " - "}</Td>
                 {isAdmin ? (
                   <Td>
                     {finding.suppressed ? null : (
@@ -540,7 +540,7 @@ function AcceptRiskModal({
  *
  * Both callers hold those filters in component state rather than the URL, so the sort rides
  * along in the same object instead of being threaded separately. Resets to page 1 on every
- * change, like the other filters — a re-sort makes the current page number meaningless.
+ * change, like the other filters - a re-sort makes the current page number meaningless.
  */
 export function useFindingsSort(
   filters: FindingsFilters,

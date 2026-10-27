@@ -2,14 +2,14 @@
 /**
  * Fetches the pinned Grype build into `var/bin/`, for local development.
  *
- * Container deployments do not need this — the image already carries the binary. This
+ * Container deployments do not need this - the image already carries the binary. This
  * exists so a native setup is one command instead of a manual download, and so the
  * version a developer runs matches the version the image ships.
  *
  * Two properties make downloading and then executing a binary defensible:
  *
  *   1. The version and the expected SHA-256 are committed in this file. Nothing is
- *      trusted because it happened to be served — the archive is hashed and compared
+ *      trusted because it happened to be served - the archive is hashed and compared
  *      before anything is extracted, and a mismatch aborts.
  *   2. Only the archive for the current platform is fetched, from Anchore's GitHub
  *      release assets over HTTPS.
@@ -88,7 +88,7 @@ async function main() {
   if (!response.ok) {
     console.error(`  download failed: HTTP ${response.status}`);
     console.error("  If this machine has no internet access, install grype by hand and");
-    console.error("  set GRYPE_PATH to it — the platform never requires this script.");
+    console.error("  set GRYPE_PATH to it - the platform never requires this script.");
     process.exit(1);
   }
 
@@ -101,7 +101,7 @@ async function main() {
      * about to be executed has been verified; "downloaded something unexpected, running
      * it anyway" would make the checksum decorative.
      */
-    console.error("  CHECKSUM MISMATCH — refusing to install.");
+    console.error("  CHECKSUM MISMATCH - refusing to install.");
     console.error(`    expected ${expected}`);
     console.error(`    actual   ${actual}`);
     console.error("  If you have just changed GRYPE_VERSION, update CHECKSUMS in this script");
@@ -140,7 +140,7 @@ async function main() {
 
   console.log("");
   console.log(`Installed to ${path.relative(REPO_ROOT, binary)}`);
-  console.log("The API finds it there automatically — no configuration needed.");
+  console.log("The API finds it there automatically - no configuration needed.");
   console.log("Enable scanning under Admin -> Vulnerability scanning, then update the database.");
 }
 

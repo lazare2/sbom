@@ -27,7 +27,7 @@ import type { GroupsService } from "./groups.service.js";
  * in one class would make it a per-method decision to record an audit entry, and the entry
  * that gets forgotten is always the one someone later needs.
  *
- * Membership is set here and nowhere else — ingest never touches these tables. See the note
+ * Membership is set here and nowhere else - ingest never touches these tables. See the note
  * on `applicationGroupMember` in the schema for why a pipeline is not allowed to declare its
  * own groups.
  */
@@ -231,7 +231,7 @@ export class GroupsAdminService {
    *
    * A foreign key would catch this too, but as a 500-shaped database error naming a
    * constraint. Naming the count of missing ids is what lets the UI say which selection was
-   * stale — usually an application deleted while the dialog was open.
+   * stale - usually an application deleted while the dialog was open.
    */
   private async assertApplicationsExist(ids: string[]): Promise<void> {
     const rows = await this.deps.db.execute<Row<{ id: string }>>(sql`

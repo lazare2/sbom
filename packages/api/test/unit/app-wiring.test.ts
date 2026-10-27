@@ -9,7 +9,7 @@ import type { VulnerabilityScanner } from "../../src/services/scanner/index.js";
  * Wiring smoke tests: builds the real Fastify app and drives it with
  * `inject()`, no network and no database.
  *
- * These cover the failure modes that only appear once everything is assembled —
+ * These cover the failure modes that only appear once everything is assembled -
  * a plugin registered in the wrong order, a route mounted under the wrong
  * prefix, an error that bypasses the handler and leaks a stack trace. The
  * endpoints exercised here (health, and the pre-database rejection paths of the
@@ -37,7 +37,7 @@ class FakeBlobStore implements BlobStore {
  * Scanner stub.
  *
  * The real one spawns a subprocess and reads a 1.9 GB database directory. These tests build
- * the whole app, so without a substitute every run would shell out to grype — and would
+ * the whole app, so without a substitute every run would shell out to grype - and would
  * behave differently on a machine that happens to have it installed.
  */
 class FakeScanner implements VulnerabilityScanner {
@@ -121,7 +121,7 @@ describe("app wiring", () => {
       Reports sit under /api/v1/admin but are registered as their own plugin, so they do not
       inherit admin.routes.ts's scope hook and apply `requireAdmin` themselves. Sharing a
       prefix with a guarded scope is not the same as being inside it, and the difference is
-      invisible by inspection — hence this test.
+      invisible by inspection - hence this test.
     */
     const list = await app.inject({ method: "GET", url: "/api/v1/admin/reports" });
     expect(list.statusCode).toBe(401);
@@ -168,8 +168,8 @@ describe("app wiring", () => {
      * The second assertion is the one that would catch a real mistake: a CI ingest
      * token must NOT open this route. The two auth mechanisms live in separate
      * plugin scopes precisely so they cannot cross over, and a token that could
-     * post to an arbitrary application id — bypassing app_name resolution, aliases
-     * and auto-creation — would defeat that separation.
+     * post to an arbitrary application id - bypassing app_name resolution, aliases
+     * and auto-creation - would defeat that separation.
      */
     const appId = "00000000-0000-4000-8000-000000000000";
 
@@ -194,8 +194,8 @@ describe("app wiring", () => {
      * Upload is append-only and open to any signed-in user; deletion destroys a build
      * record permanently and is admin-only. Two ways that could go wrong are checked
      * here because neither is visible by inspection: the route living under /api/v1/admin
-     * but outside the guarded scope, and the CI bearer token — which legitimately creates
-     * scans on the other endpoint — being accepted as authentication for removing them.
+     * but outside the guarded scope, and the CI bearer token - which legitimately creates
+     * scans on the other endpoint - being accepted as authentication for removing them.
      * A shared token held by every pipeline must never be able to erase history.
      */
     const scanId = "00000000-0000-4000-8000-000000000000";
@@ -210,7 +210,7 @@ describe("app wiring", () => {
     });
     expect(withIngestToken.statusCode).toBe(401);
 
-    // And the read-only scan routes gained no delete of their own — those sit behind
+    // And the read-only scan routes gained no delete of their own - those sit behind
     // requireAuth, which would have made this reachable by every signed-in user.
     const onReadScope = await app.inject({ method: "DELETE", url: `/api/v1/scans/${scanId}` });
     expect(onReadScope.statusCode).toBe(404);
@@ -339,13 +339,13 @@ describe("app wiring", () => {
 
   it("fails closed rather than falsely rejecting when the token store is unreachable", async () => {
     // An unrecognised token is not in the env list, so verification falls
-    // through to the `ingest_token` table — unreachable here, since these tests
+    // through to the `ingest_token` table - unreachable here, since these tests
     // run without Postgres.
     //
     // A 5xx is the correct outcome: we cannot prove the token is invalid, so the
     // pipeline should retry rather than be told its credential is bad. Asserting
-    // this pins the behaviour, because the alternative — a 401 on a database
-    // blip — would send CI owners hunting for a credential problem that does not
+    // this pins the behaviour, because the alternative - a 401 on a database
+    // blip - would send CI owners hunting for a credential problem that does not
     // exist. The genuine invalid-token 401 is covered by integration tests.
     const res = await app.inject({
       method: "POST",
@@ -382,7 +382,7 @@ describe("app wiring", () => {
 
   it("validates the login body before hitting an auth provider", async () => {
     // `email` is a login identifier, not a mailbox, so it is deliberately not
-    // RFC-validated — `not-an-email` is an acceptable username. What is still
+    // RFC-validated - `not-an-email` is an acceptable username. What is still
     // rejected is an identifier with whitespace in it, which is always a paste
     // accident, and an empty password.
     const res = await app.inject({

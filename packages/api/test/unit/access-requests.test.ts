@@ -15,7 +15,7 @@ import type { VerifiedIdentity } from "../../src/services/auth/id-token.js";
  *
  * The first is that recording never throws. It hangs off a code path whose entire job is to
  * refuse a sign-in politely, and an exception there replaces an explanation the person can act
- * on with a server error they cannot. The second is that a failure to record is *logged* —
+ * on with a server error they cannot. The second is that a failure to record is *logged* -
  * because the first guarantee is implemented by swallowing exceptions, and a swallowed
  * exception would otherwise disable this whole feature in silence. The visible symptom of that
  * would be an empty queue, which is exactly what it looks like when nobody has tried.
@@ -38,7 +38,7 @@ const IDENTITY: VerifiedIdentity = {
  * A database that records the statement it was handed.
  *
  * The SQL is captured rather than executed. Drizzle's `sql` template produces an object whose
- * query text is only assembled by a dialect, so the fragments are read off it directly — enough
+ * query text is only assembled by a dialect, so the fragments are read off it directly - enough
  * to assert which clauses are present, which is the only thing a test without a server can
  * honestly check.
  */
@@ -56,7 +56,7 @@ function harness(over: { throws?: Error; rows?: unknown[] } = {}) {
   return { service: new AccessRequestService({ db, logger }), statements, logger, execute };
 }
 
-/** The literal chunks of a drizzle `sql` template, joined — the shape of the statement. */
+/** The literal chunks of a drizzle `sql` template, joined - the shape of the statement. */
 function fragmentsOf(statement: unknown): string {
   const chunks = (statement as { queryChunks?: unknown[] }).queryChunks ?? [];
   return chunks
@@ -112,7 +112,7 @@ describe("recording a refused sign-in", () => {
     /*
       Two clauses, and the statement is wrong without either.
 
-      ON CONFLICT is what folds a repeat attempt into the row already open — nine attempts by
+      ON CONFLICT is what folds a repeat attempt into the row already open - nine attempts by
       one person is one colleague waiting, and nine rows would turn a queue into a log nobody
       drains. The WHERE predicate is what lets Postgres identify *which* index is meant: the
       unique index is partial, and conflict inference against a partial index fails outright

@@ -5,7 +5,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
  * CI ingest tokens.
  *
  * These are all high-entropy random values, not user-chosen passwords, so a
- * plain SHA-256 is the right tool — there is nothing to brute-force. User
+ * plain SHA-256 is the right tool - there is nothing to brute-force. User
  * passwords go through argon2 instead (see modules/auth/password.ts).
  */
 
@@ -20,7 +20,7 @@ export function generateToken(byteLength = 32): string {
  * Crockford-style: no `0/O`, `1/I/L`, `U`, or mixed case. These get read aloud,
  * written on paper, and retyped by hand, so a character pair that looks
  * identical in a sans-serif font costs a support round-trip. Lowercase only for
- * the same reason — "was that a capital?" is not a question worth creating.
+ * the same reason - "was that a capital?" is not a question worth creating.
  *
  * Exactly 32 symbols, which matters: 256 is divisible by 32, so `byte % 32` is
  * uniform and needs no rejection sampling. A 30-symbol alphabet here would
@@ -31,7 +31,7 @@ const PASSWORD_ALPHABET = "abcdefghjkmnpqrstvwxyz23456789#@";
 /**
  * A temporary password an admin hands over out of band.
  *
- * 20 symbols over a 32-character alphabet is 100 bits of entropy — far beyond
+ * 20 symbols over a 32-character alphabet is 100 bits of entropy - far beyond
  * what a login endpoint rate-limited to 10 attempts per minute could ever be
  * walked through. Grouped with dashes purely for legibility; the dashes are
  * part of the password and count toward the 12-character minimum.
@@ -57,7 +57,7 @@ export function sha256Hex(value: string | Buffer): string {
  * Constant-time comparison of two hex digests.
  *
  * Used when a secret is compared against a value from config rather than looked
- * up by its hash in an indexed column — a direct `===` there would leak the
+ * up by its hash in an indexed column - a direct `===` there would leak the
  * secret one byte at a time through response timing.
  */
 const HEX_RE = /^[0-9a-f]+$/i;

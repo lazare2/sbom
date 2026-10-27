@@ -13,7 +13,7 @@ import { parseCycloneDx } from "../../src/modules/ingestion/cyclonedx.js";
  * ## The two failures worth pinning
  *
  * **Silently losing an edge.** Refs are not identities. Syft emits the same package twice when
- * it finds it in two layers, and the parser collapses those into one row — but the dependency
+ * it finds it in two layers, and the parser collapses those into one row - but the dependency
  * graph may still refer to the collapsed copy by its own bom-ref. Resolving refs only for
  * kept entries would drop exactly those edges, and nothing downstream would look wrong: the
  * dependants shown would be real, just not all of them.
@@ -24,8 +24,8 @@ import { parseCycloneDx } from "../../src/modules/ingestion/cyclonedx.js";
  *
  * ## What this deliberately does not attempt
  *
- * Direct-versus-transitive. The document's root component carries no dependency entry — three
- * real SBOMs were checked and none had one — so nothing here can distinguish "you asked for
+ * Direct-versus-transitive. The document's root component carries no dependency entry - three
+ * real SBOMs were checked and none had one - so nothing here can distinguish "you asked for
  * this" from "something else did". These are the immediate dependants and the contract says
  * only that.
  */
@@ -82,7 +82,7 @@ describe("reading the dependency graph backwards", () => {
   it("leaves a component with no incoming edge null, not empty", () => {
     /*
      * The distinction the whole null-versus-empty rule rests on. An empty array would be a
-     * claim — "nothing depends on this" — and the renderer would be right to display it.
+     * claim - "nothing depends on this" - and the renderer would be right to display it.
      * Null means no edge was recorded, which on a container image is true of every npm
      * package in the build because the lockfile the graph comes from is not in the image.
      */
@@ -127,7 +127,7 @@ describe("resolving refs to packages", () => {
   it("keeps an edge that names a duplicate entry collapsed into another", () => {
     /*
      * The silent-loss failure. Both entries are the same package by identity hash, so the
-     * second is collapsed away — but the graph refers to it by its own ref. If refs were
+     * second is collapsed away - but the graph refers to it by its own ref. If refs were
      * recorded only for kept entries, this edge would vanish and `victim` would look as
      * though nothing depended on it.
      */
@@ -231,7 +231,7 @@ describe("what gets stored", () => {
     /*
      * Sorting is what makes the cap deterministic. Without it the kept five would follow
      * document order, and re-ingesting an unchanged build would look like its dependency tree
-     * had changed — the same reason the path list is sorted before it is capped.
+     * had changed - the same reason the path list is sorted before it is capped.
      */
     const parents = Array.from({ length: 9 }, (_, i) => component({ name: `p${i}` }));
     const bytes = doc(
@@ -246,7 +246,7 @@ describe("what gets stored", () => {
   });
 
   it("deduplicates a parent listed twice under one entry", () => {
-    // Real Syft output does this — one document listed @types/node twice under a single parent.
+    // Real Syft output does this - one document listed @types/node twice under a single parent.
     const parsed = parseCycloneDx(
       doc([component({ name: "fastify" }), component({ name: "victim" })], [
         { ref: "ref-fastify", dependsOn: ["ref-victim", "ref-victim"] },

@@ -41,7 +41,7 @@ import {
  * around them; the overview shows them as a compact strip.
  */
 
-/** Only the four named severities link anywhere — `other` is two severities at once. */
+/** Only the four named severities link anywhere - `other` is two severities at once. */
 const BUCKET_SEVERITY_PARAM: Record<DashboardSeverityBucket, string | null> = {
   critical: "critical",
   high: "high",
@@ -63,7 +63,7 @@ const BUCKET_EMPHASIS: Record<DashboardSeverityBucket, string> = {
  *
  * The two halves are the headline figures and the combined total above them is deliberately
  * smaller. Both are here because a combined total is what gets asked for and what gets
- * quoted — but measured on a realistic container SBOM, base-image packages were 2,817 of
+ * quoted - but measured on a realistic container SBOM, base-image packages were 2,817 of
  * 2,845 findings, so a single number is mostly a statement about base-image age. Giving the
  * split the visual weight is what keeps the quotable number from being the misleading one.
  */
@@ -85,7 +85,7 @@ function ScopePanel({
 }) {
   /*
    * Excluded by the filter is not the same as counted and found nothing, so it never
-   * renders as 0 — the same rule that makes the whole report null rather than zero-filled
+   * renders as 0 - the same rule that makes the whole report null rather than zero-filled
    * when scanning is off, applied one level down.
    */
   if (totals === null) {
@@ -175,7 +175,7 @@ function ScopePanel({
  * The totals block: one combined figure, then the split that explains it.
  *
  * Replaces the older tile strip. Tiles could only carry one number each, which meant the
- * severity split had to live in a separate card further down the page — and a reader who
+ * severity split had to live in a separate card further down the page - and a reader who
  * saw "38 critical" in a tile had no way to tell whether that was the estate's dependency
  * problem or its base image without scrolling.
  */
@@ -238,7 +238,7 @@ export function VulnBreakdownBlock({ report }: { report: VulnerabilityReport }) 
  * What the figures above were narrowed from.
  *
  * Small and out of the way, but present whenever a filter is active. Without it a filtered
- * dashboard gives no sense of scale — "12 critical" could be all of them or a twentieth,
+ * dashboard gives no sense of scale - "12 critical" could be all of them or a twentieth,
  * and those call for different reactions.
  */
 function UnfilteredReference({
@@ -415,7 +415,7 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
     reorders exactly those N rows. That distinction has to survive into the UI: sorted
     ascending this table shows the *least vulnerable of the worst N*, which reads as "our
     safest applications" and is the precise opposite of the truth. Hence the count in the
-    title and the note in the subtitle — the sort is honest only while its scope is visible.
+    title and the note in the subtitle - the sort is honest only while its scope is visible.
   */
   const capNote =
     rows.length > 0
@@ -456,7 +456,7 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
         subtitle={
           rankedByBaseImage
             ? `Ranked by base-image findings, because the filter excluded application dependencies. Every count on a row is base-image only.${capNote}`
-            : `Ranked by findings in their own dependencies. Base-image findings are shown alongside but do not affect the order — including them would rank base-image age instead.${capNote}`
+            : `Ranked by findings in their own dependencies. Base-image findings are shown alongside but do not affect the order - including them would rank base-image age instead.${capNote}`
         }
       />
       {rows.length === 0 ? (
@@ -478,8 +478,8 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
                   Application
                 </Th>
                 {/*
-                  One column, not two. The two numbers are read as a pair — "38 of its own,
-                  28 from the image" — and two separate columns invited them to be added
+                  One column, not two. The two numbers are read as a pair - "38 of its own,
+                  28 from the image" - and two separate columns invited them to be added
                   together, which is the one thing the split exists to prevent. Sorting it
                   sorts the ranked half alone, for the same reason: a sort that silently
                   used the sum would rank base-image age, which is what the split prevents.
@@ -547,7 +547,7 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
                               rankedByBaseImage ? "text-text-faint" : "font-medium text-text-base"
                             }
                           >
-                            {row.findings === null ? "—" : formatNumber(row.findings)}
+                            {row.findings === null ? " - " : formatNumber(row.findings)}
                           </span>
                           <span className="text-text-faint"> / </span>
                           <span
@@ -556,7 +556,7 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
                             }
                           >
                             {row.baseImageFindings === null
-                              ? "—"
+                              ? " - "
                               : formatNumber(row.baseImageFindings)}
                           </span>
                         </span>
@@ -610,7 +610,7 @@ export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityRep
       applications: "number",
       fixedIn: "text",
     } as const,
-    // Advisory count descending — the order the server ranked by.
+    // Advisory count descending - the order the server ranked by.
     { sortBy: "findings" },
     (row, field) =>
       field === "package"
@@ -624,7 +624,7 @@ export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityRep
               : field === "applications"
                 ? row.applications
                 : // Undefined when there is no published fix, which sorts last in both
-                  // directions — so this column answers "what can we actually fix" rather
+                  // directions - so this column answers "what can we actually fix" rather
                   // than burying the fixable rows among the ones with nowhere to go.
                   row.fixVersions[0],
     (row) => row.componentId,
@@ -748,7 +748,7 @@ export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityRep
  *
  * Renders nothing when the filter excluded base-image packages. An empty table would read
  * as "no base image has a vulnerability", which is a far stronger claim than "we did not
- * look" — the section is dropped and the filter banner explains why.
+ * look" - the section is dropped and the filter banner explains why.
  */
 export function BaseImageExposureCard({ report }: { report: VulnerabilityReport }) {
   const rows = report.baseImageExposure;

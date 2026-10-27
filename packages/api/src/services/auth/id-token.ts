@@ -3,8 +3,8 @@ import { createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:c
 /**
  * Verifying an ID token.
  *
- * This is the only thing standing between a stranger and a session. Everything upstream — the
- * redirect, the state cookie, the code exchange — narrows who can reach this point; nothing
+ * This is the only thing standing between a stranger and a session. Everything upstream - the
+ * redirect, the state cookie, the code exchange - narrows who can reach this point; nothing
  * upstream establishes *who they are*. That is decided here, from a signature, and a mistake
  * is not a failed sign-in but a silent one by the wrong person.
  *
@@ -17,7 +17,7 @@ import { createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:c
  *
  * `alg` is matched against a fixed list before anything else. A token asking for `none` is a
  * forgery with the signature removed; one asking for `HS256` is the key-confusion attack,
- * where the provider's *public* key is offered as an HMAC secret — public, so the attacker
+ * where the provider's *public* key is offered as an HMAC secret - public, so the attacker
  * has it, and so can sign anything. Reading the algorithm out of the token and trusting it is
  * how both succeed.
  *
@@ -58,8 +58,8 @@ export interface VerifiedIdentity {
   /**
    * The immutable identifier this account is matched on.
    *
-   * `oid` where the provider sends one, because Entra's `sub` is pairwise — different per
-   * application — while `oid` is the directory object and the same everywhere. Falling back to
+   * `oid` where the provider sends one, because Entra's `sub` is pairwise - different per
+   * application - while `oid` is the directory object and the same everywhere. Falling back to
    * `sub` keeps providers that publish no `oid` working, and the two never collide because a
    * deployment talks to one issuer.
    */

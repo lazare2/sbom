@@ -19,13 +19,13 @@ import {
  * Renders what an image is built on: OS distribution plus language runtimes.
  *
  * Three empty states, kept distinct because they mean different things and a
- * single "—" would conflate them:
+ * single " - " would conflate them:
  *
  *   platform === null      the application has never been scanned
  *   summary === null       it was scanned and nothing was found (scratch,
  *                          distroless, or an SBOM from a tool that does not
  *                          catalogue an OS)
- *   partial                an OS but no runtime, or the reverse — shown as
+ *   partial                an OS but no runtime, or the reverse - shown as
  *                          whatever was actually detected
  */
 
@@ -186,7 +186,7 @@ export function PlatformChips({
  * between the two representations.
  */
 export function PlatformText({ platform }: { platform: ScanPlatform | null }) {
-  if (!platform) return <span className="text-text-faint">—</span>;
+  if (!platform) return <span className="text-text-faint">-</span>;
   if (!platform.summary) {
     return (
       <span className="text-text-faint" title="Scratch or distroless image, or a non-Syft SBOM">
@@ -289,7 +289,7 @@ export function PlatformTable({
                     </Link>
                   </Td>
                   <Td>
-                    <Mono>{row.version ?? "—"}</Mono>
+                    <Mono>{row.version ?? " - "}</Mono>
                   </Td>
                   <ApplicationsCell
                     count={row.applications}

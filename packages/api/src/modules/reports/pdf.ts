@@ -38,14 +38,14 @@ export interface RenderReportOptions {
  *
  * Server-side with pdfkit rather than HTML-to-PDF through a headless browser.
  * The output is vector text in a ~50 KB file, the API image stays free of a
- * 300 MB Chromium, and `GET /reports/estate.pdf` is a plain curl-able URL — so a
+ * 300 MB Chromium, and `GET /reports/estate.pdf` is a plain curl-able URL - so a
  * scheduled job can archive a monthly snapshot with no client involved. The cost
  * is that layout is manual, which is why the helpers below exist.
  *
  * Only the standard-14 fonts are used, so no font files ship with the build.
  * Those cover Latin-1; a package name in Cyrillic or CJK would render as
  * substituted glyphs. Package names are ASCII in every ecosystem the platform
- * ingests, and the alternative — embedding a full Unicode TTF — costs several
+ * ingests, and the alternative - embedding a full Unicode TTF - costs several
  * megabytes on every single report for a case that has not occurred.
  */
 
@@ -266,7 +266,7 @@ function coverageSection(ctx: Layout, report: AnalyticsReport): void {
  * One row of the app/base-image breakdown table.
  *
  * Shared by the filtered figures and the unfiltered reference block so the two cannot be
- * laid out differently — a reader comparing them is comparing rows, and rows that do not
+ * laid out differently - a reader comparing them is comparing rows, and rows that do not
  * line up make that comparison work rather than a glance.
  */
 interface BreakdownRow {
@@ -283,7 +283,7 @@ interface BreakdownRow {
  * Abbreviated headers for the breakdown table.
  *
  * Nine columns on a 507pt content width leaves about 40pt each, and `MEDIUM` does not fit
- * — `truncate()` would silently clip it, printing a header that is not the word it means.
+ * - `truncate()` would silently clip it, printing a header that is not the word it means.
  * Matches the `Crit` / `High` abbreviations the ranking tables already use.
  */
 const BUCKET_HEADER: Record<DashboardSeverityBucket, string> = {
@@ -319,19 +319,19 @@ function breakdownTable(ctx: Layout, rows: BreakdownRow[], options: { detail: bo
               header: "Fixable",
               width: 0.09,
               align: "right" as const,
-              value: (r: BreakdownRow) => (r.fixable === null ? "—" : fmt(r.fixable)),
+              value: (r: BreakdownRow) => (r.fixable === null ? " - " : fmt(r.fixable)),
             },
             {
               header: "Exploit",
               width: 0.09,
               align: "right" as const,
-              value: (r: BreakdownRow) => (r.knownExploited === null ? "—" : fmt(r.knownExploited)),
+              value: (r: BreakdownRow) => (r.knownExploited === null ? " - " : fmt(r.knownExploited)),
             },
             {
               header: "Pkgs",
               width: 0.08,
               align: "right" as const,
-              value: (r: BreakdownRow) => (r.packages === null ? "—" : fmt(r.packages)),
+              value: (r: BreakdownRow) => (r.packages === null ? " - " : fmt(r.packages)),
             },
           ]
         : []),
@@ -344,8 +344,8 @@ function breakdownTable(ctx: Layout, rows: BreakdownRow[], options: { detail: bo
  * Vulnerability findings, or an explicit statement that nothing was assessed.
  *
  * The disabled branch is the important one. A printed report is forwarded, renamed and
- * quoted months later, so a page that silently omitted this section — or worse, showed
- * zeros — would be read as a clean bill of health for an estate nobody ever scanned.
+ * quoted months later, so a page that silently omitted this section - or worse, showed
+ * zeros - would be read as a clean bill of health for an estate nobody ever scanned.
  * It says so in as many words instead.
  *
  * When a filter is active the same concern applies one level down, which is why this
@@ -358,7 +358,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
 
   /*
    * `== null`, not `=== null`: the field is typed as nullable, but a payload that
-   * predates it — a cached response, or a partially-built object — arrives with the
+   * predates it - a cached response, or a partially-built object - arrives with the
    * key absent. Treating undefined as 'not assessed' is both correct and the safe
    * direction to fail, since the alternative is a crash mid-render.
    */
@@ -368,7 +368,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
       "Not assessed. Vulnerability scanning is disabled on this platform, so no package in this report has been matched against a vulnerability database.",
     );
     ctx.emptyNote(
-      "The absence of findings below is not a clean result — nothing was checked. An administrator can enable scanning under Admin → Vulnerability scanning.",
+      "The absence of findings below is not a clean result - nothing was checked. An administrator can enable scanning under Admin → Scanners → Vulnerabilities.",
     );
     ctx.gap(12);
     return;
@@ -389,7 +389,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
     "Vulnerability findings",
     `Matched against the Grype database built ${fmtDateTime(vuln.dbBuiltAt)}` +
       (vuln.dbAgeHours === null ? "" : ` (${fmt(Math.round(vuln.dbAgeHours))}h old)`) +
-      ". Application dependencies and base-image packages are counted separately as well as together — base packages routinely outnumber dependencies by two orders of magnitude, so the combined total says more about base-image age than about anything a team chose.",
+      ". Application dependencies and base-image packages are counted separately as well as together - base packages routinely outnumber dependencies by two orders of magnitude, so the combined total says more about base-image age than about anything a team chose.",
   );
 
   /*
@@ -400,7 +400,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
   if (filter.active) {
     ctx.paragraph(`Filtered: ${filter.label ?? ""}`, { color: COLOR.warn, size: 9 });
     ctx.paragraph(
-      "Every figure in this section counts only findings matching that filter. The inventory sections elsewhere in this report describe the whole estate and are unaffected — severity does not apply to a package count.",
+      "Every figure in this section counts only findings matching that filter. The inventory sections elsewhere in this report describe the whole estate and are unaffected - severity does not apply to a package count.",
       { color: COLOR.muted, size: 8 },
     );
     ctx.gap(4);
@@ -440,7 +440,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
 
   /*
    * "Other" is negligible plus unknown, and unknown is a real answer rather than missing
-   * data — stated because a reader who assumes it means "not yet rated" will treat it as
+   * data - stated because a reader who assumes it means "not yet rated" will treat it as
    * a queue of work that does not exist.
    */
   ctx.paragraph(
@@ -476,7 +476,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
   if (vuln.unfiltered != null) {
     ctx.heading(
       "For reference: unfiltered totals",
-      "The same estate with no filter applied, so the figures above can be read against the whole. Fix availability and package counts are omitted here — they belong to the filtered view and repeating them unfiltered would invite the two to be mixed.",
+      "The same estate with no filter applied, so the figures above can be read against the whole. Fix availability and package counts are omitted here - they belong to the filtered view and repeating them unfiltered would invite the two to be mixed.",
     );
     breakdownTable(
       ctx,
@@ -509,7 +509,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
     `Top ${vuln.topVulnerableApplications.length || 10} vulnerable applications`,
     rankedByBaseImage
       ? "Ranked by base-image findings, because the filter excluded application dependencies. Every count on a row is base-image only."
-      : "Ranked by findings in application dependencies only. Base-image findings are shown for context but take no part in the ranking — including them would rank base-image age instead.",
+      : "Ranked by findings in application dependencies only. Base-image findings are shown for context but take no part in the ranking - including them would rank base-image age instead.",
   );
 
   if (vuln.topVulnerableApplications.length === 0) {
@@ -534,8 +534,8 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
           width: 0.19,
           align: "right",
           value: (r) =>
-            `${r.findings === null ? "—" : fmt(r.findings)} / ${
-              r.baseImageFindings === null ? "—" : fmt(r.baseImageFindings)
+            `${r.findings === null ? " - " : fmt(r.findings)} / ${
+              r.baseImageFindings === null ? " - " : fmt(r.baseImageFindings)
             }`,
         },
         { header: "Crit", width: 0.08, align: "right", value: (r) => fmt(r.critical) },
@@ -569,7 +569,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
       [
         { header: "#", width: 0.05, align: "right", value: (_r, i) => String(i + 1) },
         { header: "Package", width: 0.26, value: (r) => r.name },
-        { header: "Version", width: 0.17, value: (r) => r.version ?? "—", mono: true },
+        { header: "Version", width: 0.17, value: (r) => r.version ?? " - ", mono: true },
         { header: "Advisories", width: 0.12, align: "right", value: (r) => fmt(r.findings) },
         { header: "Crit", width: 0.07, align: "right", value: (r) => fmt(r.critical) },
         { header: "High", width: 0.07, align: "right", value: (r) => fmt(r.high) },
@@ -588,7 +588,7 @@ function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
   // --- base image exposure -------------------------------------------------
   /*
    * Null means the filter excluded base-image packages entirely. Saying so beats printing
-   * an empty table, which would read as "no base image has a vulnerability" — a far
+   * an empty table, which would read as "no base image has a vulnerability" - a far
    * stronger and quite different claim.
    */
   if (vuln.baseImageExposure == null) {
@@ -634,7 +634,7 @@ function topPackagesSection(ctx: Layout, report: AnalyticsReport): void {
   );
 
   if (report.topPackages.length === 0) {
-    ctx.emptyNote("No package data yet — counts appear once the first SBOM is ingested.");
+    ctx.emptyNote("No package data yet - counts appear once the first SBOM is ingested.");
     ctx.gap(10);
     return;
   }
@@ -645,7 +645,7 @@ function topPackagesSection(ctx: Layout, report: AnalyticsReport): void {
     [
       { header: "#", width: 0.05, align: "right", value: (_r, i) => String(i + 1) },
       { header: "Package", width: 0.42, value: (r) => r.name },
-      { header: "Version", width: 0.23, value: (r) => r.version ?? "—", mono: true },
+      { header: "Version", width: 0.23, value: (r) => r.version ?? " - ", mono: true },
       { header: "Ecosystem", width: 0.16, value: (r) => r.ecosystem, mono: true },
       {
         header: "Apps",
@@ -662,7 +662,7 @@ function topPackagesSection(ctx: Layout, report: AnalyticsReport): void {
 function topProjectsSection(ctx: Layout, report: AnalyticsReport): void {
   ctx.heading(
     `Top ${report.topProjects.length} applications by package count`,
-    "Largest current builds. A size ranking, not a risk ranking — a big image costs more to review, rebuild and patch, but is not automatically in worse shape than a small one.",
+    "Largest current builds. A size ranking, not a risk ranking - a big image costs more to review, rebuild and patch, but is not automatically in worse shape than a small one.",
   );
 
   if (report.topProjects.length === 0) {
@@ -678,7 +678,7 @@ function topProjectsSection(ctx: Layout, report: AnalyticsReport): void {
       { header: "Application", width: 0.24, value: (r) => r.name },
       // Not mono, and the widest column: a three-part platform summary is ~46
       // characters, which Courier at this size cannot fit without truncating away
-      // the runtime version — the most useful part of the string.
+      // the runtime version - the most useful part of the string.
       { header: "Runs on", width: 0.4, value: (r) => r.platform ?? "not detected" },
       { header: "Build date", width: 0.17, value: (r) => fmtDate(r.scanAt), mono: true },
       { header: "Packages", width: 0.14, align: "right", value: (r) => fmt(r.packages) },
@@ -725,7 +725,7 @@ function velocitySection(ctx: Layout, report: AnalyticsReport): void {
   );
 
   /**
-   * With nothing to compare against, the three package figures are all zero —
+   * With nothing to compare against, the three package figures are all zero -
    * and zero would read as "nothing changed" rather than "nothing was measured".
    * Those two mean opposite things to someone deciding whether dependency churn
    * is under control, so the tiles are suppressed rather than printed.
@@ -766,7 +766,7 @@ function velocitySection(ctx: Layout, report: AnalyticsReport): void {
         v.applicationsWithoutBaseline === 1 ? " was" : "s were"
       } scanned for the first time during the window and ${
         v.applicationsWithoutBaseline === 1 ? "is" : "are"
-      } excluded — every package in a first build would otherwise register as an addition and swamp the real churn.`,
+      } excluded - every package in a first build would otherwise register as an addition and swamp the real churn.`,
     );
   }
   if (v.applicationsUnchanged > 0) {
@@ -877,7 +877,7 @@ function newPackagesSection(ctx: Layout, report: AnalyticsReport): void {
     ctx,
     [
       { header: "Package", width: 0.34, value: (r) => r.name },
-      { header: "Version", width: 0.22, value: (r) => r.version ?? "—", mono: true },
+      { header: "Version", width: 0.22, value: (r) => r.version ?? " - ", mono: true },
       { header: "Ecosystem", width: 0.14, value: (r) => r.ecosystem, mono: true },
       { header: "First seen", width: 0.19, value: (r) => fmtDate(r.firstSeenAt), mono: true },
       { header: "Apps", width: 0.11, align: "right", value: (r) => fmt(r.applications) },
@@ -909,7 +909,7 @@ function platformSection(ctx: Layout, report: AnalyticsReport): void {
       ctx,
       [
         { header: "Distribution", width: 0.5, value: (r) => osLabel(r.name) ?? "not detected" },
-        { header: "Version", width: 0.3, value: (r) => r.version ?? "—", mono: true },
+        { header: "Version", width: 0.3, value: (r) => r.version ?? " - ", mono: true },
         { header: "Applications", width: 0.2, align: "right", value: (r) => fmt(r.applications) },
       ],
       operatingSystems,
@@ -923,7 +923,7 @@ function platformSection(ctx: Layout, report: AnalyticsReport): void {
       ctx,
       [
         { header: "Runtime", width: 0.5, value: (r) => runtimeLabel(r.name) },
-        { header: "Version", width: 0.3, value: (r) => r.version ?? "—", mono: true },
+        { header: "Version", width: 0.3, value: (r) => r.version ?? " - ", mono: true },
         { header: "Applications", width: 0.2, align: "right", value: (r) => fmt(r.applications) },
       ],
       runtimes,
@@ -966,7 +966,7 @@ function ecosystemSection(ctx: Layout, report: AnalyticsReport): void {
 /**
  * What the numbers mean, and what they do not.
  *
- * At the back because it is reference, not news — but present, because a report
+ * At the back because it is reference, not news - but present, because a report
  * that circulates without its definitions gets its figures compared against
  * other tools' differently-defined ones.
  */
@@ -977,7 +977,7 @@ function methodologySection(ctx: Layout, report: AnalyticsReport): void {
     /*
      * This entry has to track the feature flag. It previously stated flatly that the
      * platform holds no vulnerability data, which is the right thing to say when
-     * scanning is off and a falsehood when it is on — and a methodology note that
+     * scanning is off and a falsehood when it is on - and a methodology note that
      * contradicts the tables above it discredits both.
      */
     report.vulnerabilities == null
@@ -996,7 +996,7 @@ function methodologySection(ctx: Layout, report: AnalyticsReport): void {
         ]
       : [
           "App dependencies vs base image",
-          "The two are totalled separately as well as together, and every ranking is computed on one of them rather than on the sum — application dependencies, unless a filter excludes them. Measured on a typical container image, distribution packages and language runtimes account for around 99% of all findings, so a ranking on the combined figure would order applications by base-image age and bury everything a team chose. That is also why the combined total is the least useful number here despite being the one most often quoted.",
+          "The two are totalled separately as well as together, and every ranking is computed on one of them rather than on the sum - application dependencies, unless a filter excludes them. Measured on a typical container image, distribution packages and language runtimes account for around 99% of all findings, so a ranking on the combined figure would order applications by base-image age and bury everything a team chose. That is also why the combined total is the least useful number here despite being the one most often quoted.",
         ],
     [
       "Current build",
@@ -1047,7 +1047,7 @@ function methodologySection(ctx: Layout, report: AnalyticsReport): void {
  * possible.
  *
  * The footer sits below the page's bottom margin, and pdfkit responds to text
- * that far down by flowing it onto a *new* page — which appended one blank page
+ * that far down by flowing it onto a *new* page - which appended one blank page
  * per footer fragment and left the real content pages unfooted, while the labels
  * still counted only the original pages. Zeroing the bottom margin on each page
  * before writing is what keeps the text where it was put.

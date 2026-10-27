@@ -259,7 +259,7 @@ function RecommendationRow({
             */}
             {moved ? (
               <span className="text-[11px] text-warn">
-                not {rec.minimumVersion} — it is affected too
+                not {rec.minimumVersion} - it is affected too
               </span>
             ) : null}
             {rec.resolvedByMinimum < rec.findings ? (
@@ -446,7 +446,7 @@ function RecommendationDetail({ rec }: { rec: FixRecommendation }) {
                     {check.advisories.slice(0, 8).map((advisory) => (
                       <li key={advisory.vulnerabilityId}>
                         <span className="font-mono">{advisory.vulnerabilityId}</span> (
-                        {advisory.severity}) —{" "}
+                        {advisory.severity}) -{" "}
                         {advisory.fixedIn ? (
                           <>
                             fixed in <Mono>{advisory.fixedIn}</Mono>

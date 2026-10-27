@@ -14,7 +14,7 @@ describe("pairVersionChanges", () => {
     expect(result.changed).toEqual([
       expect.objectContaining({ name: "log4j-core", fromVersion: "2.14.1", toVersion: "2.24.1" }),
     ]);
-    // Crucially, the raw rows are consumed rather than duplicated — otherwise a
+    // Crucially, the raw rows are consumed rather than duplicated - otherwise a
     // routine upgrade would be reported three times.
     expect(result.added).toEqual([]);
     expect(result.removed).toEqual([]);

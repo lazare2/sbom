@@ -9,6 +9,11 @@ import {
   createGroupRequestSchema,
   createIngestTokenRequestSchema,
   createSquadSchema,
+  createTribeSchema,
+  setTribeApplicationsSchema,
+  setTribeSquadsSchema,
+  squadSettingsSchema,
+  updateTribeSchema,
   createUserRequestSchema,
   idParamSchema,
   listApiErrorsQuerySchema,
@@ -97,6 +102,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     adminApplications,
     adminGroups,
     squads,
+    tribes,
     adminScans,
     adminMalicious,
     malicious,
@@ -128,7 +134,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   /**
    * 201 with the generated password in the body. It is shown once and never
-   * retrievable again — the plaintext is not stored, only its argon2 hash.
+   * retrievable again - the plaintext is not stored, only its argon2 hash.
    */
   fastify.post("/users", async (request, reply) => {
     const body = parseOrThrow(createUserRequestSchema, request.body);
@@ -241,7 +247,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
    * Which groups and applications a read-only account may see, inside those environments.
    *
    * The second access axis. Read back even for administrators, whose grants are stored and
-   * simply not consulted while the role is `admin` — hiding them would mean an admin screen
+   * simply not consulted while the role is `admin` - hiding them would mean an admin screen
    * that shows nothing for an admin, and a later demotion to a read-only role that hands
    * over whatever happened to be stored without anybody having reviewed it.
    */
@@ -355,6 +361,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.send({ squads: await squads.list() });
   });
 
+  /** Squad-wide rules: today, whether every squad must sit under a tribe. */
+  fastify.get("/squads/settings", async (_request, reply) => {
+    return reply.send({ settings: await squads.getSettings() });
+  });
+
+  fastify.put("/squads/settings", async (request, reply) => {
+    const body = parseOrThrow(squadSettingsSchema, request.body);
+    return reply.send({ settings: await squads.updateSettings(body, actorOf(request)) });
+  });
+
   fastify.get("/squads/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     return reply.send({ squad: await squads.get(id) });
@@ -389,6 +405,52 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const body = parseOrThrow(setSquadAccessSchema, request.body);
     return reply.send({ squad: await squads.setAccess(id, body, actorOf(request)) });
+  });
+
+  // -------------------------------------------------------------------------
+  // Tribes
+  // -------------------------------------------------------------------------
+
+  fastify.get("/tribes", async (_request, reply) => {
+    return reply.send({ tribes: await tribes.list() });
+  });
+
+  fastify.get("/tribes/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    return reply.send({ tribe: await tribes.get(id) });
+  });
+
+  fastify.post("/tribes", async (request, reply) => {
+    const body = parseOrThrow(createTribeSchema, request.body);
+    return reply.status(201).send({ tribe: await tribes.create(body, actorOf(request)) });
+  });
+
+  fastify.patch("/tribes/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(updateTribeSchema, request.body);
+    return reply.send({ tribe: await tribes.update(id, body, actorOf(request)) });
+  });
+
+  fastify.delete("/tribes/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    await tribes.remove(id, actorOf(request));
+    return reply.status(204).send();
+  });
+
+  /** The complete list of squads under the tribe. */
+  fastify.put("/tribes/:id/squads", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setTribeSquadsSchema, request.body);
+    return reply.send({ tribe: await tribes.setSquads(id, body.squadIds, actorOf(request)) });
+  });
+
+  /** The complete list of applications assigned to the tribe directly, across any environment. */
+  fastify.put("/tribes/:id/applications", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const body = parseOrThrow(setTribeApplicationsSchema, request.body);
+    return reply.send({
+      tribe: await tribes.setApplications(id, body.applicationIds, actorOf(request)),
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -557,7 +619,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * Replaces the whole membership rather than adding or removing one at a time.
    *
-   * A PUT because it is idempotent and the body is the complete resulting set — sending the
+   * A PUT because it is idempotent and the body is the complete resulting set - sending the
    * same list twice leaves the group in the same state, which is what makes a retry after a
    * dropped response safe.
    */

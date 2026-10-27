@@ -16,14 +16,14 @@ import { parseCycloneDx } from "../../src/modules/ingestion/cyclonedx.js";
  * only heuristic in the feature, and the failure it must not have is the quiet one: telling
  * somebody a package they installed came from the base image sends them to argue with the
  * platform team about a Dockerfile they do not own. The guard against that is not accuracy
- * alone — it is that the path is always rendered next to the label, so a wrong answer is
+ * alone - it is that the path is always rendered next to the label, so a wrong answer is
  * visibly wrong. What is pinned here is the classification of the prefixes that actually occur.
  *
  * The **parser** decides whether there is a location to show at all, and its dangerous failure
  * is silent loss. Syft emits the same package more than once when it finds it in two layers or
  * via two catalogers, and those duplicate entries are exactly the ones carrying a location the
- * first entry did not have. Collapsing duplicates without merging their locations — which is
- * what the parser did before this feature — discards multi-location data on precisely the
+ * first entry did not have. Collapsing duplicates without merging their locations - which is
+ * what the parser did before this feature - discards multi-location data on precisely the
  * packages installed in more than one place. Nothing about that failure is visible downstream:
  * the path shown is real, it is just not the only one.
  */
@@ -56,7 +56,7 @@ describe("classifyComponentOrigin", () => {
   it("puts a language runtime's global packages in the image, not the application", () => {
     // This is the case that motivated abandoning the layer-based rule. In node:20-alpine these
     // 203 npm packages sit in a layer containing no distro packages at all, so "the layer with
-    // apk in it is the base image" labels them application dependencies — wrong for anyone
+    // apk in it is the base image" labels them application dependencies - wrong for anyone
     // whose Dockerfile says FROM node:20-alpine.
     expect(
       classifyComponentOrigin({
@@ -79,7 +79,7 @@ describe("classifyComponentOrigin", () => {
 
   it("treats the common application WORKDIRs as application, including /usr/src/app", () => {
     // `/usr/src/app` is the trap. A bare `/usr/` prefix in the image list would misfile every
-    // dependency of every application using it — and it is one of the most common WORKDIRs
+    // dependency of every application using it - and it is one of the most common WORKDIRs
     // there is, so the mistake would land hardest on ordinary deployments.
     for (const path of [
       "/app/node_modules/left-pad/package.json",
@@ -134,8 +134,8 @@ describe("ecosystemHasMeaningfulPaths", () => {
   });
 
   it("does not exclude runtimes, whose path is a real location", () => {
-    // `/usr/local/bin/node` locates the binary. Folding runtimes in with OS packages — which
-    // `isBaseImagePackage` does, for a different and correct purpose — would throw it away.
+    // `/usr/local/bin/node` locates the binary. Folding runtimes in with OS packages - which
+    // `isBaseImagePackage` does, for a different and correct purpose - would throw it away.
     expect(ecosystemHasMeaningfulPaths("generic")).toBe(true);
     expect(classifyComponentOrigin({ ecosystem: "generic", paths: ["/usr/local/bin/node"], kind: "runtime" })).toBe(
       "image",
@@ -210,7 +210,7 @@ describe("parseCycloneDx location extraction", () => {
 
   it("merges locations from duplicate entries instead of discarding them", () => {
     // The regression this whole test file exists for. Both entries are the same package by
-    // identity hash, so the second collapses into the first — and it is the second that
+    // identity hash, so the second collapses into the first - and it is the second that
     // carries the /app copy. Before the merge, that path was silently lost.
     const parsed = parseCycloneDx(
       doc([
@@ -250,7 +250,7 @@ describe("parseCycloneDx location extraction", () => {
     const parsed = parseCycloneDx(doc([component({ name: "sprawl", syftType: "npm", locations: many })]));
 
     expect(parsed.components[0]!.paths).toHaveLength(COMPONENT_LOCATION_PATH_CAP);
-    // "3 of 9", not "3" — a truncated list that does not say so implies it is complete.
+    // "3 of 9", not "3" - a truncated list that does not say so implies it is complete.
     expect(parsed.components[0]!.pathCount).toBe(9);
   });
 

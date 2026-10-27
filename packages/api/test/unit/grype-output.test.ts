@@ -18,7 +18,7 @@ import {
  * and are wrong.
  *
  * The fixtures are shaped from real Grype 0.115.0 output, including the details that were
- * verified rather than assumed — `bom-ref` coming back as `artifact.id`, the CVE living in
+ * verified rather than assumed - `bom-ref` coming back as `artifact.id`, the CVE living in
  * `relatedVulnerabilities` when the primary id is a GHSA, and `knownExploited` being an
  * array whose presence is the signal.
  */
@@ -140,7 +140,7 @@ describe("collectAliases", () => {
   it("pulls the CVE out of relatedVulnerabilities", () => {
     /*
      * The behaviour CVE search depends on. Grype's primary id for a language package is
-     * usually a GHSA — Log4Shell is GHSA-jfh8-c2jp-5v3q — and someone searching the CVE
+     * usually a GHSA - Log4Shell is GHSA-jfh8-c2jp-5v3q - and someone searching the CVE
      * number they read in the news has to reach the same row.
      */
     expect(collectAliases(match())).toEqual(["CVE-2021-44228"]);
@@ -156,7 +156,7 @@ describe("collectAliases", () => {
     /*
      * The common shape for OS advisories, which are reported with the CVE as the primary
      * id. This case caused a real NOT NULL violation once, because array_agg over an empty
-     * set returns NULL — so it is worth pinning that the parser produces `[]` and not
+     * set returns NULL - so it is worth pinning that the parser produces `[]` and not
      * undefined.
      */
     expect(collectAliases(match({ relatedVulnerabilities: [] }))).toEqual([]);
@@ -183,7 +183,7 @@ describe("parseGrypeReport", () => {
     /*
      * When no bom-ref is supplied Grype substitutes a hash like `92547e41269f40eb`. Parsing
      * that as a component id is impossible, and silently dropping it would understate every
-     * count — so it is counted, and the sweep logs it.
+     * count - so it is counted, and the sweep logs it.
      */
     const parsed = parseGrypeReport(report([match({ artifact: { id: "92547e41269f40eb" } })]));
     expect(parsed.findings).toHaveLength(0);
@@ -220,7 +220,7 @@ describe("parseGrypeReport", () => {
 
   it("collapses the same (component, advisory) reported by two match rules", () => {
     /*
-     * Grype reports one pairing more than once when several rules fire — a direct purl
+     * Grype reports one pairing more than once when several rules fire - a direct purl
      * match and a CPE match, say. Those are one finding, and letting both through would
      * double-count it in every severity total on every dashboard.
      */
@@ -247,7 +247,7 @@ describe("parseGrypeReport", () => {
   it("skips a malformed match without discarding the batch", () => {
     /*
      * A sweep processes tens of thousands of matches at a time. One odd entry must not
-     * throw away the other 9,999 — the batch would be retried forever and never converge.
+     * throw away the other 9,999 - the batch would be retried forever and never converge.
      */
     const parsed = parseGrypeReport(report([null, "nonsense", { artifact: { id: "1" } }, match()]));
     expect(parsed.findings).toHaveLength(1);

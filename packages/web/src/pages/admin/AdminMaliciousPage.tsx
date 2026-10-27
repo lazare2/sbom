@@ -29,8 +29,8 @@ import {
  *
  * Separate from the vulnerability-scanning tab even though the two look similar, because they
  * are independently switchable and an operator has real reasons to run one without the other.
- * This one needs no scanner binary and no multi-gigabyte database — it is a 40 MB download and
- * a name lookup — so an estate that cannot host Grype can still have this.
+ * This one needs no scanner binary and no multi-gigabyte database - it is a 40 MB download and
+ * a name lookup - so an estate that cannot host Grype can still have this.
  */
 
 interface SettingsResponse {
@@ -47,7 +47,7 @@ interface SettingsResponse {
  */
 function sharePercent(b: { corroborated: number; singleSource: number; unattributed: number }): string {
   const total = b.corroborated + b.singleSource + b.unattributed;
-  if (total === 0) return "—";
+  if (total === 0) return " - ";
   return `${((b.corroborated / total) * 100).toFixed(1)}%`;
 }
 
@@ -99,7 +99,7 @@ export function AdminMaliciousPage() {
       <Card>
         <CardHeader
           title="Malicious package detection"
-          subtitle="Matches the estate against the OpenSSF malicious-packages feed — typosquats, dependency-confusion stubs, and legitimate packages whose maintainer accounts were compromised. Apache-2.0, no account or key required."
+          subtitle="Matches the estate against the OpenSSF malicious-packages feed - typosquats, dependency-confusion stubs, and legitimate packages whose maintainer accounts were compromised. Apache-2.0, no account or key required."
           actions={
             <Button
               variant={settings.enabled ? "secondary" : "primary"}
@@ -213,7 +213,7 @@ export function AdminMaliciousPage() {
           {refresh.data ? (
             <p className="text-xs text-text-muted">
               Last refresh: <strong className="text-text-base">{refresh.data.outcome}</strong>
-              {refresh.data.message ? ` — ${refresh.data.message}` : ""}
+              {refresh.data.message ? ` - ${refresh.data.message}` : ""}
             </p>
           ) : null}
 
@@ -288,7 +288,7 @@ export function AdminMaliciousPage() {
       <Card>
         <CardHeader
           title="Refresh history"
-          subtitle="Every attempt, successful or not — so a stale feed can be explained rather than guessed at."
+          subtitle="Every attempt, successful or not - so a stale feed can be explained rather than guessed at."
         />
         {historyQuery.isLoading ? (
           <LoadingBlock label="Loading history" />
@@ -334,13 +334,13 @@ export function AdminMaliciousPage() {
                       </Badge>
                     </Td>
                     <Td align="right" className="nums text-text-muted">
-                      {attempt.reportsTotal === null ? "—" : formatNumber(attempt.reportsTotal)}
+                      {attempt.reportsTotal === null ? " - " : formatNumber(attempt.reportsTotal)}
                     </Td>
                     <Td align="right" className="nums text-text-muted">
-                      {attempt.reportsChanged === null ? "—" : formatNumber(attempt.reportsChanged)}
+                      {attempt.reportsChanged === null ? " - " : formatNumber(attempt.reportsChanged)}
                     </Td>
                     <Td className="text-xs text-text-faint">
-                      {attempt.message ?? attempt.sourceUrl ?? "—"}
+                      {attempt.message ?? attempt.sourceUrl ?? " - "}
                     </Td>
                   </Tr>
                 ))}

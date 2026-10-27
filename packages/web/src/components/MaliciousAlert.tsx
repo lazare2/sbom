@@ -7,8 +7,8 @@ import { formatNumber, formatRelative } from "../lib/format.ts";
  * The dashboard's malicious-package alert.
  *
  * Renders nothing at all in four of its five states, and that restraint is what makes the
- * fifth one mean something. A banner that is permanently present — saying "0 malicious
- * packages" on a healthy estate — is a banner people stop reading, and the day it changes to
+ * fifth one mean something. A banner that is permanently present - saying "0 malicious
+ * packages" on a healthy estate - is a banner people stop reading, and the day it changes to
  * a number nobody notices.
  *
  * So:
@@ -25,8 +25,8 @@ import { formatNumber, formatRelative } from "../lib/format.ts";
  *
  * The historical case gets its own wording rather than a smaller number in the same sentence.
  * "Nothing in your current builds, but four applications shipped this" is the state most
- * likely to be misread as safe, and it is the one where the remaining work — rotating the
- * credentials those builds exposed — has not been done.
+ * likely to be misread as safe, and it is the one where the remaining work - rotating the
+ * credentials those builds exposed - has not been done.
  */
 
 /**
@@ -34,7 +34,7 @@ import { formatNumber, formatRelative } from "../lib/format.ts";
  *
  * localStorage rather than component state, or the banner would return on every navigation
  * and the button would be decorative. What is stored is the *signature* of the outstanding
- * finding set, never a bare "dismissed" flag — see the guard in the component.
+ * finding set, never a bare "dismissed" flag - see the guard in the component.
  */
 const DISMISSED_KEY = "sbom.malicious-alert.dismissed";
 
@@ -61,7 +61,7 @@ export function MaliciousAlert() {
      *
      * Gated on `isSuccess`, and that guard is load-bearing rather than defensive. `summary` is
      * `undefined` while the query is in flight, which makes `signature` null for the first
-     * render of every page load — indistinguishable here from "nothing is outstanding".
+     * render of every page load - indistinguishable here from "nothing is outstanding".
      * Without the guard this effect fired before the data arrived and deleted the dismissal on
      * every refresh, so the alert came back each time and the close button appeared to do
      * nothing beyond the current render.
@@ -80,7 +80,7 @@ export function MaliciousAlert() {
   // `undefined` while loading, `null` when detection is off or no feed is installed. Neither
   // is a finding, and neither may render as reassurance.
   if (!summary) return null;
-  // Zero here means "nothing outstanding" — either nothing was found, or every finding has
+  // Zero here means "nothing outstanding" - either nothing was found, or every finding has
   // been acknowledged. Both are states the findings page describes properly and neither
   // warrants interrupting.
   if (summary.everPackages === 0) return null;

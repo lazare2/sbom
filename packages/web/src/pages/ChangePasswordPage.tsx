@@ -10,8 +10,8 @@ const MIN_LENGTH = 12;
  * Change your own password.
  *
  * Serves two situations with one form. Normally it is a voluntary action
- * reachable from the header. When `mustChangePassword` is set — an admin issued
- * this credential, so someone other than its owner has seen it — the router
+ * reachable from the header. When `mustChangePassword` is set - an admin issued
+ * this credential, so someone other than its owner has seen it - the router
  * pins the user here and the API refuses every other authenticated route until
  * it clears.
  *
@@ -62,7 +62,7 @@ export function ChangePasswordPage() {
 
     Keyed on `forced` going false rather than on the submission succeeding, because those are
     not the same moment: the mutation invalidates the session query, and until the refetch
-    lands `mustChangePassword` is still set — so navigating on success alone would race the
+    lands `mustChangePassword` is still set - so navigating on success alone would race the
     refetch and be bounced straight back here by the router.
 
     This page no longer sits inside the application shell, so there is no navigation on screen
@@ -76,7 +76,7 @@ export function ChangePasswordPage() {
   }, [done, forced, navigate]);
 
   return (
-    /* Its own container in both cases now — there is no surrounding layout to provide one. */
+    /* Its own container in both cases now - there is no surrounding layout to provide one. */
     <div className="mx-auto max-w-lg px-4 py-10">
       <PageHeader
         title={forced ? "Change your password" : "Change password"}
@@ -90,7 +90,7 @@ export function ChangePasswordPage() {
       <Card>
         <CardHeader
           title="New password"
-          subtitle={`At least ${MIN_LENGTH} characters. Length matters more than punctuation — a memorable phrase beats a short password with symbols in it.`}
+          subtitle={`At least ${MIN_LENGTH} characters. Length matters more than punctuation - a memorable phrase beats a short password with symbols in it.`}
         />
 
         <form onSubmit={handleSubmit} className="space-y-4 px-4 py-4" noValidate>
@@ -165,8 +165,8 @@ export function ChangePasswordPage() {
                 The way out of a screen that otherwise has none.
 
                 On the forced path every other route is refused, so without this a person who
-                mistypes the password their administrator sent them — or who is signed in as
-                the wrong account — has no action available but to clear their cookies. It is
+                mistypes the password their administrator sent them - or who is signed in as
+                the wrong account - has no action available but to clear their cookies. It is
                 worded as a way back to the sign-in page rather than as an escape, because
                 that is what it is for.
               */
