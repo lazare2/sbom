@@ -30,6 +30,7 @@
     "db:seed:demo": "npm run db:seed:demo --workspace=@sbom/api",
     "ui:drive": "node scripts/ui-drive.mjs ./var/ui-shots",
     "grype:install": "node scripts/install-grype.mjs",
+    "scanners:install": "node scripts/install-scanners.mjs",
     "bundle:offline": "powershell -ExecutionPolicy Bypass -File ./scripts/build-offline-bundle.ps1",
     "db:seed:drift": "npm run db:seed:drift --workspace=@sbom/api",
     "db:backfill:platform": "npm run db:backfill:platform --workspace=@sbom/api"

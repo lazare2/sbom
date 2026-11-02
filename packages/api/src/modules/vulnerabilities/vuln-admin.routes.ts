@@ -60,20 +60,22 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    */
   async function status(): Promise<VulnScanStatus> {
     const base = await vulnDb.status();
-    const active = await settings.vulnProvider();
+    const scanners = await settings.vulnScanners();
     const xray = await settings.xraySettings();
+    const xrayOnly = scanners.xray && !scanners.grype && !scanners.trivy && !scanners.osv;
 
     return {
       ...base,
       /*
-        Grype matches everything it is handed, so nothing is uncovered. Xray's coverage is
-        whatever the last probe measured -- and until one has run, nothing is known to be
-        covered, which is reported as an unmeasured state rather than as full coverage.
+        The local scanners match everything they are handed, so with any of them on nothing
+        is uncovered. Only when Xray runs alone does its measured coverage decide - and until
+        a probe has run, nothing is known to be covered, which is reported as an unmeasured
+        state rather than as full coverage.
       */
       provider: {
-        active,
-        uncoveredEcosystems: active === "xray" ? (xray.coverage?.uncovered ?? []) : [],
-        coverageCheckedAt: active === "xray" ? (xray.coverage?.checkedAt ?? null) : null,
+        scanners,
+        uncoveredEcosystems: xrayOnly ? (xray.coverage?.uncovered ?? []) : [],
+        coverageCheckedAt: xrayOnly ? (xray.coverage?.checkedAt ?? null) : null,
       },
       coverage: {
         ...base.coverage,
@@ -386,7 +388,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get("/provider", async (_request, reply) => {
     return reply.send({
-      provider: await settings.vulnProvider(),
+      scanners: await settings.vulnScanners(),
       xray: await settings.xraySettings(),
       /*
         Whether a token could be stored at all. Without SECRETS_KEY the save is refused, and
@@ -409,27 +411,19 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.put("/provider", async (request, reply) => {
     const body = parseOrThrow(setVulnProviderSchema, request.body, "Body");
-    const before = await settings.vulnProvider();
+    const before = await settings.vulnScanners();
 
-    if (body.provider === "xray") {
+    if (body.scanners.xray && !before.xray) {
       const credentials = await settings.xrayCredentials();
       if (!credentials) {
-        throw new BadRequestError(
-          "Configure and test the JFrog Xray connection before making it the active database.",
-        );
+        throw new BadRequestError("Configure and test the JFrog Xray connection before switching it on.");
       }
 
       /*
-        Reachable, not merely stored.
-
-        This used to check only that a connection existed, which let an administrator switch
-        to an Xray that answers nothing -- and the estate then reads "not assessed" everywhere
-        with the cause three screens away. That is the exact failure this provider is most
-        likely to hit in a corporate network, and the one with the worst silent outcome, so
-        the switch pays the cost of a round trip to prove the choice is usable.
-
-        Only the switch *to* Xray is gated. Returning to the local database must always be
-        possible, including from a broken Xray -- especially from a broken Xray.
+        Reachable, not merely stored. Switching on an Xray that answers nothing would leave it
+        listed as on while every sweep runs without it, with the cause three screens away -
+        so the switch pays the cost of a round trip to prove the choice is usable. Switching
+        it off is never gated.
       */
       const scanner = new XrayScanner(credentials, {
         logger: fastify.log,
@@ -439,22 +433,23 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
       if (!availability.available) {
         const reason = availability.attempts[0]?.reason ?? "The connection failed.";
         throw new BadRequestError(
-          `Could not reach JFrog Xray at ${credentials.baseUrl}, so it cannot be made the active database. ${reason}`,
+          `Could not reach JFrog Xray at ${credentials.baseUrl}, so it cannot be switched on. ${reason}`,
         );
       }
     }
 
-    await settings.setVulnProvider(body.provider);
+    await settings.setVulnScanners(body.scanners);
+    fastify.ctx.scanner.invalidate?.();
 
     await audit.record({
       actor: actorOf(request),
       action: "vuln.provider_change",
       targetType: "setting",
       targetId: "vuln.provider",
-      metadata: { provider: { from: before, to: body.provider } },
+      metadata: { scanners: { from: before, to: body.scanners } },
     });
 
-    return reply.send({ provider: body.provider, xray: await settings.xraySettings() });
+    return reply.send({ scanners: body.scanners, xray: await settings.xraySettings() });
   });
 
   /**

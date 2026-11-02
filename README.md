@@ -1039,6 +1039,78 @@ The **vulnerability database is not in the image.** It is ~141 MB compressed, ex
 triple the image size. It lives on a volume and is fetched at runtime when an
 administrator asks for it. A fresh `docker compose up` downloads nothing.
 
+### Several scanners, one set of findings
+
+Every package is matched against **Grype, Trivy and OSV.dev**, and their findings are
+merged. **JFrog Xray** can be added from the same screen, and is off until an administrator
+ticks it. The switches are under **Admin → Scanners → Vulnerabilities**.
+
+No single database is complete. CVE-2026-47892 against spring-webflux 6.2.0 shows why:
+
+- **Grype** reported it with no fix. That is not a gap in Grype. GitHub's advisory records
+  the 6.2 line as "last affected 6.2.19" because the 6.2.20 fix is an *Enterprise
+  support only* Spring release that never reached Maven Central.
+- **Trivy and OSV** both report the open-source fix on the next release line, **7.0.9**.
+- The merged finding says "fixed in 7.0.9 · newer release line", and its hover text shows
+  what each scanner said.
+
+How it works:
+
+- **One finding per flaw.** Findings on the same package are the same finding when they
+  share a name: Grype's GHSA with a CVE alias, Trivy's CVE with the GHSA as a vendor id,
+  OSV's GHSA or distro id with the CVE upstream. A CVE links findings only when it is the
+  one CVE a finding is about, so a Debian bulletin that covers eight CVEs cannot chain eight
+  findings into one. Two ids from the *same* scanner are never merged.
+- **Stable ids.** The merged finding keeps the id the platform already stores for it, so
+  accepted risks, history and links carry over. Otherwise it takes Grype's id, then a GHSA,
+  then a CVE.
+- **What it says.** Severity is the highest any scanner gave. Fix versions are every fix any
+  of them named that is newer than the installed version, lowest first. Descriptions,
+  aliases, CWEs and references are combined. `component_vulnerability.found_by` records
+  which scanners reported it, and `source_details` records what each one said: its own
+  id, severity, fix state and versions, and the version range it matched.
+- **"No fix yet", "fix unknown" and "won't fix" are three different answers** and are shown
+  as such. They used to render identically.
+- **Run the ones that work.** A scanner that is switched on but cannot run (binary missing,
+  database not downloaded, address not yet allowed through the firewall) is left out of
+  the sweep, and the admin screen says why. The sweep's watermark is the moment the set of
+  usable scanners or any of their databases last changed, so a database update, a scanner
+  switched on or off, or one that comes back all re-queue the estate. A scanner that fails
+  mid-match sits out for 30 minutes rather than blocking everything.
+- **Everything matches locally.** Each scanner downloads its database through the service's
+  proxy settings and matches offline. Nothing about the estate leaves the network except,
+  for OSV, the names of the ecosystems in use. Firewall openings needed:
+
+| Scanner | Downloads from | Volume |
+|---|---|---|
+| Grype | `grype.anchore.io` | `/data/grype-db`, ~4 GB |
+| Trivy | `mirror.gcr.io` (an OCI registry; set `TRIVY_DB_REPOSITORY` to use an internal mirror) | `/data/trivy-db`, ~2 GB |
+| OSV.dev | `osv-vulnerabilities.storage.googleapis.com` (one archive per ecosystem; not the malicious-package feed's address, which is GitHub) | `/data/osv-db`, ~1 GB |
+| JFrog Xray | your Xray server | none |
+
+Two measured exclusions keep the merged set fast and honest:
+
+- **Ubuntu is not sent to OSV** (`OSV_SKIP_DISTROS`). OSV's Ubuntu archive is about 800 MB,
+  and osv-scanner took 291 seconds just to load it for a single package, so every batch
+  holding one Ubuntu package timed out. The data is Canonical's own security notices, which
+  Grype and Trivy both read directly, so Ubuntu packages are still covered twice. With it
+  skipped, all three scanners assess this estate's 1,692 packages in about 100 seconds.
+- **Kernel header packages** (`linux-libc-dev`, `linux-headers-*`, `kernel-headers`) are not
+  sent to Trivy or OSV. Grype already ignores them by default: their source package is the
+  kernel, so every kernel CVE matches them, but a container runs on its host's kernel. On
+  this estate they were 1,601 of the 1,734 findings Trivy reported that Grype did not. The
+  other 133 are real coverage Grype lacked.
+
+Trivy has two quirks the adapter handles. It refuses an SBOM that mixes OS package types,
+and it matches Debian packages only by their *source* package. So each batch is split per
+distribution, and the source name is taken from Syft's `upstream` purl qualifier. OSV
+matches Debian by source package too.
+
+Trivy (`aquasec/trivy:0.76.1`) and osv-scanner (2.7.0, SHA-256-checked) ship in the API
+image beside Grype. On a native install, `npm run scanners:install` fetches both into
+`var/bin/`, checksum-verified. **Import from file** accepts Grype's `.tar.zst` or Trivy's
+`db.tar.gz`. OSV's databases can only be downloaded.
+
 ### How findings are stored, and why it matters
 
 Findings are keyed on the **component**, not the scan - `component_vulnerability` joins a
@@ -1375,6 +1447,14 @@ statement that there are none"*. Nullable types are what enforce it: a consumer 
 | `GRYPE_SCAN_TIMEOUT_MS` | `600000` | Per-batch match timeout. |
 | `GRYPE_DB_UPDATE_TIMEOUT_MS` | `1800000` | Download timeout - 141 MB on a slow link. |
 | `GRYPE_REACHABILITY_TIMEOUT_MS` | `8000` | Listing probe. Short: it only answers "is there a route". |
+| `TRIVY_PATH` | unset | Explicit Trivy binary path; otherwise `var/bin`, then `PATH`. |
+| `TRIVY_CACHE_DIR` | `./var/trivy-db` | Trivy's ~1.7 GB database. **A volume in a container.** |
+| `TRIVY_DB_REPOSITORY` | `mirror.gcr.io/aquasec/trivy-db:2` | Where Trivy pulls its database. Point at an internal registry mirror if needed. |
+| `OSV_SCANNER_PATH` | unset | Explicit osv-scanner binary path. |
+| `OSV_DB_DIR` | `./var/osv-db` | The per-ecosystem OSV archives. **A volume in a container.** |
+| `OSV_SKIP_DISTROS` | `ubuntu` | Distributions not sent to OSV (or downloaded for it). See below. |
+
+The timeouts and the CA directory (`GRYPE_DB_CA_DIR`) apply to all three local scanners.
 
 Whether scanning is **on**, and the check interval, are not here - they are admin-editable
 rows in `setting`, because they are runtime decisions rather than deployment ones.

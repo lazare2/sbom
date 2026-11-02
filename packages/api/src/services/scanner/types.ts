@@ -1,4 +1,4 @@
-import type { VulnDbUpdateOutcome } from "@sbom/shared";
+import type { VulnDbUpdateOutcome, VulnScannerStatus } from "@sbom/shared";
 import type { ParsedFinding, ScannablePackage } from "./grype-output.js";
 
 export type { ParsedFinding, ScannablePackage };
@@ -110,4 +110,8 @@ export interface VulnerabilityScanner {
   importDb(archivePath: string): Promise<DbUpdateResult>;
   /** Matches one batch of packages. Throws only if the batch itself cannot be processed. */
   match(packages: readonly ScannablePackage[]): Promise<MatchResult>;
+  /** Per-scanner state, for a scanner made of several. Absent on a single scanner. */
+  memberStatuses?(): Promise<VulnScannerStatus[]>;
+  /** Drop cached state after a settings change. */
+  invalidate?(): void;
 }

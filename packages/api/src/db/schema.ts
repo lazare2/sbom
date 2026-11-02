@@ -20,6 +20,7 @@ import type {
   Attributes,
   AttributeType,
   AuthProviderName,
+  FindingSourceDetail,
   FixState,
   MaliciousAckState,
   MaliciousFeedOutcome,
@@ -936,8 +937,11 @@ export const component = pgTable(
      *
      * Null means the component predates this column, which is indistinguishable from
      * "assessed by nobody" and correctly re-queues it once.
+     *
+     * Since findings are merged from several scanners this holds the set that assessed the
+     * component, e.g. `grype+trivy+osv`, rather than one provider name.
      */
-    vulnProvider: text("vuln_provider").$type<VulnProvider>(),
+    vulnProvider: text("vuln_provider"),
 
     /**
      * The same derived-work-queue pattern as the two columns above, for malicious-package
@@ -1381,6 +1385,14 @@ export const componentVulnerability = pgTable(
     fixVersions: text("fix_versions").array().notNull().default([]),
     /** Grype's match type, e.g. `exact-direct-match` - why it believes this matches. */
     matchType: text("match_type"),
+    /** The scanners that reported this pairing; their findings are merged into this row. */
+    foundBy: text("found_by").array().notNull().default([]),
+    /**
+     * What each of those scanners said: its own advisory id, severity, fix state, fix
+     * versions and matched range. Kept because the disagreements are the useful part -
+     * "no fix" from one and "fixed in 7.0.9" from another says the fix is on a later line.
+     */
+    sourceDetails: jsonb("source_details").$type<FindingSourceDetail[]>().notNull().default([]),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
     /** Last sweep that still reported this pairing; lets a withdrawn advisory be pruned. */
     lastConfirmedAt: timestamp("last_confirmed_at", { withTimezone: true }).notNull().defaultNow(),

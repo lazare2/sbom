@@ -207,6 +207,55 @@ const envSchema = z
       .min(1024 * 1024)
       .default(1024 * 1024 * 1024),
 
+    /**
+     * Trivy, the second local scanner. Same resolution rules as grype: this path, then
+     * `var/bin`, then PATH. Its findings are merged with Grype's and OSV's.
+     */
+    TRIVY_PATH: z.string().trim().optional().or(z.literal("").transform(() => undefined)),
+
+    /** Trivy's cache, holding its ~1.7 GB database. A mounted volume in a container. */
+    TRIVY_CACHE_DIR: z.string().default("./var/trivy-db"),
+
+    /**
+     * Where Trivy downloads its database from: an OCI registry repository.
+     *
+     * Trivy's own default is `mirror.gcr.io/aquasec/trivy-db:2`, which is what a firewall
+     * has to allow. Point it at an internal registry mirror to keep the traffic inside.
+     */
+    TRIVY_DB_REPOSITORY: z.string().trim().default("mirror.gcr.io/aquasec/trivy-db:2"),
+
+    /** osv-scanner, the third local scanner. Same resolution rules as grype. */
+    OSV_SCANNER_PATH: z.string().trim().optional().or(z.literal("").transform(() => undefined)),
+
+    /**
+     * Where the per-ecosystem OSV database archives are kept. A mounted volume in a container.
+     *
+     * osv-scanner downloads them itself, from `osv-vulnerabilities.storage.googleapis.com` -
+     * the one address a firewall has to allow for OSV, and a different one from the
+     * malicious-package feed, which is a GitHub archive.
+     */
+    OSV_DB_DIR: z.string().default("./var/osv-db"),
+
+    /**
+     * Linux distributions whose packages are not sent to OSV, comma-separated, by the
+     * namespace in their purl (`pkg:deb/ubuntu/...`).
+     *
+     * Ubuntu by default, measured: OSV's Ubuntu archive is ~800 MB, and osv-scanner took 291
+     * seconds just to load it for a single package - every batch holding one Ubuntu package
+     * paid that, and timed out. The data is a conversion of Canonical's own security notices,
+     * which Grype and Trivy both read directly, so Ubuntu packages stay covered twice. Set it
+     * empty to send them anyway.
+     */
+    OSV_SKIP_DISTROS: z
+      .string()
+      .default("ubuntu")
+      .transform((v) =>
+        v
+          .split(",")
+          .map((s) => s.trim().toLowerCase())
+          .filter((s) => s !== ""),
+      ),
+
     /** Comma-separated extra origins allowed to send credentialed requests. */
     CORS_ORIGINS: z
       .string()

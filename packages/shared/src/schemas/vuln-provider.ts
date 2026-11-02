@@ -28,6 +28,77 @@ export const VULN_PROVIDER_LABELS: Record<VulnProvider, string> = {
 };
 
 /**
+ * The scanners whose findings are merged.
+ *
+ * ## Why several, and why merged
+ *
+ * Each database is assembled differently and none is complete. On spring-webflux 6.2.0,
+ * Grype reported CVE-2026-47892 with no fix because GitHub's advisory records the 6.2 line as
+ * "last affected 6.2.19" - the 6.2.20 fix is a commercial release - while Trivy reported the
+ * open-source fix on the next line, 7.0.9. Matching every package against several databases
+ * and keeping the union is how one database's gap stops being the estate's blind spot.
+ *
+ * ## How the same flaw is recognised across them
+ *
+ * They name advisories differently - Grype a GHSA with the CVE as an alias, Trivy the CVE
+ * with the GHSA as a vendor id, OSV a GHSA or a distro id with the CVE upstream, Xray its own
+ * issue id with the CVE list. Findings on one package are merged when they share any of
+ * those names, and the merged finding keeps the id the platform already uses for it, so
+ * accepted risks and history carry over. See `mergeFindings` in the API.
+ *
+ * Every merged finding records which scanners reported it (`foundBy`), and what each one said
+ * about severity and fix (`sources`). Severity is the highest any of them reported.
+ */
+export const vulnScanners = ["grype", "trivy", "osv", "xray"] as const;
+export const vulnScannerSchema = z.enum(vulnScanners);
+export type VulnScanner = z.infer<typeof vulnScannerSchema>;
+
+export const VULN_SCANNER_LABELS: Record<VulnScanner, string> = {
+  grype: "Grype",
+  trivy: "Trivy",
+  osv: "OSV.dev",
+  xray: "JFrog Xray",
+};
+
+/** Which scanners run. Grype, Trivy and OSV by default; Xray only when an administrator ticks it. */
+export const vulnScannerSettingsSchema = z
+  .object({
+    grype: z.boolean(),
+    trivy: z.boolean(),
+    osv: z.boolean(),
+    xray: z.boolean(),
+  })
+  .refine((v) => v.grype || v.trivy || v.osv || v.xray, {
+    message: "At least one scanner must stay switched on.",
+  });
+export type VulnScannerSettings = z.infer<typeof vulnScannerSettingsSchema>;
+
+export const DEFAULT_VULN_SCANNERS: VulnScannerSettings = {
+  grype: true,
+  trivy: true,
+  osv: true,
+  xray: false,
+};
+
+/** One scanner's state, for the admin screen. */
+export interface VulnScannerStatus {
+  name: VulnScanner;
+  enabled: boolean;
+  /** Binary found (or, for Xray, server answering). */
+  available: boolean;
+  version: string | null;
+  /** Why it is not usable, when it is not. */
+  problem: string | null;
+  database: {
+    present: boolean;
+    builtAt: string | null;
+    path: string | null;
+  };
+  /** Where its database comes from - the address a firewall has to allow. */
+  updateSource: string | null;
+}
+
+/**
  * A hostname the platform will make authenticated requests to, and nothing else.
  *
  * Narrow for the same reason the SMTP host is: this value is handed to an HTTP client with a
@@ -166,7 +237,7 @@ export interface XrayDiagnosis {
   coverage: XrayCoverage | null;
 }
 
-export const setVulnProviderSchema = z.object({ provider: vulnProviderSchema });
+export const setVulnProviderSchema = z.object({ scanners: vulnScannerSettingsSchema });
 export type SetVulnProvider = z.infer<typeof setVulnProviderSchema>;
 
 /**
@@ -184,7 +255,7 @@ export type TestXrayConnection = z.infer<typeof testXrayConnectionSchema>;
 
 /** What the admin screen reads back about the active database and its connection. */
 export interface VulnProviderSettings {
-  provider: VulnProvider;
+  scanners: VulnScannerSettings;
   xray: XraySettings;
   /** False when SECRETS_KEY is unset, so the screen can say why a token cannot be saved. */
   secretsKeyConfigured: boolean;

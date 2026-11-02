@@ -11,9 +11,10 @@ import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { SEVERITY_ORDER, SeverityBadge, ScanningDisabledNotice } from "../components/Severity.tsx";
-import { advisorySort, sortDirections } from "@sbom/shared";
-import { useServerSort } from "../lib/useSort.ts";
-import { advisoryHeadline, cweName, cweUrl, decodeCvss, groupReferences, REFERENCE_KIND_LABELS } from "../lib/advisory.ts";
+import { advisorySort, sortDirections, VULN_SCANNER_LABELS } from "@sbom/shared";
+import { useServerSort } from "../lib/useSort.ts";
+import { FixCell, FoundBy } from "../components/ScannerSources.tsx";
+import { advisoryHeadline, cweName, cweUrl, decodeCvss, groupReferences, REFERENCE_KIND_LABELS } from "../lib/advisory.ts";
 import { ExportTableButton, exportDate, exportList, fetchAllPages, type ExportColumn } from "../components/ExportTable.tsx";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import {
@@ -291,6 +292,7 @@ export function VulnerabilitiesPage() {
                               exploited
                             </Badge>
                           ) : null}
+                          <FoundBy scanners={advisory.foundBy} />
                         </div>
                       </Td>
                       <Td className="max-w-[520px] text-text-muted" title={advisory.description ?? undefined}>
@@ -513,13 +515,18 @@ function ImpactTable({
                     </span>
                   </Td>
                   <Td>
-                    {row.packages.some((p) => p.fixVersions.length > 0) ? (
-                      <Mono>
-                        {row.packages.flatMap((p) => p.fixVersions).slice(0, 2).join(", ")}
-                      </Mono>
-                    ) : (
-                      <span className="text-xs text-text-faint">no fix</span>
-                    )}
+                    {/* One cell per package, so each fix is read against its own version. */}
+                    <span className="flex flex-col gap-1">
+                      {row.packages.map((pkg) => (
+                        <FixCell
+                          key={pkg.componentId}
+                          fixState={pkg.fixState}
+                          fixVersions={pkg.fixVersions}
+                          installed={pkg.version}
+                          sources={pkg.sources}
+                        />
+                      ))}
+                    </span>
                   </Td>
                   <Td>
                     <Link
@@ -557,6 +564,7 @@ const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
   { header: "Applications now", value: (a) => exportList(a.currentApplicationList), width: 40 },
   { header: "Apps dropped", value: (a) => a.historicalApplications, width: 12 },
   { header: "Fix available", value: (a) => (a.fixAvailable ? "yes" : "no"), width: 12 },
+  { header: "Found by", value: (a) => exportList(a.foundBy.map((s) => VULN_SCANNER_LABELS[s])), width: 22 },
   { header: "References", value: (a) => exportList(a.urls), width: 50 },
 ];
 
@@ -616,6 +624,9 @@ function AdvisoryAboutCard({ advisory }: { advisory: AdvisoryDetail }) {
           </Field>
           <Field label="Also known as">
             {advisory.aliases.length > 0 ? <Mono>{advisory.aliases.join(", ")}</Mono> : " - "}
+          </Field>
+          <Field label="Reported by">
+            {advisory.foundBy.length > 0 ? advisory.foundBy.map((s) => VULN_SCANNER_LABELS[s]).join(", ") : " - "}
           </Field>
         </dl>
 

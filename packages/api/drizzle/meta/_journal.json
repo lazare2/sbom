@@ -176,6 +176,13 @@
       "when": 1793610609203,
       "tag": "0024_vulnerability_summary_cwes",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793613635013,
+      "tag": "0025_merged_scanner_findings",
+      "breakpoints": true
     }
   ]
 }

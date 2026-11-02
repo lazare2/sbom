@@ -39,6 +39,19 @@ describe("explaining why the sweep cannot run", () => {
     expect(message).not.toContain("grype");
   });
 
+  it("lists every scanner's reason when none of the merged scanners can run", () => {
+    const message = unavailableMessage(
+      "composite",
+      availability({
+        attempts: [
+          { strategy: "grype", location: "grype", reason: "Grype: not present" },
+          { strategy: "trivy", location: "trivy", reason: "Trivy: no database installed" },
+        ],
+      }),
+    );
+    expect(message).toBe("No vulnerability scanner can run. Grype: not present Trivy: no database installed");
+  });
+
   it("still names the binary under grype", () => {
     expect(unavailableMessage("grype", availability())).toContain("grype binary");
   });

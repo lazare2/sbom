@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import type { Paginated, SortDirection, VulnBreakdown, VulnerabilityFinding, VulnSeverity } from "@sbom/shared";
 import {
+  VULN_SCANNER_LABELS,
   findingSort,
   requiresJustification,
   vexJustifications,
@@ -17,7 +18,8 @@ import { useAuth } from "../auth/AuthProvider.tsx";
 import { useCreateSuppression } from "../lib/mutations.ts";
 import { formatNumber } from "../lib/format.ts";
 import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
-import { advisoryHeadline } from "../lib/advisory.ts";
+import { advisoryHeadline } from "../lib/advisory.ts";
+import { FixCell, FoundBy } from "./ScannerSources.tsx";
 import { ExportTableButton, exportList, fetchAllPages, locationColumns, type ExportColumn } from "./ExportTable.tsx";
 import { SEVERITY_ORDER, SeverityBadge, SeverityBar } from "./Severity.tsx";
 import {
@@ -287,6 +289,7 @@ export function FindingsTable({
                         {advisoryHeadline(finding)}
                       </span>
                     ) : null}
+                    <FoundBy scanners={finding.foundBy} />
                     <span className="flex flex-wrap gap-1">
                       {finding.knownExploited ? (
                         <Badge tone="danger" title="On CISA's Known Exploited Vulnerabilities list.">
@@ -329,15 +332,12 @@ export function FindingsTable({
                   </div>
                 </Td>
                 <Td>
-                  {finding.fixVersions.length > 0 ? (
-                    <Mono title={finding.fixVersions.join(", ")}>{finding.fixVersions[0]}</Mono>
-                  ) : finding.fixState === "wont-fix" ? (
-                    <span className="text-xs text-warn" title="Upstream will not fix this.">
-                      won't fix
-                    </span>
-                  ) : (
-                    <span className="text-xs text-text-faint">no fix yet</span>
-                  )}
+                  <FixCell
+                    fixState={finding.fixState}
+                    fixVersions={finding.fixVersions}
+                    installed={finding.componentVersion}
+                    sources={finding.sources}
+                  />
                 </Td>
                 <Td className="nums text-text-muted">{finding.cvssBaseScore?.toFixed(1) ?? " - "}</Td>
                 {isAdmin ? (
@@ -568,6 +568,15 @@ export const FINDING_EXPORT_COLUMNS: ExportColumn<VulnerabilityFinding>[] = [
   { header: "Kind", value: (f) => f.kind, width: 10 },
   { header: "Fix state", value: (f) => f.fixState, width: 12 },
   { header: "Fixed in", value: (f) => exportList(f.fixVersions), width: 20 },
+  { header: "Found by", value: (f) => exportList(f.foundBy.map((s) => VULN_SCANNER_LABELS[s])), width: 22 },
+  {
+    header: "Per scanner",
+    value: (f) =>
+      f.sources
+        .map((s) => `${VULN_SCANNER_LABELS[s.scanner]}: ${s.fixVersions.length > 0 ? `fixed in ${s.fixVersions.join(", ")}` : s.fixState}${s.affectedRange ? ` (affects ${s.affectedRange})` : ""}`)
+        .join("; "),
+    width: 60,
+  },
   { header: "CVSS", value: (f) => f.cvssBaseScore, width: 7 },
   { header: "EPSS", value: (f) => f.epssScore, width: 8 },
   { header: "Known exploited", value: (f) => (f.knownExploited ? "yes" : "no"), width: 14 },

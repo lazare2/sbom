@@ -155,7 +155,7 @@ export class VulnDbService {
       this.deps.scanner.dbStatus(),
     ]);
 
-    const [last, lastSuccessful, inProgress, coverage, listingUrl] = await Promise.all([
+    const [last, lastSuccessful, inProgress, coverage, listingUrl, scanners] = await Promise.all([
       this.lastAttempt(false),
       this.lastAttempt(true),
       this.isUpdateInProgress(),
@@ -165,6 +165,7 @@ export class VulnDbService {
         // Falls back to the configured base if the binary cannot be asked for its
         // schema. Showing the wrong-but-close URL beats showing none.
         .catch(() => this.listingUrlFallback()),
+      this.deps.scanner.memberStatuses?.() ?? Promise.resolve([]),
     ]);
 
     const ageHours =
@@ -186,6 +187,7 @@ export class VulnDbService {
 
     return {
       enabled: settings.enabled,
+      scanners,
       scanner: {
         available: availability.available,
         version: availability.version,
@@ -394,8 +396,8 @@ export class VulnDbService {
       return {
         outcome: "failed",
         message:
-          "The grype binary is not available, so the vulnerability database cannot be updated. " +
-          "See the scanner status for where it was looked for.",
+          "No vulnerability scanner is available, so no database can be updated. " +
+          "See the scanner status for where each one was looked for.",
         attempt: null,
         databaseChanged: false,
       };
@@ -449,7 +451,7 @@ export class VulnDbService {
     if (!availability.available) {
       return {
         outcome: "failed",
-        message: "The grype binary is not available, so a database cannot be imported.",
+        message: "No vulnerability scanner is available, so a database cannot be imported.",
         attempt: null,
         databaseChanged: false,
       };

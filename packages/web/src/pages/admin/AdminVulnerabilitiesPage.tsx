@@ -7,10 +7,13 @@ import type {
   VexStatus,
   VulnDbUpdateAttempt,
   VulnScanStatus,
+  VulnScanner,
   XrayCoverage,
   XrayDiagnosis,
 } from "@sbom/shared";
 import {
+  vulnScanners,
+  VULN_SCANNER_LABELS,
   requiresJustification,
   xrayUrlIsPlaintext,
   vexJustifications,
@@ -85,9 +88,8 @@ export function AdminVulnerabilitiesPage() {
 
   return (
     <div className="space-y-4">
-      <ProviderCard />
+      <ProviderCard status={status} />
       <EnableCard status={status} />
-      <ScannerCard status={status} />
       <DatabaseCard status={status} />
       <CoverageCard status={status} />
       <HistoryCard />
@@ -116,7 +118,15 @@ export function AdminVulnerabilitiesPage() {
  * would be unreadable: it could mean a clean image or an unasked question, and on a typical
  * container image two thirds of the packages are operating-system ones.
  */
-function ProviderCard() {
+/** What each scanner is, in one line, for the row that switches it. */
+const SCANNER_DESCRIPTIONS: Record<VulnScanner, string> = {
+  grype: "Anchore's database: GitHub advisories, NVD and every major Linux distribution's security feed.",
+  trivy: "Aqua Security's database: the same upstream feeds assembled independently, with vendor fix data for many more releases.",
+  osv: "OSV.dev, Google's open vulnerability database, matched locally from downloaded copies.",
+  xray: "Your organisation's JFrog Xray, queried over the network. Off unless you switch it on.",
+};
+
+function ProviderCard({ status }: { status: VulnScanStatus }) {
   const query = useVulnProvider();
   const setProvider = useSetVulnProvider();
   const saveConnection = useSetXrayConnection();
@@ -155,7 +165,7 @@ function ProviderCard() {
     );
   }
 
-  const active = settings.provider;
+  const scanners = settings.scanners;
   const connection = settings.xray.connection;
   const coverage = settings.xray.coverage;
   /* A saved token may be kept; a connection that has never had one must be given one. */
@@ -174,28 +184,77 @@ function ProviderCard() {
   return (
     <Card>
       <CardHeader
-        title="Vulnerability database"
-        subtitle="Which database findings are matched against. One at a time - the two identify the same advisory differently, so their numbers are never mixed."
+        title="Scanners"
+        subtitle="Every package is matched against each switched-on scanner and their findings are merged: the same flaw reported by several is one finding, at the highest severity any of them gave, with every fix any of them knows. Each finding shows which scanners reported it."
       />
       <div className="space-y-4 p-4">
-        <div className="flex flex-col gap-1.5">
-          <Checkbox
-            checked={active === "grype"}
-            onChange={() => setProvider.mutate("grype")}
-            disabled={setProvider.isPending}
-            label="Grype - a local database this platform downloads and keeps"
-          />
-          <Checkbox
-            checked={active === "xray"}
-            onChange={() => setProvider.mutate("xray")}
-            /*
-              Not selectable until a connection exists. The server refuses it anyway; a
-              checkbox that fails with a validation error is worse than one that explains
-              why it is unavailable.
-            */
-            disabled={setProvider.isPending || !connection?.tokenConfigured}
-            label="JFrog Xray - your organisation's own database, queried over the network"
-          />
+        <div className="overflow-hidden rounded-md border border-border-base">
+          <ul className="divide-y divide-border-base">
+            {vulnScanners.map((name) => {
+              const state = status.scanners.find((s) => s.name === name);
+              const on = scanners[name];
+              const onlyOneLeft = on && vulnScanners.filter((n) => scanners[n]).length === 1;
+              const xrayLocked = name === "xray" && !on && !connection?.tokenConfigured;
+              return (
+                <li key={name} className="flex flex-wrap items-start gap-x-4 gap-y-2 px-3 py-3">
+                  <div className="min-w-[220px] flex-1">
+                    <Checkbox
+                      checked={on}
+                      onChange={(next) => setProvider.mutate({ ...scanners, [name]: next })}
+                      /*
+                        The last one cannot be switched off - there would be nothing to match
+                        against - and Xray cannot be switched on before a connection exists;
+                        the server refuses both, and a box that fails is worse than one that
+                        says why it is unavailable.
+                      */
+                      disabled={setProvider.isPending || onlyOneLeft || xrayLocked}
+                      label={VULN_SCANNER_LABELS[name]}
+                    />
+                    <p className="mt-0.5 pl-5 text-[11px] text-text-faint">{SCANNER_DESCRIPTIONS[name]}</p>
+                    {xrayLocked ? (
+                      <p className="mt-0.5 pl-5 text-[11px] text-text-muted">Save and test a connection below first.</p>
+                    ) : null}
+                  </div>
+                  <div className="min-w-[260px] flex-[2] text-xs">
+                    {!on ? (
+                      <span className="text-text-faint">Switched off</span>
+                    ) : !state ? (
+                      <span className="text-text-faint">Checking…</span>
+                    ) : state.problem ? (
+                      <span className="text-warn">{state.problem}</span>
+                    ) : (
+                      <span className="text-ok">Ready</span>
+                    )}
+                    {state && on ? (
+                      <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px] text-text-muted">
+                        <dt className="text-text-faint">Version</dt>
+                        <dd>{state.version ?? " - "}</dd>
+                        <dt className="text-text-faint">Database</dt>
+                        <dd>
+                          {state.database.builtAt ? (
+                            <span title={formatDateTime(state.database.builtAt)}>
+                              {name === "xray" ? "assessed " : name === "osv" ? "updated " : "built "}
+                              {formatRelative(state.database.builtAt)}
+                            </span>
+                          ) : (
+                            "not downloaded yet"
+                          )}
+                        </dd>
+                        {state.updateSource ? (
+                          <>
+                            <dt className="text-text-faint">{name === "xray" ? "Server" : "Downloads from"}</dt>
+                            <dd>
+                              <Mono>{state.updateSource}</Mono>
+                            </dd>
+                          </>
+                        ) : null}
+                      </dl>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </div>
 
         <FormError error={setProvider.error} />
@@ -205,9 +264,11 @@ function ProviderCard() {
           administrator who does not know that will not try it.
         */}
         <p className="text-xs text-text-muted">
-          Switching re-assesses every package against the new database. Existing findings are
-          kept but not counted while the other database is active, so figures read “not
-          assessed” until the sweep catches up - and switching back restores them.
+          Changing which scanners run re-assesses every package. A scanner that is switched on
+          but cannot run yet - its database not downloaded, its address not yet allowed through
+          the firewall - is left out until it can, and the estate is re-assessed again when it
+          joins. Each scanner downloads its own database through the proxy configured for this
+          service, and a certificate in the CA directory is trusted by all of them.
         </p>
 
         <div className="space-y-3 border-t border-border-base pt-4">
@@ -443,58 +504,6 @@ function EnableCard({ status }: { status: VulnScanStatus }) {
 // Scanner
 // ---------------------------------------------------------------------------
 
-function ScannerCard({ status }: { status: VulnScanStatus }) {
-  const { scanner } = status;
-  return (
-    <Card>
-      <CardHeader
-        title="Scanner"
-        subtitle="The Grype binary. Ships inside the container image; on a native install it is found on PATH or in var/bin."
-        actions={
-          scanner.available ? (
-            <Badge tone="ok">Available</Badge>
-          ) : (
-            <Badge tone="danger">Not found</Badge>
-          )
-        }
-      />
-      <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-        <Field label="Version">{scanner.version ?? " - "}</Field>
-        <Field label="Resolved by">{scanner.resolvedBy ?? " - "}</Field>
-        <div className="col-span-2">
-          <Field label="Path">
-            <Mono title={scanner.path ?? undefined}>{scanner.path ?? " - "}</Mono>
-          </Field>
-        </div>
-      </dl>
-
-      {!scanner.available && scanner.attempts.length > 0 ? (
-        <div className="border-t border-border-base px-4 py-3">
-          {/*
-            Every rule that was tried and why it failed. This is the difference between a
-            setup someone completes in two minutes and one they give up on - "not found"
-            alone tells nobody where to put the binary.
-          */}
-          <p className="mb-2 text-xs font-medium text-text-muted">Where it was looked for</p>
-          <ul className="space-y-1">
-            {scanner.attempts.map((attempt) => (
-              <li key={attempt.strategy} className="text-xs text-text-muted">
-                <span className="font-medium text-text-base">{attempt.strategy}</span>{" "}
-                <Mono>{attempt.location}</Mono> - {attempt.reason}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-xs text-text-muted">
-            On a native install run <Mono>npm run grype:install</Mono>, or set{" "}
-            <Mono>GRYPE_PATH</Mono> to an existing binary. The path is an environment setting
-            rather than a field here, because it decides which executable the server runs.
-          </p>
-        </div>
-      ) : null}
-    </Card>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
@@ -515,8 +524,8 @@ function DatabaseCard({ status }: { status: VulnScanStatus }) {
   return (
     <Card>
       <CardHeader
-        title="Vulnerability database"
-        subtitle="Downloaded from Anchore at runtime, not shipped in the image - it is about 1.9 GB expanded and is rebuilt daily, so a bundled copy would arrive stale."
+        title="Vulnerability databases"
+        subtitle="Each scanner keeps its own database, downloaded at runtime rather than shipped in the image - together several gigabytes, each rebuilt daily, so a bundled copy would arrive stale. Update now refreshes every switched-on scanner's."
         actions={
           database.present ? (
             stale ? (
@@ -540,7 +549,7 @@ function DatabaseCard({ status }: { status: VulnScanStatus }) {
           )}
         </Field>
         <Field label="Built">{database.builtAt ? formatDateTime(database.builtAt) : " - "}</Field>
-        <Field label="Schema">{database.schemaVersion ?? " - "}</Field>
+        <Field label="Scanners in use">{database.schemaVersion?.split("+").join(", ") ?? " - "}</Field>
         <Field label="Age">
           {database.ageHours === null
             ? " - "
@@ -549,7 +558,7 @@ function DatabaseCard({ status }: { status: VulnScanStatus }) {
               : `${Math.round(database.ageHours / 24)} days`}
         </Field>
         <div className="col-span-2 sm:col-span-4">
-          <Field label="Update source">
+          <Field label="Update sources">
             <Mono>{updates.listingUrl}</Mono>
           </Field>
         </div>
@@ -584,7 +593,7 @@ function DatabaseCard({ status }: { status: VulnScanStatus }) {
         <input
           ref={fileInput}
           type="file"
-          accept=".tar.zst,.zst,.tar,application/octet-stream"
+          accept=".tar.zst,.zst,.tar,.tar.gz,.tgz,application/octet-stream"
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -593,8 +602,9 @@ function DatabaseCard({ status }: { status: VulnScanStatus }) {
           }}
         />
         <p className="text-xs text-text-faint">
-          Import is for machines with no internet access - download the archive elsewhere and upload
-          it here.
+          Import is for machines with no internet access - download Grype's <Mono>.tar.zst</Mono>{" "}
+          or Trivy's <Mono>db.tar.gz</Mono> elsewhere and upload it here. OSV databases can only be
+          downloaded.
         </p>
       </div>
 

@@ -103,6 +103,15 @@ services:
       GRYPE_DB_UPDATE_URL: ${GRYPE_DB_UPDATE_URL:-https://grype.anchore.io/databases}
       # For a mirror behind a TLS-inspecting proxy or a private CA.
       GRYPE_DB_CA_CERT: ${GRYPE_DB_CA_CERT:-}
+      # Trivy and osv-scanner run beside Grype and their findings are merged. Each keeps its
+      # database on a volume and downloads it itself, through the proxy above, from the one
+      # address a firewall has to allow for it:
+      #   Trivy        mirror.gcr.io (an OCI registry; override with an internal mirror)
+      #   osv-scanner  osv-vulnerabilities.storage.googleapis.com
+      # A certificate in the CA directory below is trusted by all three.
+      TRIVY_CACHE_DIR: /data/trivy-db
+      TRIVY_DB_REPOSITORY: ${TRIVY_DB_REPOSITORY:-mirror.gcr.io/aquasec/trivy-db:2}
+      OSV_DB_DIR: /data/osv-db
     volumes:
       # Raw SBOM blobs. The single most important thing to back up after the
       # database - scan rows reference blobs by key and cannot regenerate them.
@@ -111,6 +120,9 @@ services:
       # the old copy alongside the new archive and its expansion. Not worth backing up
       # - it is reproducible from upstream and stale within a day.
       - grype-db:/data/grype-db
+      # Trivy's database is ~1.7 GB; OSV's archives are a few hundred MB per ecosystem.
+      - trivy-db:/data/trivy-db
+      - osv-db:/data/osv-db
       # Read-only mount for a corporate / private CA, for GRYPE_DB_CA_CERT.
       #
       # A TLS-inspecting proxy re-signs every connection with its own authority, and grype
@@ -142,3 +154,5 @@ volumes:
   db-data:
   sbom-blobs:
   grype-db:
+  trivy-db:
+  osv-db:

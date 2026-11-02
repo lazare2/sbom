@@ -1,4 +1,4 @@
-import type { FixState, VulnSeverity } from "@sbom/shared";
+import type { FindingSourceDetail, FixState, VulnScanner, VulnSeverity } from "@sbom/shared";
 
 /**
  * Parsing of Grype's JSON report into normalised findings.
@@ -43,6 +43,16 @@ export interface ParsedFinding {
   fixState: FixState;
   fixVersions: string[];
   matchType: string | null;
+  /** The scanner that reported it. */
+  source: VulnScanner;
+  /** The version range the scanner matched on, e.g. `>=6.2.0,<=6.2.19`, when it says. */
+  affectedRange: string | null;
+  /**
+   * Set only on a merged finding: every scanner that reported it, and what each said.
+   * A finding straight from one scanner leaves these unset and is its own only source.
+   */
+  foundBy?: VulnScanner[];
+  sources?: FindingSourceDetail[];
 }
 
 export interface ParsedReport {
@@ -416,10 +426,17 @@ export function parseGrypeReport(raw: string): ParsedReport {
     const fix = typeof v.fix === "object" && v.fix !== null ? (v.fix as { state?: unknown; versions?: unknown }) : {};
 
     let matchType: string | null = null;
+    let affectedRange: string | null = null;
     if (Array.isArray(m.matchDetails) && m.matchDetails.length > 0) {
       const first = m.matchDetails[0];
       if (typeof first === "object" && first !== null) {
         matchType = asString((first as { type?: unknown }).type, 64);
+        const found = (first as { found?: unknown }).found;
+        if (typeof found === "object" && found !== null) {
+          // ">=6.2.0,<=6.2.19 (unknown)": the parenthesised part is the version scheme.
+          affectedRange =
+            asString((found as { versionConstraint?: unknown }).versionConstraint, 256)?.replace(/\s*\([^)]*\)\s*$/, "") || null;
+        }
       }
     }
 
@@ -444,6 +461,8 @@ export function parseGrypeReport(raw: string): ParsedReport {
       fixState: toFixState(fix.state),
       fixVersions: asStringArray(fix.versions, 16),
       matchType,
+      source: "grype",
+      affectedRange,
     });
   }
 

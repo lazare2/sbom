@@ -35,7 +35,7 @@ import type {
   SetUserApplicationAccess,
   UserApplicationAccess,
   UserSummary,
-  VulnProvider,
+  VulnScannerSettings,
   VulnProviderSettings,
   VulnScanStatus,
   OidcConnectionInput,
@@ -332,8 +332,8 @@ function invalidateVulnProvider(qc: QueryClient): Promise<unknown> {
 export function useSetVulnProvider() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (provider: VulnProvider) =>
-      api.put<VulnProviderSettings>("/admin/vuln/provider", { provider }),
+    mutationFn: (scanners: VulnScannerSettings) =>
+      api.put<VulnProviderSettings>("/admin/vuln/provider", { scanners }),
     onSuccess: () => {
       void invalidateVulnProvider(qc);
     },

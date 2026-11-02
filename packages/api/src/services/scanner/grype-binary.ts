@@ -42,7 +42,27 @@ export interface BinaryResolution {
   attempts: ResolutionAttempt[];
 }
 
-const EXECUTABLE = process.platform === "win32" ? "grype.exe" : "grype";
+/** A scanner executable this platform knows how to find. */
+export interface ToolSpec {
+  /** Base name of the executable, without `.exe`. */
+  name: string;
+  /** The environment variable that names it explicitly. */
+  envVar: string;
+  /** How to get it into `var/bin` on a development machine. */
+  installHint: string;
+}
+
+export const GRYPE_TOOL: ToolSpec = { name: "grype", envVar: "GRYPE_PATH", installHint: "npm run grype:install" };
+export const TRIVY_TOOL: ToolSpec = { name: "trivy", envVar: "TRIVY_PATH", installHint: "npm run scanners:install" };
+export const OSV_SCANNER_TOOL: ToolSpec = {
+  name: "osv-scanner",
+  envVar: "OSV_SCANNER_PATH",
+  installHint: "npm run scanners:install",
+};
+
+function executableName(tool: ToolSpec): string {
+  return process.platform === "win32" ? `${tool.name}.exe` : tool.name;
+}
 
 /** True when the path exists and is executable by this process. */
 async function isExecutable(candidate: string): Promise<boolean> {
@@ -64,12 +84,12 @@ async function isExecutable(candidate: string): Promise<boolean> {
  * container image places it on PATH instead, so this rule is really about the
  * development and offline-bundle cases.
  */
-function bundledCandidates(): string[] {
+function bundledCandidates(executable: string): string[] {
   const cwd = process.cwd();
   return [
     // Running from packages/api (npm run dev) or from the repo root.
-    path.resolve(cwd, "var", "bin", EXECUTABLE),
-    path.resolve(cwd, "..", "..", "var", "bin", EXECUTABLE),
+    path.resolve(cwd, "var", "bin", executable),
+    path.resolve(cwd, "..", "..", "var", "bin", executable),
   ];
 }
 
@@ -83,6 +103,12 @@ function pathEntries(): string[] {
 }
 
 export async function resolveGrypeBinary(explicitPath?: string | undefined): Promise<BinaryResolution> {
+  return resolveToolBinary(GRYPE_TOOL, explicitPath);
+}
+
+/** The same rules for any scanner executable: its env var, then `var/bin`, then PATH. */
+export async function resolveToolBinary(tool: ToolSpec, explicitPath?: string | undefined): Promise<BinaryResolution> {
+  const EXECUTABLE = executableName(tool);
   const attempts: ResolutionAttempt[] = [];
 
   // --- 1. explicit configuration ------------------------------------------
@@ -94,14 +120,14 @@ export async function resolveGrypeBinary(explicitPath?: string | undefined): Pro
     attempts.push({
       strategy: "config",
       location: resolved,
-      reason: "GRYPE_PATH is set but no executable file is there",
+      reason: `${tool.envVar} is set but no executable file is there`,
     });
   } else {
-    attempts.push({ strategy: "config", location: "GRYPE_PATH", reason: "not set" });
+    attempts.push({ strategy: "config", location: tool.envVar, reason: "not set" });
   }
 
   // --- 2. bundled with the application ------------------------------------
-  for (const candidate of bundledCandidates()) {
+  for (const candidate of bundledCandidates(EXECUTABLE)) {
     if (await isExecutable(candidate)) {
       return { binary: { path: candidate, resolvedBy: "bundled" }, attempts };
     }
@@ -109,7 +135,7 @@ export async function resolveGrypeBinary(explicitPath?: string | undefined): Pro
   attempts.push({
     strategy: "bundled",
     location: path.join("var", "bin", EXECUTABLE),
-    reason: "not present - run `npm run grype:install` to fetch the pinned build",
+    reason: `not present - run \`${tool.installHint}\` to fetch the pinned build`,
   });
 
   // --- 3. PATH -------------------------------------------------------------

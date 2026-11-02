@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import type { VulnProvider } from "@sbom/shared";
+import type { FindingSourceDetail } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import type {
@@ -65,10 +65,14 @@ const FINDING_UPSERT_CHUNK = 1000;
  * `attempts` is where every provider's availability check records why it failed, so the
  * specific reason travels with the summary instead of living only in a log line.
  */
-export function unavailableMessage(provider: VulnProvider, availability: ScannerAvailability): string {
+export function unavailableMessage(scanner: string, availability: ScannerAvailability): string {
+  if (scanner === "composite") {
+    const reasons = availability.attempts.map((a) => a.reason).join(" ");
+    return `No vulnerability scanner can run. ${reasons}`.trim();
+  }
   const detail = availability.attempts[0]?.reason ?? null;
   const summary =
-    provider === "xray"
+    scanner === "jfrog-xray" || scanner === "xray"
       ? `JFrog Xray at ${availability.path ?? "the configured URL"} could not be reached.`
       : "The grype binary is not available.";
   return detail ? `${summary} ${detail}` : summary;
@@ -94,6 +98,18 @@ export function collapsePairings(findings: readonly ParsedFinding[]): ParsedFind
  * where another does not. Keeping the copy that knows about a fix means which duplicate
  * happened to arrive last never silently removes the upgrade an administrator would act on.
  */
+/** A finding straight from one scanner is its own only source. */
+function sourceOf(f: ParsedFinding): FindingSourceDetail {
+  return {
+    scanner: f.source,
+    advisoryId: f.vulnerabilityId,
+    severity: f.severity,
+    fixState: f.fixState,
+    fixVersions: f.fixVersions,
+    affectedRange: f.affectedRange,
+  };
+}
+
 function namesABetterFix(next: ParsedFinding, current: ParsedFinding): boolean {
   if (next.fixVersions.length !== current.fixVersions.length) {
     return next.fixVersions.length > current.fixVersions.length;
@@ -214,8 +230,6 @@ export class SweepService {
       After the guards above, not before, so a tick that declines for any of those reasons
       costs no settings read at all.
     */
-    const provider = await this.deps.settings.vulnProvider();
-
     const availability = await this.deps.scanner.availability();
     if (!availability.available) {
       /*
@@ -229,8 +243,8 @@ export class SweepService {
       return {
         ...empty,
         status: "unavailable",
-        message: unavailableMessage(provider, availability),
-        remaining: await this.pendingCount(null, provider),
+        message: unavailableMessage(this.deps.scanner.name, availability),
+        remaining: await this.pendingCount(null, null),
       };
     }
 
@@ -244,6 +258,12 @@ export class SweepService {
     */
     const dbStatus = await this.deps.scanner.dbStatus();
     const watermark = await this.deps.scanner.watermark();
+    /*
+      What assessed each component, stamped beside the watermark: the set of scanners that
+      ran (`grype+trivy+osv`), or the one scanner's name. Resolved once per run so every
+      statement in it agrees.
+    */
+    const provider = this.deps.scanner.name === "composite" ? (dbStatus.schemaVersion ?? "none") : this.deps.scanner.name;
     if (!dbStatus.present || watermark === null) {
       return {
         ...empty,
@@ -350,8 +370,9 @@ export class SweepService {
    * own -- nothing to migrate, nothing to wipe, and switching back undoes it. The
    * alternative was blending two databases that identify the same advisory differently.
    */
-  private pendingPredicate(watermark: Date | null, provider: VulnProvider) {
-    const wrongProvider = sql`c.vuln_provider IS DISTINCT FROM ${provider}`;
+  /** `provider` null counts every component not assessed against `watermark`, whoever assessed it. */
+  private pendingPredicate(watermark: Date | null, provider: string | null) {
+    const wrongProvider = provider === null ? sql`FALSE` : sql`c.vuln_provider IS DISTINCT FROM ${provider}`;
 
     if (watermark === null) {
       return sql`(c.vuln_scanned_at IS NULL OR c.vuln_db_built_at IS NULL OR ${wrongProvider})`;
@@ -364,7 +385,7 @@ export class SweepService {
     )`;
   }
 
-  private async pendingCount(watermark: Date | null, provider: VulnProvider): Promise<number> {
+  private async pendingCount(watermark: Date | null, provider: string | null): Promise<number> {
     const rows = await this.deps.db.execute<Row<{ pending: number | string }>>(sql`
       SELECT count(*)::int AS pending FROM component c WHERE ${this.pendingPredicate(watermark, provider)}
     `);
@@ -384,7 +405,7 @@ export class SweepService {
    */
   private async claimBatch(
     watermark: Date,
-    provider: VulnProvider,
+    provider: string,
     limit: number,
   ): Promise<ScannablePackage[]> {
     const rows = await this.deps.db.execute<
@@ -512,19 +533,23 @@ export class SweepService {
           ${f.vulnerabilityId},
           ${f.fixState},
           ${sql.param(f.fixVersions)}::text[],
-          ${f.matchType}
+          ${f.matchType},
+          ${sql.param(f.foundBy ?? [f.source])}::text[],
+          ${JSON.stringify(f.sources ?? [sourceOf(f)])}::jsonb
         )`,
       );
 
       await this.deps.db.execute(sql`
         INSERT INTO component_vulnerability (
-          component_id, vulnerability_id, fix_state, fix_versions, match_type
+          component_id, vulnerability_id, fix_state, fix_versions, match_type, found_by, source_details
         )
         VALUES ${sql.join(values, sql`, `)}
         ON CONFLICT (component_id, vulnerability_id) DO UPDATE SET
           fix_state = EXCLUDED.fix_state,
           fix_versions = EXCLUDED.fix_versions,
           match_type = EXCLUDED.match_type,
+          found_by = EXCLUDED.found_by,
+          source_details = EXCLUDED.source_details,
           last_confirmed_at = now()
       `);
     }
@@ -543,7 +568,7 @@ export class SweepService {
   private async markScanned(
     componentIds: readonly number[],
     dbBuiltAt: Date,
-    provider: VulnProvider,
+    provider: string,
   ): Promise<void> {
     if (componentIds.length === 0) return;
     const ids = sql`${sql.param(componentIds)}::bigint[]`;

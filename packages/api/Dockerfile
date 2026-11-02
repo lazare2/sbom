@@ -13,6 +13,24 @@
 # anyone pulled the image. It lives on a volume and is fetched at runtime.
 FROM anchore/grype:v0.115.0 AS grype
 
+# Trivy, the second scanner, the same way: from its official image, pinned by tag.
+FROM aquasec/trivy:0.76.1 AS trivy
+
+# osv-scanner, the third. Its image keeps the binary at no stable path, so the release
+# binary is fetched instead and checked against the SHA-256 the project publishes in
+# osv-scanner_SHA256SUMS - a build that downloads something else stops here.
+FROM alpine:3.20 AS osv
+ARG TARGETARCH
+RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) sum=160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b ;; \
+      arm64) sum=4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7 ;; \
+      *) echo "no pinned osv-scanner for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    wget -qO /osv-scanner "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_${TARGETARCH:-amd64}"; \
+    echo "${sum}  /osv-scanner" | sha256sum -c -; \
+    chmod 0755 /osv-scanner
+
 FROM node:22-alpine AS base
 WORKDIR /app
 # argon2 is a native module and needs a toolchain to compile.
@@ -47,13 +65,16 @@ COPY --from=build /app/packages/api/dist ./packages/api/dist
 # code was built against.
 COPY --from=build /app/packages/api/drizzle ./packages/api/drizzle
 
-# The scanner. On PATH, so binary resolution finds it without configuration.
+# The scanners. On PATH, so binary resolution finds them without configuration. Their
+# findings are merged; see packages/api/src/services/scanner/merge.ts.
 COPY --from=grype /grype /usr/local/bin/grype
+COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
+COPY --from=osv /osv-scanner /usr/local/bin/osv-scanner
 
 # Raw SBOM blobs and the vulnerability database both live on mounted volumes, not in
 # image layers. The database directory is created here so a first start with the volume
 # mounted does not have to make it as an unprivileged user.
-RUN mkdir -p /data/sboms /data/grype-db && chown -R node:node /data
+RUN mkdir -p /data/sboms /data/grype-db /data/trivy-db /data/osv-db && chown -R node:node /data
 USER node
 WORKDIR /app/packages/api
 

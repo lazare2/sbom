@@ -1,92 +1,11 @@
-import type { FastifyBaseLogger } from "fastify";
-import type { Config } from "../../config.js";
-import { GrypeScanner } from "./grype.js";
-import { XrayScanner } from "./xray.js";
 import type {
   DbUpdateResult,
   MatchResult,
   ReachabilityResult,
-  ScannablePackage,
   ScannerAvailability,
   ScannerDbStatus,
   VulnerabilityScanner,
 } from "./types.js";
-
-/**
- * The scanner the rest of the platform holds, which delegates to whichever provider is
- * currently selected.
- *
- * ## Why this exists rather than a factory call
- *
- * `createScanner(config)` ran once, at startup, and the result was injected into the sweep
- * and the database service. That is correct while the choice is made by an environment
- * variable. It stops being correct the moment an administrator can change the provider from
- * a screen: the process would keep talking to the database it was born with until somebody
- * restarted it, and nothing on the admin panel would say so.
- *
- * Resolving per call keeps every existing call site - fourteen of them - unchanged, and
- * means the switch takes effect on the next question anybody asks.
- *
- * ## What happens when Xray is selected but not usable
- *
- * A missing connection, an unreadable token, a rotated `SECRETS_KEY`. None of those are
- * exceptions to throw: the sweep runs on a timer with nothing to catch it, and an admin
- * page that 500s tells an administrator less than one that says the scanner is unavailable.
- * So the resolver falls back to a scanner that reports itself unavailable with the reason,
- * and the sweep declines to run rather than assessing anything.
- *
- * It deliberately does NOT fall back to Grype. Silently matching against a different
- * database than the one selected would produce findings attributed to the wrong provider,
- * and the estate would look assessed when the thing an administrator chose is not working.
- */
-export class ProviderScanner implements VulnerabilityScanner {
-  readonly name = "provider";
-
-  constructor(
-    private readonly deps: {
-      config: Config;
-      logger: FastifyBaseLogger;
-      /** Reads the active provider and, when it is Xray, the connection to use. */
-      resolve: () => Promise<VulnerabilityScanner>;
-    },
-  ) {}
-
-  private active(): Promise<VulnerabilityScanner> {
-    return this.deps.resolve();
-  }
-
-  async availability(): Promise<ScannerAvailability> {
-    return (await this.active()).availability();
-  }
-
-  async dbStatus(): Promise<ScannerDbStatus> {
-    return (await this.active()).dbStatus();
-  }
-
-  async watermark(): Promise<Date | null> {
-    return (await this.active()).watermark();
-  }
-
-  async listingUrl(): Promise<string> {
-    return (await this.active()).listingUrl();
-  }
-
-  async checkReachable(): Promise<ReachabilityResult> {
-    return (await this.active()).checkReachable();
-  }
-
-  async updateDb(): Promise<DbUpdateResult> {
-    return (await this.active()).updateDb();
-  }
-
-  async importDb(archivePath: string): Promise<DbUpdateResult> {
-    return (await this.active()).importDb(archivePath);
-  }
-
-  async match(packages: readonly ScannablePackage[]): Promise<MatchResult> {
-    return (await this.active()).match(packages);
-  }
-}
 
 /**
  * A stand-in for a provider that was chosen but cannot be reached.
@@ -180,36 +99,3 @@ export class UnavailableScanner implements VulnerabilityScanner {
  * epoch both live in settings an administrator can change, and a cached instance would keep
  * using the connection that was configured when the process started.
  */
-export function providerResolver(deps: {
-  config: Config;
-  logger: FastifyBaseLogger;
-  settings: {
-    vulnProvider(): Promise<"grype" | "xray">;
-    xrayCredentials(): Promise<
-      { baseUrl: string; username: string; token: string; allowSelfSigned: boolean } | null
-    >;
-    xrayAssessmentEpoch(): Promise<Date>;
-  };
-}): () => Promise<VulnerabilityScanner> {
-  const grype = new GrypeScanner(deps.config);
-
-  return async () => {
-    const provider = await deps.settings.vulnProvider();
-    if (provider === "grype") return grype;
-
-    const credentials = await deps.settings.xrayCredentials();
-    if (!credentials) {
-      return new UnavailableScanner(
-        deps.config.SECRETS_KEY
-          ? "JFrog Xray is selected but no connection is configured, or the stored API token could not be decrypted. Re-enter it in Administration."
-          : "JFrog Xray is selected but SECRETS_KEY is not set on this deployment, so the stored API token cannot be read.",
-        "settings",
-      );
-    }
-
-    return new XrayScanner(credentials, {
-      logger: deps.logger,
-      assessmentEpoch: await deps.settings.xrayAssessmentEpoch(),
-    });
-  };
-}

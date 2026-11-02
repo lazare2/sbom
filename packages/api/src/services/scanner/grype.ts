@@ -73,6 +73,14 @@ export class GrypeScanner implements VulnerabilityScanner {
    * them. Bundling also means a chain -- root plus intermediate -- works by just dropping
    * both files in.
    */
+  /**
+   * The CA bundle for database downloads, shared with Trivy and osv-scanner: a corporate CA
+   * dropped into GRYPE_DB_CA_DIR has to reach every downloader, not only Grype's.
+   */
+  caCertificate(): Promise<string | null> {
+    return this.resolveCaCert();
+  }
+
   private async resolveCaCert(): Promise<string | null> {
     if (this.caCert !== undefined) return this.caCert;
 

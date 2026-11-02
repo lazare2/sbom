@@ -15,6 +15,8 @@ import {
   MALICIOUS_DEFAULT_FEED_URL,
   type MaliciousSettings,
   type VulnProvider,
+  type VulnScannerSettings,
+  DEFAULT_VULN_SCANNERS,
   type XrayConnectionInput,
   type XrayCoverage,
   type XraySettings,
@@ -75,6 +77,12 @@ export const SETTING_KEYS = {
    * to be in, and separate keys would let a half-applied write produce exactly that.
    */
   vulnProvider: "vuln.provider",
+  /**
+   * The fingerprint of the scanner set the current findings came from, and when it last
+   * changed. Its own key because it is written by the sweep, not by an administrator, and
+   * folding it into the provider settings would invalidate their cache on every change.
+   */
+  vulnWatermark: "vuln.watermark",
   /**
    * Single sign-on: the provider connection and the last verdict on it.
    *
@@ -174,7 +182,10 @@ const DEFAULT_OIDC: StoredOidc = {
 };
 
 interface StoredProviderSettings {
+  /** The single-provider choice this replaced. Read only to migrate it into `scanners`. */
   provider: VulnProvider;
+  /** Which scanners run. Absent in settings written before there were several. */
+  scanners: VulnScannerSettings | null;
   xray: StoredXray;
   coverage: XrayCoverage | null;
   /** ISO timestamp standing in for a database build date, which Xray does not publish. */
@@ -189,6 +200,7 @@ interface StoredProviderSettings {
  */
 const DEFAULT_PROVIDER_SETTINGS: StoredProviderSettings = {
   provider: "grype",
+  scanners: null,
   xray: { baseUrl: "", username: "", tokenEnvelope: null, allowSelfSignedCertificate: false },
   coverage: null,
   assessmentEpoch: new Date(0).toISOString(),
@@ -499,6 +511,15 @@ export class SettingsService {
     if (stored && typeof stored === "object") {
       const raw = stored as Record<string, unknown>;
       if (raw.provider === "grype" || raw.provider === "xray") value.provider = raw.provider;
+      if (raw.scanners && typeof raw.scanners === "object") {
+        const s = raw.scanners as Record<string, unknown>;
+        value.scanners = {
+          grype: s.grype === true,
+          trivy: s.trivy === true,
+          osv: s.osv === true,
+          xray: s.xray === true,
+        };
+      }
       if (raw.xray && typeof raw.xray === "object") {
         value.xray = { ...value.xray, ...(raw.xray as Record<string, unknown>) } as StoredXray;
       }
@@ -526,6 +547,46 @@ export class SettingsService {
     } catch {
       return "grype";
     }
+  }
+
+  /**
+   * Which scanners run.
+   *
+   * Grype, Trivy and OSV by default. A deployment that had chosen Xray as its one provider
+   * keeps Xray on beside them, so upgrading never quietly drops the database somebody chose;
+   * one that had not, gets Xray off until an administrator ticks it.
+   */
+  async vulnScanners(): Promise<VulnScannerSettings> {
+    try {
+      const stored = await this.getProviderSettings();
+      return stored.scanners ?? { ...DEFAULT_VULN_SCANNERS, xray: stored.provider === "xray" };
+    } catch {
+      return { ...DEFAULT_VULN_SCANNERS };
+    }
+  }
+
+  async setVulnScanners(scanners: VulnScannerSettings): Promise<void> {
+    const current = await this.getProviderSettings();
+    await this.writeProviderSettings({ ...current, scanners });
+  }
+
+  /** Not cached: the sweep reads it once per run, and a stale copy would re-queue the estate. */
+  async readVulnWatermark(): Promise<{ fingerprint: string; at: Date } | null> {
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${SETTING_KEYS.vulnWatermark}
+    `);
+    const value = rowsOf(rows)[0]?.value as { fingerprint?: unknown; at?: unknown } | undefined;
+    if (!value || typeof value.fingerprint !== "string" || typeof value.at !== "string") return null;
+    const at = new Date(value.at);
+    return Number.isNaN(at.getTime()) ? null : { fingerprint: value.fingerprint, at };
+  }
+
+  async writeVulnWatermark(value: { fingerprint: string; at: Date }): Promise<void> {
+    const stored = { fingerprint: value.fingerprint, at: value.at.toISOString() };
+    await this.deps.db
+      .insert(setting)
+      .values({ key: SETTING_KEYS.vulnWatermark, value: stored })
+      .onConflictDoUpdate({ target: setting.key, set: { value: stored, updatedAt: new Date() } });
   }
 
   /** What the admin screen reads back. Never the token - only whether one is stored. */

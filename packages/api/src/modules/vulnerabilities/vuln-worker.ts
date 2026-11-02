@@ -109,47 +109,53 @@ export class VulnWorker {
   private async maybeUpdateDatabase(reason: "scheduled" | "startup" | "enable"): Promise<boolean> {
     const settings = await this.deps.settings.getVulnSettings();
 
-    /*
-      Under Xray there is nothing to download: the database is somebody else's and is
-      synchronised on their server. What this platform still has to decide is when its own
-      assessments have gone stale, and the answer is the same interval an administrator
-      already configured for database checks.
+    const scanners = await this.deps.settings.vulnScanners();
 
-      Advancing the epoch re-queues the estate, which is Xray's equivalent of a newly
-      published Grype build. Everything below this point is about fetching a local database
-      and does not apply.
+    /*
+      Xray has nothing to download: the database is somebody else's and is synchronised on
+      their server. What this platform still has to decide is when its own assessments have
+      gone stale, and the answer is the same interval an administrator already configured
+      for database checks. Advancing the epoch moves Xray's watermark, which re-queues the
+      estate exactly as a newly published local database does.
     */
-    if ((await this.deps.settings.vulnProvider()) === "xray") {
+    let xrayRequeued = false;
+    if (scanners.xray) {
       const epoch = await this.deps.settings.xrayAssessmentEpoch();
-      const elapsed = Date.now() - epoch.getTime();
-      if (elapsed >= settings.intervalHours * 60 * 60 * 1000) {
+      if (Date.now() - epoch.getTime() >= settings.intervalHours * 60 * 60 * 1000) {
         await this.deps.settings.advanceAssessmentEpoch();
-        this.deps.logger.info(
-          { intervalHours: settings.intervalHours },
-          "re-assessing the estate against JFrog Xray",
-        );
-        return true;
+        this.deps.logger.info({ intervalHours: settings.intervalHours }, "re-assessing the estate against JFrog Xray");
+        xrayRequeued = true;
       }
-      return false;
     }
+    if (!scanners.grype && !scanners.trivy && !scanners.osv) return xrayRequeued;
 
     const status = await this.deps.vulnDb.status();
 
     if (!status.scanner.available) {
       this.noteUnavailable(
-        "grype binary not available",
-        "vulnerability scanning is enabled but the grype binary was not found",
+        "no scanner available",
+        "vulnerability scanning is enabled but no scanner binary was found",
       );
-      return false;
+      return xrayRequeued;
     }
 
+    /*
+      Due when the interval has passed - or straight away when a switched-on local scanner
+      has no database yet. With several scanners "a database is present" is no longer the
+      same as "every database is present", and a newly enabled Trivy must not wait hours for
+      its first download because Grype already has one.
+    */
+    const missingDatabase = status.scanners.some(
+      (s) => s.enabled && s.name !== "xray" && s.available && !s.database.present,
+    );
     const due =
       !status.database.present ||
+      missingDatabase ||
       status.updates.last === null ||
       Date.now() - new Date(status.updates.last.startedAt).getTime() >=
         settings.intervalHours * 60 * 60 * 1000;
 
-    if (!due) return false;
+    if (!due) return xrayRequeued;
 
     const trigger = reason === "enable" ? "enable" : reason === "startup" ? "startup" : "scheduled";
     const result = await this.deps.vulnDb.update(trigger, null);

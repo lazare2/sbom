@@ -175,6 +175,8 @@ export function toFindings(
             ),
           ],
           dataSource: "jfrog-xray",
+          source: "xray",
+          affectedRange: null,
           namespace: detail.package_type?.trim() || null,
           urls: (vuln.references ?? []).filter((u) => typeof u === "string" && u.trim() !== ""),
           /*
