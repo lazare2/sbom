@@ -3,6 +3,7 @@ import type { AccessRequest, UserSummary } from "@sbom/shared";
 import { sortDirections, userSort } from "@sbom/shared";
 import { useServerSort } from "../../lib/useSort.ts";
 import { useAuth } from "../../auth/AuthProvider.tsx";
+import { SquadBadges } from "../../components/SquadBadges.tsx";
 import { ExportTableButton, exportDate, exportList, fetchAllPages } from "../../components/ExportTable.tsx";
 import { formatDate, formatRelative } from "../../lib/format.ts";
 import {
@@ -63,6 +64,8 @@ const spec = {
     search: "",
     role: "" as (typeof ROLES)[number],
     access: "" as (typeof ACCESS)[number],
+    /** A squad id, `none` for accounts on no squad, or empty for any. */
+    squad: "",
     sortBy: userSort.defaultField,
     sortDir: userSort.defaultDirection,
     page: 1,
@@ -71,6 +74,7 @@ const spec = {
     search: readString(p, "search"),
     role: readEnum(p, "role", ROLES, ""),
     access: readEnum(p, "access", ACCESS, ""),
+    squad: readString(p, "squad"),
     sortBy: readEnum(p, "sortBy", userSort.fields, userSort.defaultField),
     sortDir: readEnum(p, "sortDir", sortDirections, userSort.defaultDirection),
     page: readNumber(p, "page", 1),
@@ -113,12 +117,14 @@ export function AdminUsersPage() {
     search: state.search || undefined,
     role: state.role || undefined,
     access: state.access || undefined,
+    squad: state.squad || undefined,
     sortBy: state.sortBy,
     sortDir: state.sortDir,
     page: state.page,
     pageSize: 25,
   };
   const users = useUsers(query);
+  const squadList = useSquads();
   const sort = useServerSort(userSort, state, setState);
 
   const updateUser = useUpdateUser();
@@ -259,6 +265,18 @@ export function AdminUsersPage() {
             options={[
               { value: "", label: "Any access" },
               { value: "none", label: "No access yet" },
+            ]}
+          />
+          <Select
+            value={state.squad}
+            ariaLabel="Filter by squad"
+            onChange={(v) => setState({ squad: v, page: 1 })}
+            options={[
+              { value: "", label: "Any squad" },
+              { value: "none", label: "On no squad" },
+              ...[...(squadList.data?.squads ?? [])]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((s) => ({ value: s.id, label: s.name })),
             ]}
           />
         </div>
@@ -1142,11 +1160,7 @@ function AccessCell({ user, onEdit }: { user: UserSummary; onEdit: () => void })
           Restricted
         </Badge>
       ) : null}
-      {user.squads.map((squad) => (
-        <Badge key={squad.id} tone="info" title="A squad this account is on. It reaches everything the squad is granted.">
-          {squad.name}
-        </Badge>
-      ))}
+      <SquadBadges squads={user.squads} />
       {/*
         One label for both states, in the default boxed style rather than the borderless one.
         "Review…" and "Choose…" described the state of the grants, which the badge beside it

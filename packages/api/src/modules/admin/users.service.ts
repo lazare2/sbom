@@ -103,6 +103,13 @@ export class AdminUsersService {
     if (query.role) conditions.push(sql`u.role = ${query.role}`);
     if (query.isActive !== undefined) conditions.push(sql`u.is_active = ${query.isActive}`);
     if (query.access === "none") conditions.push(sql`NOT ${HAS_ACCESS}`);
+    if (query.squad === "none") {
+      conditions.push(sql`NOT EXISTS (SELECT 1 FROM squad_member sm WHERE sm.user_id = u.id)`);
+    } else if (query.squad) {
+      conditions.push(
+        sql`EXISTS (SELECT 1 FROM squad_member sm WHERE sm.user_id = u.id AND sm.squad_id = ${query.squad}::uuid)`,
+      );
+    }
 
     const rows = await this.deps.db.execute<Row<UserQueryRow>>(sql`
       SELECT

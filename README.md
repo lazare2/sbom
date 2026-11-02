@@ -968,6 +968,11 @@ applications; nothing is sent to it yet. A squad can sit under several tribes; t
 *Every squad must belong to a tribe* switch on the Squads tab (off by default) makes
 choosing at least one mandatory when a squad is created or its tribes are edited.
 
+On **Admin → Access → Users** an account's squads take at most one line: the first two
+alphabetically, then a **+N more** badge that opens the full list (searchable from ten
+squads up). The **Squad** filter beside the role and access filters lists the members of
+one squad, or the accounts on no squad at all (`GET /admin/users?squad=<id>|none`).
+
 ### Tribes
 
 Tribe → squad → user. A tribe has a name, an optional email and description, the

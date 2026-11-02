@@ -144,6 +144,8 @@ export const listUsersQuerySchema = paginationQuerySchema.extend({
    * who signed in once and is waiting for an administrator to give them something to see.
    */
   access: z.enum(["none"]).optional(),
+  /** Members of one squad, by id - or `none` for accounts on no squad at all. */
+  squad: z.union([z.literal("none"), uuidSchema]).optional(),
 }).merge(userSort.querySchema);
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 
