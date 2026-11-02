@@ -1,7 +1,7 @@
 {
   "name": "sbom-platform",
   "private": true,
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Internal SBOM / dependency management platform",
   "type": "module",
   "engines": {
