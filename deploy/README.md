@@ -264,6 +264,8 @@ Two Docker volumes hold everything:
 | `sbom-platform_db-data` | Applications, scans, components, users, audit trail | **yes** |
 | `sbom-platform_sbom-blobs` | The original CycloneDX files, gzipped | **yes** |
 | `sbom-platform_grype-db` | Grype's vulnerability database | no - reproducible, and stale within a day |
+| `sbom-platform_trivy-db` | Trivy's vulnerability database | no - re-downloaded from `mirror.gcr.io` |
+| `sbom-platform_osv-db` | OSV.dev's per-ecosystem databases | no - re-downloaded from `osv-vulnerabilities.storage.googleapis.com` |
 
 Back up the first **two**. Scan rows reference blobs by key and cannot regenerate them, so
 a database restored without its blobs loses every raw SBOM download.
