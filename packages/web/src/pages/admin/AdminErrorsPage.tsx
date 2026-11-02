@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate, fetchAllPages } from "../../components/ExportTable.tsx";
 import { useState } from "react";
 import type { ApiErrorEntry } from "@sbom/shared";
 import { apiErrorSort, sortDirections } from "@sbom/shared";
@@ -74,14 +75,15 @@ export function AdminErrorsPage() {
 
   const summary = useApiErrorSummary();
   const clear = useClearApiErrors();
-  const entries = useApiErrors({
+  const params = {
     serverOnly: state.scope === "server" ? true : undefined,
     path: state.path || undefined,
     sortBy: state.sortBy,
     sortDir: state.sortDir,
     page: state.page,
     pageSize: 50,
-  });
+  };
+  const entries = useApiErrors(params);
   const sort = useServerSort(apiErrorSort, state, setState);
 
   const retentionDays = summary.data?.retentionDays;
@@ -94,6 +96,32 @@ export function AdminErrorsPage() {
           retentionDays
             ? `Requests this platform refused or failed, kept for ${retentionDays} days. Separate from the audit log, which records changes that succeeded.`
             : "Requests this platform refused or failed. Separate from the audit log, which records changes that succeeded."
+        }
+        actions={
+          <ExportTableButton
+            title="Error log"
+            filename="error-log"
+            fetchRows={(progress) => fetchAllPages<ApiErrorEntry>("/admin/errors", params, progress)}
+            columns={[
+              { header: "When", value: (e) => exportDate(e.occurredAt), width: 18 },
+              { header: "Status", value: (e) => e.statusCode, width: 8 },
+              { header: "Method", value: (e) => e.method, width: 8 },
+              { header: "Path", value: (e) => e.path, width: 40 },
+              { header: "Code", value: (e) => e.code, width: 20 },
+              { header: "Message", value: (e) => e.message, width: 60 },
+              {
+                header: "Field errors",
+                value: (e) =>
+                  e.details
+                    ? Object.entries(e.details)
+                        .map(([field, messages]) => `${field}: ${messages.join("; ")}`)
+                        .join(" | ")
+                    : null,
+                width: 50,
+              },
+              { header: "Who", value: (e) => e.actorEmail, width: 28 },
+            ]}
+          />
         }
       />
 

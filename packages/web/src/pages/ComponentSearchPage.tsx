@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { componentSearchSort, sortDirections } from "@sbom/shared";
+import { componentSearchSort, sortDirections, type ComponentSearchHit } from "@sbom/shared";
 import { useClientSort, useServerSort } from "../lib/useSort.ts";
 import {
   useComponentEcosystems,
@@ -19,7 +19,8 @@ import {
   useUrlState,
 } from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
-import { ComponentHitsTable } from "../components/ComponentHitsTable.tsx";
+import { COMPONENT_HIT_EXPORT_COLUMNS, ComponentHitsTable } from "../components/ComponentHitsTable.tsx";
+import { ExportTableButton, fetchAllPages } from "../components/ExportTable.tsx";
 import { BulkPackageSearch } from "./BulkPackageSearch.tsx";
 import {
   Badge,
@@ -352,6 +353,25 @@ function SinglePackageSearch() {
           <CardHeader
             title="Versions in use"
             subtitle={`${versions.length} distinct versions of ${state.name} across the estate`}
+            actions={
+              <ExportTableButton
+                title="Versions in use"
+                filename={`versions-${state.name.trim().replace(/[^A-Za-z0-9._-]+/g, "-")}`}
+                rows={versionSort.rows}
+                columns={[
+                  { header: "Package", value: () => state.name, width: 32 },
+                  { header: "Version", value: (v) => v.version, width: 18 },
+                  { header: "Ecosystem", value: (v) => v.ecosystem, width: 12 },
+                  { header: "Current applications", value: (v) => v.currentApplications, width: 18 },
+                  { header: "Ever used by", value: (v) => v.totalApplications, width: 12 },
+                  {
+                    header: "Fully removed",
+                    value: (v) => (v.currentApplications === 0 && v.totalApplications > 0 ? "yes" : "no"),
+                    width: 13,
+                  },
+                ]}
+              />
+            }
           />
           <TableWrap>
             <Table>
@@ -442,6 +462,16 @@ function SinglePackageSearch() {
                 ? `${formatNumber(data.total)} application - package pair${data.total === 1 ? "" : "s"}` +
                   (data.matchedComponents > 0 ? ` · ${formatNumber(data.matchedComponents)} distinct packages matched` : "")
                 : undefined
+            }
+            actions={
+              data && data.total > 0 ? (
+                <ExportTableButton
+                  title="Package search"
+                  filename={`package-search-${state.name.trim().replace(/[^A-Za-z0-9._-]+/g, "-")}`}
+                  fetchRows={(progress) => fetchAllPages<ComponentSearchHit>("/components/search", params, progress)}
+                  columns={COMPONENT_HIT_EXPORT_COLUMNS}
+                />
+              ) : undefined
             }
           />
 

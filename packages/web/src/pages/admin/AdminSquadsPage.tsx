@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate, exportList } from "../../components/ExportTable.tsx";
 import { useMemo, useState } from "react";
 import type { SquadDetail, SquadSummary, UserSummary } from "@sbom/shared";
 import { displayName, formatNumber } from "../../lib/format.ts";
@@ -69,9 +70,27 @@ export function AdminSquadsPage() {
           title="Squads"
           subtitle="Teams of people granted applications together. Adding someone to a squad gives them everything the squad is granted; removing them takes it away."
           actions={
-            <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
-              New squad
-            </Button>
+            <>
+              <ExportTableButton
+                title="Squads"
+                filename="squads"
+                rows={list}
+                columns={[
+                  { header: "Squad", value: (s) => s.name, width: 24 },
+                  { header: "Description", value: (s) => s.description, width: 36 },
+                  { header: "Tribes", value: (s) => exportList(s.tribes.map((t) => t.name)), width: 24 },
+                  { header: "Email", value: (s) => s.email, width: 28 },
+                  { header: "Members", value: (s) => s.memberCount, width: 10 },
+                  { header: "Groups", value: (s) => s.groupCount, width: 8 },
+                  { header: "Applications", value: (s) => s.applicationCount, width: 12 },
+                  { header: "Reaches", value: (s) => s.reachableApplicationCount, width: 10 },
+                  { header: "Created", value: (s) => exportDate(s.createdAt), width: 18 },
+                ]}
+              />
+              <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
+                New squad
+              </Button>
+            </>
           }
         />
 

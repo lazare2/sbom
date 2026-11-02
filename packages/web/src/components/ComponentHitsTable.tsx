@@ -2,9 +2,29 @@ import { Link } from "react-router";
 import type { ComponentSearchHit, componentSearchSort } from "@sbom/shared";
 import { formatDateTime, formatRelative } from "../lib/format.ts";
 import type { SortControl } from "../lib/useSort.ts";
+import { exportDate, type ExportColumn } from "./ExportTable.tsx";
 import { Badge, EcosystemBadge, StatusBadge, Table, TableWrap, Td, Th, Tr , NAME_COLUMN_MIN_WIDTH } from "./ui.tsx";
 
 type HitSortField = (typeof componentSearchSort)["fields"][number];
+
+/** The export columns for a page of hits; shared by both searches, like the table. */
+export const COMPONENT_HIT_EXPORT_COLUMNS: ExportColumn<ComponentSearchHit>[] = [
+  { header: "Application", value: (h) => h.applicationName, width: 36 },
+  {
+    header: "Application status",
+    value: (h) =>
+      h.applicationStatus === "pending_confirmation" ? "Unconfirmed" : h.applicationStatus === "active" ? "Active" : "Inactive",
+    width: 16,
+  },
+  { header: "Environment", value: (h) => h.environmentName, width: 14 },
+  { header: "Package", value: (h) => h.componentName, width: 32 },
+  { header: "Version", value: (h) => h.componentVersion, width: 16 },
+  { header: "Ecosystem", value: (h) => h.ecosystem, width: 12 },
+  { header: "Usage", value: (h) => (h.usage === "current" ? "Current build" : "Earlier build only"), width: 16 },
+  { header: "Last seen", value: (h) => exportDate(h.lastSeenAt), width: 18 },
+  { header: "Last seen in build", value: (h) => h.lastSeenBuildNumber, width: 16 },
+  { header: "Package URL", value: (h) => h.purl, width: 50 },
+];
 
 /**
  * The package × application result table.

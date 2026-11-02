@@ -16,7 +16,8 @@ import { useServerSort, type SortControl } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useCreateSuppression } from "../lib/mutations.ts";
 import { formatNumber } from "../lib/format.ts";
-import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
+import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
+import { ExportTableButton, exportList, fetchAllPages, locationColumns, type ExportColumn } from "./ExportTable.tsx";
 import { SEVERITY_ORDER, SeverityBadge, SeverityBar } from "./Severity.tsx";
 import {
   Badge,
@@ -549,18 +550,44 @@ export function useFindingsSort(
   return useServerSort(findingSort, filters, (patch) => onChange({ ...patch, page: 1 }));
 }
 
+/** One row per package and advisory, as the findings table shows them. */
+export const FINDING_EXPORT_COLUMNS: ExportColumn<VulnerabilityFinding>[] = [
+  { header: "Severity", value: (f) => f.severity, width: 10 },
+  { header: "Advisory", value: (f) => f.vulnerabilityId, width: 22 },
+  { header: "Aliases", value: (f) => exportList(f.aliases), width: 22 },
+  { header: "Package", value: (f) => f.componentName, width: 32 },
+  { header: "Version", value: (f) => f.componentVersion, width: 16 },
+  { header: "Ecosystem", value: (f) => f.ecosystem, width: 12 },
+  { header: "Kind", value: (f) => f.kind, width: 10 },
+  { header: "Fix state", value: (f) => f.fixState, width: 12 },
+  { header: "Fixed in", value: (f) => exportList(f.fixVersions), width: 20 },
+  { header: "CVSS", value: (f) => f.cvssBaseScore, width: 7 },
+  { header: "EPSS", value: (f) => f.epssScore, width: 8 },
+  { header: "Known exploited", value: (f) => (f.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Accepted risk", value: (f) => (f.suppressed ? "yes" : "no"), width: 13 },
+  { header: "Accepted risk reason", value: (f) => f.suppressionReason, width: 30 },
+  ...locationColumns<VulnerabilityFinding>((f) => f.location),
+  { header: "Description", value: (f) => f.description, width: 60 },
+  { header: "Data source", value: (f) => f.dataSource, width: 30 },
+  { header: "References", value: (f) => exportList(f.urls), width: 50 },
+  { header: "Package URL", value: (f) => f.purl, width: 50 },
+];
+
 /** Wraps a findings list in the standard card, with filters in the header. */
 export function FindingsCard({
   title,
   subtitle,
   filters,
   onChange,
+  exportFrom,
   children,
 }: {
   title: string;
   subtitle?: string;
   filters: FindingsFilters;
   onChange: (patch: Partial<FindingsFilters>) => void;
+  /** The findings endpoint and a file name stem, for "Export table" under the current filters. */
+  exportFrom?: { path: string; filename: string };
   children: React.ReactNode;
 }) {
   return (
@@ -568,7 +595,21 @@ export function FindingsCard({
       <CardHeader
         title={title}
         subtitle={subtitle}
-        actions={<FindingsFilterBar filters={filters} onChange={onChange} />}
+        actions={
+          <>
+            {exportFrom ? (
+              <ExportTableButton
+                title="Findings"
+                filename={exportFrom.filename}
+                fetchRows={(progress) =>
+                  fetchAllPages<VulnerabilityFinding>(exportFrom.path, findingsParams(filters), progress)
+                }
+                columns={FINDING_EXPORT_COLUMNS}
+              />
+            ) : null}
+            <FindingsFilterBar filters={filters} onChange={onChange} />
+          </>
+        }
       />
       {children}
     </Card>

@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate } from "../../components/ExportTable.tsx";
 import { useState } from "react";
 import type { Environment, EnvironmentComparisonRow } from "@sbom/shared";
 import { useEnvironmentComparison, useEnvironments } from "../../lib/queries.ts";
@@ -55,6 +56,20 @@ export function AdminEnvironmentsPage() {
           <CardHeader
             title="Environments"
             subtitle="Isolated estates. Applications never move between them, and no figure on this platform is ever computed across two."
+            actions={
+              <ExportTableButton
+                title="Environments"
+                filename="environments"
+                rows={environments.data?.environments ?? []}
+                columns={[
+                  { header: "Environment", value: (e) => e.name, width: 20 },
+                  { header: "Description", value: (e) => e.description, width: 40 },
+                  { header: "Applications", value: (e) => e.applicationCount, width: 12 },
+                  { header: "Builds", value: (e) => e.scanCount, width: 10 },
+                  { header: "Created", value: (e) => exportDate(e.createdAt), width: 18 },
+                ]}
+              />
+            }
           />
 
           {environments.error ? (
@@ -331,6 +346,39 @@ function ComparisonCard() {
       <CardHeader
         title="Side by side"
         subtitle="Each column is one estate, complete in itself. Nothing here is added across environments - a combined total would describe none of them."
+        actions={
+          // One row per environment in the file: the screen's transposed layout reads well,
+          // but a spreadsheet is sorted and filtered by row.
+          <ExportTableButton
+            title="Environments side by side"
+            filename="environments-side-by-side"
+            rows={rows}
+            columns={[
+              { header: "Environment", value: (r) => r.name, width: 20 },
+              { header: "Applications", value: (r) => r.applications.total, width: 12 },
+              { header: "Active", value: (r) => r.applications.active, width: 8 },
+              { header: "Stale", value: (r) => r.applications.stale, width: 8 },
+              { header: "Never scanned", value: (r) => r.applications.neverScanned, width: 14 },
+              { header: "Builds", value: (r) => r.scans.total, width: 8 },
+              { header: "Builds, last 7 days", value: (r) => r.scans.last7d, width: 18 },
+              { header: "Packages in use", value: (r) => r.packagesInUse, width: 15 },
+              { header: "Last build", value: (r) => exportDate(r.scans.latestAt), width: 18 },
+              ...(scanningEnabled
+                ? [
+                    { header: "Assessed applications", value: (r: EnvironmentComparisonRow) => r.vulnerabilities?.assessedApplications ?? null, width: 20 },
+                    { header: "Critical", value: (r: EnvironmentComparisonRow) => r.vulnerabilities?.critical ?? null, width: 10 },
+                    { header: "High", value: (r: EnvironmentComparisonRow) => r.vulnerabilities?.high ?? null, width: 8 },
+                    { header: "App findings", value: (r: EnvironmentComparisonRow) => r.vulnerabilities?.appFindings ?? null, width: 12 },
+                    {
+                      header: "Base image findings",
+                      value: (r: EnvironmentComparisonRow) => r.vulnerabilities?.baseImageFindings ?? null,
+                      width: 18,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        }
       />
       <TableWrap>
         <Table>

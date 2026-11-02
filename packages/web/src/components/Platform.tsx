@@ -1,3 +1,4 @@
+import { ExportTableButton, exportList } from "./ExportTable.tsx";
 import { Link } from "react-router";
 import type { ScanPlatform } from "@sbom/shared";
 import { useClientSort } from "../lib/useSort.ts";
@@ -245,7 +246,23 @@ export function PlatformTable({
 
   return (
     <Card>
-      <CardHeader title={title} subtitle={subtitle} />
+      <CardHeader
+        title={title}
+        subtitle={subtitle}
+        actions={
+          <ExportTableButton
+            title={title}
+            filename={title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}
+            rows={sort.rows}
+            columns={[
+              { header: "Name", value: (r) => r.label, width: 24 },
+              { header: "Version", value: (r) => r.version, width: 16 },
+              { header: "Applications", value: (r) => r.applications, width: 12 },
+              { header: "Application names", value: (r) => exportList(r.applicationList), width: 40 },
+            ]}
+          />
+        }
+      />
       {loading ? (
         <LoadingBlock />
       ) : rows.length === 0 ? (

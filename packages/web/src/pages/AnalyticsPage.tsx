@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ExportTableButton, exportDate, exportList } from "../components/ExportTable.tsx";
 import { Link } from "react-router";
 import type { AnalyticsReport } from "@sbom/shared";
 import { useClientSort } from "../lib/useSort.ts";
@@ -440,6 +441,20 @@ function TopPackagesCard({ report }: { report: AnalyticsReport }) {
       <CardHeader
         title={`Top ${rows.length} most widely deployed packages`}
         subtitle="Present in the most applications' current builds - the blast radius if one turns out to be a problem. Operating systems and runtimes are excluded and shown separately."
+        actions={
+          <ExportTableButton
+            title="Most deployed packages"
+            filename="most-deployed-packages"
+            rows={sort.rows}
+            columns={[
+              { header: "Package", value: (c) => c.name, width: 32 },
+              { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
+              { header: "Version", value: (c) => c.version, width: 16 },
+              { header: "Applications", value: (c) => c.applications, width: 12 },
+              { header: "Application names", value: (c) => exportList(c.applicationList), width: 40 },
+            ]}
+          />
+        }
       />
       {rows.length === 0 ? (
         <EmptyState title="No package data yet" hint="Counts appear once the first SBOM is ingested." />
@@ -511,6 +526,19 @@ function TopProjectsCard({ report }: { report: AnalyticsReport }) {
       <CardHeader
         title={`Top ${rows.length} applications by package count`}
         subtitle="Largest current builds. A size ranking, not a risk ranking - a big image costs more to review and patch, but is not automatically in worse shape."
+        actions={
+          <ExportTableButton
+            title="Applications by package count"
+            filename="applications-by-package-count"
+            rows={sort.rows}
+            columns={[
+              { header: "Application", value: (p) => p.name, width: 36 },
+              { header: "Runs on", value: (p) => p.platform, width: 32 },
+              { header: "Packages", value: (p) => p.packages, width: 10 },
+              { header: "Build received", value: (p) => exportDate(p.scanAt), width: 18 },
+            ]}
+          />
+        }
       />
       {rows.length === 0 ? (
         <EmptyState title="No builds yet" hint="Applications appear here once they report an SBOM." />
@@ -702,6 +730,20 @@ function FragmentationCard({ report }: { report: AnalyticsReport }) {
       <CardHeader
         title="Version fragmentation"
         subtitle="Packages the estate runs several versions of at once. Each extra version multiplies the cost of the next upgrade - the section that names work that can actually be finished."
+        actions={
+          <ExportTableButton
+            title="Version fragmentation"
+            filename="version-fragmentation"
+            rows={sort.rows}
+            columns={[
+              { header: "Package", value: (r) => r.name, width: 32 },
+              { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
+              { header: "Versions in use", value: (r) => r.versions, width: 14 },
+              { header: "Example versions", value: (r) => exportList(r.examples), width: 40 },
+              { header: "Applications", value: (r) => r.applications, width: 12 },
+            ]}
+          />
+        }
       />
       {rows.length === 0 ? (
         <EmptyState
@@ -775,6 +817,20 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
       <CardHeader
         title={`New to the estate, last ${report.meta.periodDays} days`}
         subtitle="First seen inside the window and still deployed. The supply-chain review queue: what is in our images now that was not here before."
+        actions={
+          <ExportTableButton
+            title="New packages"
+            filename="new-packages"
+            rows={sort.rows}
+            columns={[
+              { header: "Package", value: (p) => p.name, width: 32 },
+              { header: "Ecosystem", value: (p) => p.ecosystem, width: 12 },
+              { header: "Version", value: (p) => p.version, width: 16 },
+              { header: "First seen", value: (p) => exportDate(p.firstSeenAt), width: 18 },
+              { header: "Applications", value: (p) => p.applications, width: 12 },
+            ]}
+          />
+        }
       />
       {rows.length === 0 ? (
         <EmptyState
@@ -842,7 +898,23 @@ function EcosystemCard({ report }: { report: AnalyticsReport }) {
   );
   return (
     <Card>
-      <CardHeader title="Ecosystem mix" subtitle="Distinct packages in current builds, by package manager." />
+      <CardHeader
+        title="Ecosystem mix"
+        subtitle="Distinct packages in current builds, by package manager."
+        actions={
+          <ExportTableButton
+            title="Ecosystem mix"
+            filename="ecosystem-mix"
+            rows={sort.rows}
+            columns={[
+              { header: "Ecosystem", value: (e) => e.ecosystem, width: 14 },
+              { header: "Packages", value: (e) => e.components, width: 10 },
+              { header: "Applications", value: (e) => e.applications, width: 12 },
+              { header: "Application names", value: (e) => exportList(e.applicationList), width: 40 },
+            ]}
+          />
+        }
+      />
       {rows.length === 0 ? (
         <EmptyState title="No components yet" />
       ) : (

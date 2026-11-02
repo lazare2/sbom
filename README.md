@@ -335,6 +335,27 @@ The first drag measures every column and switches the table to fixed layout. Und
 layout, widening one column makes the browser quietly redistribute all the others, which reads
 as the control not working.
 
+### Exporting a table
+
+Every table on a page has an **Export table** button that downloads it as an Excel workbook:
+the rows as the table currently shows them, under its current filters and in its current sort
+order. For a paginated table that means every matching page, not the page on screen; the
+browser walks the same API call the table makes, 200 rows per request, and stops at 50,000
+rows. A second sheet records what was exported, when, from which view, and whether the cap
+cut it short.
+
+- **Same data, same permissions.** The rows come from the reader's own session and
+  environment, so an export never holds anything its reader could not already see.
+- **Columns are declared per table, not scraped from the screen.** A severity breakdown
+  becomes four sortable columns, dates are real Excel dates, and lists that open on screen
+  (application names behind a count) are written out in full.
+- **Built in the browser.** The workbook is written by `packages/shared/src/xlsx.ts`, a small
+  dependency-free writer. Every string is an inline-string cell, so a value such as
+  `=HYPERLINK(...)` in a branch name stays text and is never evaluated.
+
+The SBOM download on application, build and group pages is now labelled **Export SBOM…** so
+the two are not confused. Package-list search keeps its own multi-sheet **Download Excel**.
+
 ### Searching a list of packages
 
 **Package search → A list** takes a pasted list and checks all of it against the

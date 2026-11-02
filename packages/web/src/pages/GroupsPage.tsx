@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { groupSort, sortDirections } from "@sbom/shared";
-import { useGroups, useVulnStatus } from "../lib/queries.ts";
+import { groupSort, sortDirections, type ApplicationGroupSummary } from "@sbom/shared";
+import { useGroups, useVulnStatus } from "../lib/queries.ts";
+import { ExportTableButton, exportDate, exportList, fetchAllPages, severityColumns } from "../components/ExportTable.tsx";
 import { useServerSort } from "../lib/useSort.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
 import {
@@ -81,13 +82,14 @@ export function GroupsPage() {
     setSearchInput(state.search);
   }, [state.search]);
 
-  const { data, isLoading, isFetching, error, refetch } = useGroups({
+  const params = {
     search: state.search || undefined,
     sortBy: state.sortBy,
     sortDir: state.sortDir,
     page: state.page,
     pageSize: 50,
-  });
+  };
+  const { data, isLoading, isFetching, error, refetch } = useGroups(params);
 
   /*
     Strict `=== true`, matching the applications list: undefined while the status request is in
@@ -103,6 +105,31 @@ export function GroupsPage() {
       <PageHeader
         title="Groups"
         subtitle="Sets of applications that answer a question together - one product built from several images, or a trait that cuts across unrelated services."
+        actions={
+          <ExportTableButton
+            title="Groups"
+            filename="groups"
+            fetchRows={(progress) => fetchAllPages<ApplicationGroupSummary>("/groups", params, progress)}
+            columns={[
+              { header: "Group", value: (g) => g.name, width: 28 },
+              { header: "Description", value: (g) => g.description, width: 40 },
+              { header: "Applications", value: (g) => g.applicationCount, width: 12 },
+              { header: "Members", value: (g) => exportList(g.memberNames), width: 50 },
+              ...(showAdvisories
+                ? [
+                    { header: "Advisories", value: (g: ApplicationGroupSummary) => g.vulnerabilities?.advisories ?? null, width: 11 },
+                    ...severityColumns<ApplicationGroupSummary>("", (g) => g.vulnerabilities?.bySeverity),
+                    {
+                      header: "Affected applications",
+                      value: (g: ApplicationGroupSummary) => g.vulnerabilities?.affectedApplicationCount ?? null,
+                      width: 20,
+                    },
+                  ]
+                : []),
+              { header: "Created", value: (g) => exportDate(g.createdAt), width: 18 },
+            ]}
+          />
+        }
       />
 
       <Card>

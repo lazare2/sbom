@@ -1,7 +1,8 @@
 import { Link } from "react-router";
 import type { ScanDiff } from "@sbom/shared";
 import { formatDateTime, formatNumber, formatRelative, shortSha } from "../lib/format.ts";
-import { useClientSort } from "../lib/useSort.ts";
+import { useClientSort } from "../lib/useSort.ts";
+import { ExportTableButton, exportDate } from "./ExportTable.tsx";
 import {
   Badge,
   Card,
@@ -99,6 +100,21 @@ export function DiffView({ diff }: { diff: ScanDiff }) {
           <CardHeader
             title={`Removed (${formatNumber(diff.removed.length)})`}
             subtitle="Present in the earlier build, gone from the later one - and not replaced by another version."
+            actions={
+              <ExportTableButton
+                title="Removed"
+                filename="diff-removed"
+                rows={removedSort.rows}
+                columns={[
+                  { header: "Package", value: (c) => c.name, width: 32 },
+                  { header: "Version", value: (c) => c.version, width: 18 },
+                  { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
+                  { header: "Last seen", value: (c) => exportDate(c.lastSeenAt), width: 18 },
+                  { header: "Last seen in build", value: (c) => c.lastSeenBuildNumber, width: 16 },
+                  { header: "Package URL", value: (c) => c.purl, width: 50 },
+                ]}
+              />
+            }
           />
           <TableWrap>
             <Table>
@@ -151,6 +167,19 @@ export function DiffView({ diff }: { diff: ScanDiff }) {
           <CardHeader
             title={`Version changes (${formatNumber(diff.changed.length)})`}
             subtitle="Same package, different version. Usually the bulk of a routine build."
+            actions={
+              <ExportTableButton
+                title="Version changes"
+                filename="diff-version-changes"
+                rows={changedSort.rows}
+                columns={[
+                  { header: "Package", value: (c) => c.name, width: 32 },
+                  { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
+                  { header: "From version", value: (c) => c.fromVersion, width: 18 },
+                  { header: "To version", value: (c) => c.toVersion, width: 18 },
+                ]}
+              />
+            }
           />
           <TableWrap>
             <Table>
@@ -198,6 +227,19 @@ export function DiffView({ diff }: { diff: ScanDiff }) {
           <CardHeader
             title={`Added (${formatNumber(diff.added.length)})`}
             subtitle="New in the later build, with no earlier version of the same package."
+            actions={
+              <ExportTableButton
+                title="Added"
+                filename="diff-added"
+                rows={addedSort.rows}
+                columns={[
+                  { header: "Package", value: (c) => c.name, width: 32 },
+                  { header: "Version", value: (c) => c.version, width: 18 },
+                  { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
+                  { header: "Package URL", value: (c) => c.purl, width: 50 },
+                ]}
+              />
+            }
           />
           <TableWrap>
             <Table>

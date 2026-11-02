@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate } from "../../components/ExportTable.tsx";
 import { useState } from "react";
 import type { TribeDetail, TribeSummary } from "@sbom/shared";
 import { formatNumber } from "../../lib/format.ts";
@@ -52,9 +53,25 @@ export function AdminTribesPage() {
           title="Tribes"
           subtitle="Groups of squads. Projects assigned to a tribe are visible to everyone in its squads, and show the tribe in their Tribe attribute."
           actions={
-            <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
-              New tribe
-            </Button>
+            <>
+              <ExportTableButton
+                title="Tribes"
+                filename="tribes"
+                rows={list}
+                columns={[
+                  { header: "Tribe", value: (t) => t.name, width: 24 },
+                  { header: "Description", value: (t) => t.description, width: 36 },
+                  { header: "Email", value: (t) => t.email, width: 28 },
+                  { header: "Squads", value: (t) => t.squadCount, width: 8 },
+                  { header: "Projects", value: (t) => t.applicationCount, width: 10 },
+                  { header: "Members", value: (t) => t.memberCount, width: 10 },
+                  { header: "Created", value: (t) => exportDate(t.createdAt), width: 18 },
+                ]}
+              />
+              <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
+                New tribe
+              </Button>
+            </>
           }
         />
 

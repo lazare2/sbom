@@ -7,7 +7,8 @@ import { formatNumber, formatRelative, humanizeKey } from "../../lib/format.ts";
 import { useDeleteApplication } from "../../lib/mutations.ts";
 import { useApplications, useAttributeDefinitions } from "../../lib/queries.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../../lib/useUrlState.ts";
-import { useDebounced } from "../../lib/useDebounced.ts";
+import { useDebounced } from "../../lib/useDebounced.ts";
+import { attributeText, ExportTableButton, exportDate, exportList, fetchAllPages } from "../../components/ExportTable.tsx";
 import {
   Button,
   Card,
@@ -63,7 +64,7 @@ export function AdminApplicationsPage() {
 
   const deleteApp = useDeleteApplication();
 
-  const applications = useApplications({
+  const params = {
     search: debouncedSearch || undefined,
     // Unlike the read-only list, the admin view defaults to every status: this
     // is where inactive records are managed, so hiding them by default would
@@ -74,7 +75,8 @@ export function AdminApplicationsPage() {
     sortBy: state.sortBy,
     sortDir: state.sortDir,
     sortAttribute: state.sortAttribute || undefined,
-  });
+  };
+  const applications = useApplications(params);
   const sort = useServerSort(applicationSort, state, setState);
 
   /* Attribute columns share one sort field - see the applications list for why. */
@@ -95,9 +97,33 @@ export function AdminApplicationsPage() {
           title="Applications"
           subtitle="Register an application before its first scan to have CI land on a confirmed record with its attributes already set."
           actions={
-            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-              Register application
-            </Button>
+            <>
+              <ExportTableButton<ApplicationSummary>
+                title="Applications"
+                filename="admin-applications"
+                fetchRows={(progress) => fetchAllPages<ApplicationSummary>("/applications", params, progress)}
+                columns={[
+                  { header: "Application", value: (a) => a.name, width: 36 },
+                  {
+                    header: "Status",
+                    value: (a) =>
+                      a.status === "pending_confirmation" ? "Unconfirmed" : a.status === "active" ? "Active" : "Inactive",
+                    width: 12,
+                  },
+                  { header: "Groups", value: (a) => exportList(a.groups.map((g) => g.name)), width: 24 },
+                  // Every active attribute, not only the two the table has room for.
+                  ...(definitions.data ?? [])
+                    .filter((d) => d.isActive)
+                    .map((d) => ({ header: d.label, value: (a: ApplicationSummary) => attributeText(a.attributes[d.key]), width: 18 })),
+                  { header: "Scans", value: (a) => a.scanCount, width: 8 },
+                  { header: "Last scan", value: (a) => exportDate(a.lastScanAt), width: 18 },
+                  { header: "Registered", value: (a) => exportDate(a.createdAt), width: 18 },
+                ]}
+              />
+              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+                Register application
+              </Button>
+            </>
           }
         />
 

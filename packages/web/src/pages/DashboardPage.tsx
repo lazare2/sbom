@@ -13,6 +13,7 @@ import {
   vulnFilterQuery,
 } from "../components/VulnFilter.tsx";
 import { useUrlState } from "../lib/useUrlState.ts";
+import { ExportTableButton, exportDate } from "../components/ExportTable.tsx";
 import { formatDate, formatNumber, formatRelative } from "../lib/format.ts";
 import {
   useCoverageGaps,
@@ -268,7 +269,25 @@ export function DashboardPage() {
 
       {/* --- recent activity ------------------------------------------------ */}
       <Card className="mt-4">
-        <CardHeader title="Recent scans" subtitle="The last builds to report an SBOM." />
+        <CardHeader
+          title="Recent scans"
+          subtitle="The last builds to report an SBOM."
+          actions={
+            <ExportTableButton
+              title="Recent scans"
+              filename="recent-scans"
+              rows={recentSort.rows}
+              columns={[
+                { header: "Application", value: (s) => s.applicationName, width: 36 },
+                { header: "Current build", value: (s) => (s.isLatest ? "yes" : "no"), width: 12 },
+                { header: "Build", value: (s) => s.buildNumber },
+                { header: "Branch", value: (s) => s.branch, width: 24 },
+                { header: "Packages", value: (s) => s.componentCount, width: 10 },
+                { header: "Received", value: (s) => exportDate(s.createdAt), width: 18 },
+              ]}
+            />
+          }
+        />
         {recent.isLoading ? (
           <LoadingBlock />
         ) : !recent.data || recent.data.length === 0 ? (
@@ -363,9 +382,21 @@ function NeedsAttentionCard() {
         subtitle="Active applications that have gone quiet, longest-silent first. Never-scanned applications sort above stale ones."
         actions={
           gaps.length > 0 ? (
-            <Link to="/applications?staleOnly=true" className="text-xs text-accent hover:underline">
-              See all
-            </Link>
+            <>
+              <Link to="/applications?staleOnly=true" className="text-xs text-accent hover:underline">
+                See all
+              </Link>
+              <ExportTableButton
+                title="Needs attention"
+                filename="needs-attention"
+                rows={gaps}
+                columns={[
+                  { header: "Application", value: (a) => a.name, width: 36 },
+                  { header: "Last build", value: (a) => exportDate(a.lastScanAt), width: 18 },
+                  { header: "Days silent", value: (a) => a.daysSinceScan, width: 12 },
+                ]}
+              />
+            </>
           ) : undefined
         }
       />

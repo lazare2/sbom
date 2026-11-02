@@ -1,3 +1,4 @@
+import { ExportTableButton, exportList } from "./ExportTable.tsx";
 import { Link } from "react-router";
 import {
   bucketize,
@@ -327,6 +328,23 @@ export function TopAdvisoriesCard() {
       <CardHeader
         title={`Vulnerabilities${rows.length > 0 ? ` · top ${rows.length}` : ""}`}
         subtitle={`Advisories against application dependencies in some current build, by how many applications they reach. Expand a package count to see the versions behind it.${capNote}`}
+        actions={
+          <ExportTableButton
+            title="Top vulnerabilities"
+            filename="top-vulnerabilities"
+            rows={sort.rows}
+            columns={[
+              { header: "Severity", value: (a) => a.severity, width: 10 },
+              { header: "Advisory", value: (a) => a.vulnerabilityId, width: 22 },
+              { header: "Aliases", value: (a) => exportList(a.aliases), width: 22 },
+              { header: "Known exploited", value: (a) => (a.knownExploited ? "yes" : "no"), width: 14 },
+              { header: "Packages", value: (a) => a.affectedPackages, width: 10 },
+              { header: "Package versions", value: (a) => exportList(a.affectedPackageList), width: 40 },
+              { header: "Applications", value: (a) => a.currentApplications, width: 12 },
+              { header: "Application names", value: (a) => exportList(a.currentApplicationList), width: 40 },
+            ]}
+          />
+        }
       />
       {query.isLoading ? (
         <LoadingBlock />
@@ -458,6 +476,21 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
           rankedByBaseImage
             ? `Ranked by base-image findings, because the filter excluded application dependencies. Every count on a row is base-image only.${capNote}`
             : `Ranked by findings in their own dependencies. Base-image findings are shown alongside but do not affect the order - including them would rank base-image age instead.${capNote}`
+        }
+        actions={
+          <ExportTableButton
+            title="Vulnerable applications"
+            filename="vulnerable-applications"
+            rows={sort.rows}
+            columns={[
+              { header: "Application", value: (r) => r.name, width: 36 },
+              { header: "App findings", value: (r) => r.findings, width: 12 },
+              { header: "Base image findings", value: (r) => r.baseImageFindings, width: 18 },
+              { header: "Critical", value: (r) => r.critical, width: 10 },
+              { header: "High", value: (r) => r.high, width: 10 },
+              { header: "Fixable", value: (r) => r.fixable, width: 10 },
+            ]}
+          />
         }
       />
       {rows.length === 0 ? (
@@ -640,6 +673,23 @@ export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityRep
             ? "Base-image packages present in some current build"
             : "Application dependencies present in some current build"
         }, by number of distinct advisories against that exact version. The application count is the blast radius of fixing it.${capNote}`}
+        actions={
+          <ExportTableButton
+            title="Vulnerable packages"
+            filename="vulnerable-packages"
+            rows={sort.rows}
+            columns={[
+              { header: "Package", value: (r) => r.name, width: 32 },
+              { header: "Version", value: (r) => r.version, width: 16 },
+              { header: "Advisories", value: (r) => r.findings, width: 11 },
+              { header: "Critical", value: (r) => r.critical, width: 10 },
+              { header: "Known exploited", value: (r) => r.knownExploited, width: 14 },
+              { header: "Applications", value: (r) => r.applications, width: 12 },
+              { header: "Application names", value: (r) => exportList(r.applicationList), width: 40 },
+              { header: "Fixed in", value: (r) => exportList(r.fixVersions), width: 20 },
+            ]}
+          />
+        }
       />
       {rows.length === 0 ? (
         <EmptyState
@@ -760,6 +810,20 @@ export function BaseImageExposureCard({ report }: { report: VulnerabilityReport 
       <CardHeader
         title="Base image exposure"
         subtitle="Findings from distribution packages and language runtimes. Usually the largest number here, and usually fixed by rebuilding on a newer image rather than by changing any dependency."
+        actions={
+          <ExportTableButton
+            title="Base image exposure"
+            filename="base-image-exposure"
+            rows={rows}
+            columns={[
+              { header: "Base image", value: (r) => [r.osName ?? "unknown", r.osVersion].filter(Boolean).join(" "), width: 28 },
+              { header: "Applications", value: (r) => r.applications, width: 12 },
+              { header: "Findings", value: (r) => r.findings, width: 10 },
+              { header: "Critical", value: (r) => r.critical, width: 10 },
+              { header: "High", value: (r) => r.high, width: 10 },
+            ]}
+          />
+        }
       />
       {rows.length === 0 ? (
         <EmptyState

@@ -1,13 +1,14 @@
 import { Link, useParams } from "react-router";
 import { ExportMenu } from "../components/ExportMenu.tsx";
 import { groupAdvisorySort, sortDirections } from "@sbom/shared";
-import type { VulnSeverity } from "@sbom/shared";
+import type { GroupAdvisory, GroupMember, VulnSeverity } from "@sbom/shared";
 import { vulnSeverities } from "@sbom/shared";
 import {
   SeverityBadge,
   SeverityCountsInline,
 } from "../components/Severity.tsx";
-import { useGroup, useGroupAdvisories, useVulnStatus } from "../lib/queries.ts";
+import { useGroup, useGroupAdvisories, useVulnStatus } from "../lib/queries.ts";
+import { ExportTableButton, exportDate, fetchAllPages } from "../components/ExportTable.tsx";
 import { useServerSort } from "../lib/useSort.ts";
 import {
   readEnum,
@@ -80,13 +81,14 @@ export function GroupDetailPage() {
   const vulnStatus = useVulnStatus();
   const showAdvisories = vulnStatus.data?.enabled === true;
 
-  const advisories = useGroupAdvisories(showAdvisories ? id : undefined, {
+  const advisoryParams = {
     severity: state.severity || undefined,
     sortBy: state.sortBy,
     sortDir: state.sortDir,
     page: state.page,
     pageSize: 50,
-  });
+  };
+  const advisories = useGroupAdvisories(showAdvisories ? id : undefined, advisoryParams);
 
   const sort = useServerSort(groupAdvisorySort, state, setState);
 
@@ -178,7 +180,29 @@ export function GroupDetailPage() {
       </div>
 
       <Card className="mb-4">
-        <CardHeader title="Applications in this group" />
+        <CardHeader
+          title="Applications in this group"
+          actions={
+            <ExportTableButton
+              title="Group members"
+              filename={`${group.name}-applications`}
+              rows={group.members}
+              columns={[
+                { header: "Application", value: (m) => m.name, width: 36 },
+                {
+                  header: "Status",
+                  value: (m) =>
+                    m.status === "pending_confirmation" ? "Unconfirmed" : m.status === "active" ? "Active" : "Inactive",
+                  width: 12,
+                },
+                ...(showAdvisories
+                  ? [{ header: "Advisories", value: (m: GroupMember) => m.advisories, width: 11 }]
+                  : []),
+                { header: "Last scan", value: (m) => exportDate(m.lastScanAt), width: 18 },
+              ]}
+            />
+          }
+        />
         {group.members.length === 0 ? (
           <EmptyState
             title="No applications yet"
@@ -244,7 +268,24 @@ export function GroupDetailPage() {
 
       {showAdvisories ? (
         <Card>
-          <CardHeader title="Advisories across this group" />
+          <CardHeader
+            title="Advisories across this group"
+            actions={
+              <ExportTableButton
+                title="Group advisories"
+                filename={`${group.name}-advisories`}
+                fetchRows={(progress) => fetchAllPages<GroupAdvisory>(`/groups/${group.id}/advisories`, advisoryParams, progress)}
+                columns={[
+                  { header: "Advisory", value: (a) => a.vulnerabilityId, width: 22 },
+                  { header: "Severity", value: (a) => a.severity, width: 10 },
+                  { header: "CVSS", value: (a) => a.cvssScore, width: 7 },
+                  { header: "Affected applications", value: (a) => a.affectedMembers, width: 20 },
+                  { header: "Affected packages", value: (a) => a.affectedPackages, width: 17 },
+                  { header: "Fix available", value: (a) => (a.fixable ? "yes" : "no"), width: 12 },
+                ]}
+              />
+            }
+          />
           <div className="border-b border-border-base p-3">
             <div className="max-w-[200px]">
               <label

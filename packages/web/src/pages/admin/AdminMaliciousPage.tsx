@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate } from "../../components/ExportTable.tsx";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { MaliciousFeedAttempt, MaliciousSettings, MaliciousStatus } from "@sbom/shared";
@@ -289,6 +290,26 @@ export function AdminMaliciousPage() {
         <CardHeader
           title="Refresh history"
           subtitle="Every attempt, successful or not - so a stale feed can be explained rather than guessed at."
+          actions={
+            <ExportTableButton
+              title="Feed refresh history"
+              filename="malicious-feed-history"
+              rows={historyQuery.data ?? []}
+              columns={[
+                { header: "Started", value: (a) => exportDate(a.startedAt), width: 18 },
+                { header: "Finished", value: (a) => exportDate(a.finishedAt), width: 18 },
+                { header: "Trigger", value: (a) => a.trigger, width: 12 },
+                { header: "Outcome", value: (a) => a.outcome ?? "running", width: 12 },
+                { header: "Reports", value: (a) => a.reportsTotal, width: 10 },
+                { header: "Changed", value: (a) => a.reportsChanged, width: 10 },
+                { header: "Withdrawn", value: (a) => a.reportsWithdrawn, width: 10 },
+                { header: "Feed built", value: (a) => exportDate(a.feedBuiltAt), width: 18 },
+                { header: "Message", value: (a) => a.message, width: 50 },
+                { header: "Source", value: (a) => a.sourceUrl, width: 50 },
+                { header: "Who", value: (a) => a.actorEmail, width: 24 },
+              ]}
+            />
+          }
         />
         {historyQuery.isLoading ? (
           <LoadingBlock label="Loading history" />

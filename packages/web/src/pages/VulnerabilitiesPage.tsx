@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { AdvisoryImpact, VulnSeverity } from "@sbom/shared";
+import type { AdvisoryImpact, AdvisorySummary, VulnSeverity } from "@sbom/shared";
 import { useAdvisoryImpact, useAdvisorySearch, useVulnStatus } from "../lib/queries.ts";
 import { ComponentLocationCell, OriginBadge } from "../components/ComponentLocationCell.tsx";
 import {
@@ -12,7 +12,8 @@ import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { SEVERITY_ORDER, SeverityBadge, ScanningDisabledNotice } from "../components/Severity.tsx";
 import { advisorySort, sortDirections } from "@sbom/shared";
-import { useServerSort } from "../lib/useSort.ts";
+import { useServerSort } from "../lib/useSort.ts";
+import { ExportTableButton, exportDate, exportList, fetchAllPages, type ExportColumn } from "../components/ExportTable.tsx";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import {
   Badge,
@@ -141,6 +142,14 @@ export function VulnerabilitiesPage() {
               </Badge>
             ) : null}
           </span>
+        }
+        actions={
+          <ExportTableButton
+            title="Advisories"
+            filename="advisories"
+            fetchRows={(progress) => fetchAllPages<AdvisorySummary>("/vulnerabilities", params, progress)}
+            columns={ADVISORY_EXPORT_COLUMNS}
+          />
         }
       />
 
@@ -421,6 +430,7 @@ export function AdvisoryDetailPage() {
         title="Affected now"
         subtitle="The affected package is in these applications' current builds."
         rows={current}
+        advisoryId={data.advisory.vulnerabilityId}
         emptyHint="No application currently ships an affected package version."
       />
 
@@ -430,6 +440,7 @@ export function AdvisoryDetailPage() {
             title="Previously affected"
             subtitle="These applications shipped an affected version at some point but their current build does not."
             rows={historical}
+            advisoryId={data.advisory.vulnerabilityId}
             emptyHint=""
           />
         </div>
@@ -448,16 +459,52 @@ function ImpactTable({
   title,
   subtitle,
   rows,
+  advisoryId,
   emptyHint,
 }: {
   title: string;
   subtitle: string;
   rows: AdvisoryImpact["applications"];
+  advisoryId: string;
   emptyHint: string;
 }) {
   return (
     <Card>
-      <CardHeader title={title} subtitle={subtitle} />
+      <CardHeader
+        title={title}
+        subtitle={subtitle}
+        actions={
+          rows.length > 0 ? (
+            <ExportTableButton
+              title={title}
+              filename={`${advisoryId}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+              rows={rows}
+              columns={[
+                { header: "Application", value: (r) => r.applicationName, width: 36 },
+                { header: "Status", value: (r) => r.applicationStatus, width: 14 },
+                { header: "In current build", value: (r) => (r.current ? "yes" : "no"), width: 14 },
+                {
+                  header: "Affected packages",
+                  value: (r) => exportList(r.packages.map((p) => `${p.name} ${p.version ?? "unknown"}`)),
+                  width: 40,
+                },
+                { header: "Ecosystems", value: (r) => exportList([...new Set(r.packages.map((p) => p.ecosystem))]), width: 14 },
+                {
+                  header: "Fixed in",
+                  value: (r) => exportList([...new Set(r.packages.flatMap((p) => p.fixVersions))]),
+                  width: 20,
+                },
+                {
+                  header: "Locations",
+                  value: (r) => exportList(r.packages.flatMap((p) => p.location.paths ?? [])),
+                  width: 50,
+                },
+                { header: "Last seen", value: (r) => exportDate(r.lastSeenAt), width: 18 },
+              ]}
+            />
+          ) : undefined
+        }
+      />
       {rows.length === 0 ? (
         <EmptyState title="None" hint={emptyHint} />
       ) : (
@@ -530,3 +577,21 @@ function ImpactTable({
     </Card>
   );
 }
+
+/** One row per advisory, as the advisory list shows it. */
+const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
+  { header: "Severity", value: (a) => a.severity, width: 10 },
+  { header: "Advisory", value: (a) => a.vulnerabilityId, width: 22 },
+  { header: "Aliases", value: (a) => exportList(a.aliases), width: 22 },
+  { header: "CVSS", value: (a) => a.cvssBaseScore, width: 7 },
+  { header: "EPSS", value: (a) => a.epssScore, width: 8 },
+  { header: "Known exploited", value: (a) => (a.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Description", value: (a) => a.description, width: 60 },
+  { header: "Packages", value: (a) => a.affectedPackages, width: 10 },
+  { header: "Package versions", value: (a) => exportList(a.affectedPackageList), width: 40 },
+  { header: "Apps now", value: (a) => a.currentApplications, width: 10 },
+  { header: "Applications now", value: (a) => exportList(a.currentApplicationList), width: 40 },
+  { header: "Apps dropped", value: (a) => a.historicalApplications, width: 12 },
+  { header: "Fix available", value: (a) => (a.fixAvailable ? "yes" : "no"), width: 12 },
+  { header: "References", value: (a) => exportList(a.urls), width: 50 },
+];

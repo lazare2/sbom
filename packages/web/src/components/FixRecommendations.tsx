@@ -1,3 +1,4 @@
+import { ExportTableButton, exportList, severityColumns } from "./ExportTable.tsx";
 import { Fragment, useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { FixRecommendation, FixRecommendationReport } from "@sbom/shared";
@@ -36,6 +37,13 @@ import {
  * second checks the recommended versions with the scanner, which the first time can take a
  * while on a large base image. The table is usable throughout, and says which it is showing.
  */
+const STATUS_EXPORT_LABELS: Record<FixRecommendation["status"], string> = {
+  clean: "Clears every advisory",
+  residual: "Leaves advisories with no fix",
+  unverified: "Not verified",
+  no_fix: "No fix published",
+};
+
 export function FixRecommendationsCard({
   applicationId,
   scope,
@@ -66,6 +74,30 @@ export function FixRecommendationsCard({
         subtitle="One target version per package: the lowest that clears every advisory reported against it, then checked against the vulnerability database and moved forward if that version is itself affected."
         actions={
           <>
+            <ExportTableButton
+              title="Recommended upgrades"
+              filename="recommended-upgrades"
+              rows={rows}
+              columns={[
+                { header: "Package", value: (r) => r.name, width: 32 },
+                { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
+                { header: "Origin", value: (r) => (r.origin === "app" ? "Application" : "Base image"), width: 12 },
+                { header: "Installed", value: (r) => exportList(r.installedVersions), width: 18 },
+                { header: "Findings", value: (r) => r.findings, width: 10 },
+                ...severityColumns<FixRecommendation>("", (r) => r.counts),
+                { header: "Highest severity", value: (r) => r.highestSeverity, width: 15 },
+                { header: "Known exploited", value: (r) => r.knownExploited, width: 14 },
+                { header: "Minimum fix", value: (r) => r.minimumVersion, width: 16 },
+                { header: "Upgrade to", value: (r) => r.recommendedVersion, width: 16 },
+                { header: "Status", value: (r) => STATUS_EXPORT_LABELS[r.status], width: 24 },
+                {
+                  header: "Advisories",
+                  value: (r) =>
+                    exportList(r.advisories.map((a) => `${a.vulnerabilityId} (${a.severity}${a.fixedIn ? `, fixed in ${a.fixedIn}` : ", no fix"})`)),
+                  width: 60,
+                },
+              ]}
+            />
             <Select
               value={scope}
               onChange={(value) => onScopeChange(value)}

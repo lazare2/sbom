@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { ScanSummary, SeverityCounts, SortDirection } from "@sbom/shared";
+import type { RemovedComponent, ScanComponentEntry, ScanSummary, SeverityCounts, SortDirection } from "@sbom/shared";
 import { componentListSort, removedComponentSort, scanHistorySort } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
@@ -15,6 +15,13 @@ import {
 } from "../lib/queries.ts";
 import { formatBytes, formatDateTime, formatNumber, formatRelative, shortImageRef, shortSha } from "../lib/format.ts";
 import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
+import {
+  ExportTableButton,
+  exportDate,
+  fetchAllPages,
+  locationColumns,
+  severityColumns,
+} from "../components/ExportTable.tsx";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { DiffView, LastSeen, PackageLink } from "../components/DiffView.tsx";
 import { ComponentLocationCell } from "../components/ComponentLocationCell.tsx";
@@ -281,6 +288,7 @@ export function ApplicationDetailPage() {
       {state.tab === "components" ? (
         <ComponentsTab
           applicationId={app.id}
+          applicationName={app.name}
           hasScan={app.latestScanId !== null}
           state={state}
           setState={setState}
@@ -296,7 +304,7 @@ export function ApplicationDetailPage() {
           onViewChange={(vulnView) => setState({ vulnView })}
         />
       ) : state.tab === "removed" ? (
-        <RemovedTab applicationId={app.id} state={state} setState={setState} />
+        <RemovedTab applicationId={app.id} applicationName={app.name} state={state} setState={setState} />
       ) : (
         <HistoryTab
           applicationId={app.id}
@@ -336,11 +344,13 @@ type DetailState = ReturnType<typeof urlSpec.parse>;
 
 function ComponentsTab({
   applicationId,
+  applicationName,
   hasScan,
   state,
   setState,
 }: {
   applicationId: string;
+  applicationName: string;
   hasScan: boolean;
   state: DetailState;
   setState: (patch: Partial<DetailState>) => void;
@@ -393,6 +403,20 @@ function ComponentsTab({
           subtitle={data ? `${formatNumber(data.total)} matching` : undefined}
           actions={
             <>
+              <ExportTableButton
+                title="Components"
+                filename={`${applicationName}-components`}
+                fetchRows={(progress) =>
+                  fetchAllPages<ScanComponentEntry>(`/applications/${applicationId}/components`, params, progress)
+                }
+                columns={[
+                  { header: "Package", value: (c) => c.name, width: 32 },
+                  { header: "Version", value: (c) => c.version, width: 18 },
+                  { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
+                  ...locationColumns<ScanComponentEntry>((c) => c.location),
+                  { header: "Package URL", value: (c) => c.purl, width: 50 },
+                ]}
+              />
               <div className="w-52">
                 <TextInput
                   value={searchInput}
@@ -532,10 +556,12 @@ function ChangesTab({ applicationId }: { applicationId: string }) {
  */
 function RemovedTab({
   applicationId,
+  applicationName,
   state,
   setState,
 }: {
   applicationId: string;
+  applicationName: string;
   state: DetailState;
   setState: (patch: Partial<DetailState>) => void;
 }) {
@@ -583,6 +609,21 @@ function RemovedTab({
           }
           actions={
             <>
+              <ExportTableButton
+                title="Removed packages"
+                filename={`${applicationName}-removed-packages`}
+                fetchRows={(progress) =>
+                  fetchAllPages<RemovedComponent>(`/applications/${applicationId}/removed-components`, params, progress)
+                }
+                columns={[
+                  { header: "Package", value: (c) => c.name, width: 32 },
+                  { header: "Version", value: (c) => c.version, width: 18 },
+                  { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
+                  { header: "Last seen", value: (c) => exportDate(c.lastSeenAt), width: 18 },
+                  { header: "Last seen in build", value: (c) => c.lastSeenBuildNumber, width: 16 },
+                  { header: "Package URL", value: (c) => c.purl, width: 50 },
+                ]}
+              />
               <div className="w-52">
                 <TextInput
                   value={searchInput}
@@ -762,6 +803,7 @@ function VulnerabilitiesTab({
         subtitle="Matched against the installed vulnerability database. Application dependencies and base-image packages are counted separately - the base image usually contributes far more findings, and it is fixed by a rebuild rather than a dependency change."
         filters={filters}
         onChange={(patch) => setFilters((prev) => ({ ...prev, ...patch }))}
+        exportFrom={{ path: `/applications/${applicationId}/vulnerabilities`, filename: "findings" }}
       >
         {data ? <BreakdownTiles breakdown={data.breakdown} /> : null}
         <FindingsTable
@@ -897,9 +939,34 @@ function HistoryTab({
           title="Scan history"
           subtitle="Every build that submitted an SBOM. Nothing is trimmed automatically; select a build to see the components it shipped. Vulnerabilities are Critical / High / Medium / Low: Today is against the current database, When replaced is the count saved when a newer build took over."
           actions={
-            <Button size="sm" variant="primary" onClick={() => setUploading(true)}>
-              Upload SBOM
-            </Button>
+            <>
+              <ExportTableButton
+                title="Scan history"
+                filename={`${applicationName}-scan-history`}
+                fetchRows={(progress) => fetchAllPages<ScanSummary>(`/applications/${applicationId}/scans`, params, progress)}
+                columns={[
+                  { header: "Scanned", value: (s) => exportDate(s.createdAt), width: 18 },
+                  { header: "Current build", value: (s) => (s.isLatest ? "yes" : "no"), width: 12 },
+                  { header: "Build", value: (s) => s.buildNumber, width: 12 },
+                  { header: "Commit", value: (s) => s.commitSha, width: 42 },
+                  { header: "Branch", value: (s) => s.branch, width: 24 },
+                  { header: "Components", value: (s) => s.componentCount, width: 12 },
+                  ...severityColumns<ScanSummary>("App today", (s) => s.vulnerabilities?.today.app),
+                  ...severityColumns<ScanSummary>("Image today", (s) => s.vulnerabilities?.today.os),
+                  ...severityColumns<ScanSummary>("App when replaced", (s) => s.vulnerabilities?.whenReplaced?.app),
+                  ...severityColumns<ScanSummary>("Image when replaced", (s) => s.vulnerabilities?.whenReplaced?.os),
+                  { header: "Runs on", value: (s) => s.platform.summary, width: 32 },
+                  { header: "Image", value: (s) => s.imageRef, width: 50 },
+                  { header: "Source", value: (s) => s.source, width: 10 },
+                  { header: "Uploaded by", value: (s) => s.uploadedByEmail, width: 24 },
+                  { header: "Syft", value: (s) => [s.toolName, s.toolVersion].filter(Boolean).join(" "), width: 14 },
+                  { header: "SBOM bytes", value: (s) => s.sbomSizeBytes, width: 12 },
+                ]}
+              />
+              <Button size="sm" variant="primary" onClick={() => setUploading(true)}>
+                Upload SBOM
+              </Button>
+            </>
           }
         />
         {isLoading ? (

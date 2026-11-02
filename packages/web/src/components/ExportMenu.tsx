@@ -52,7 +52,7 @@ export function ExportMenu({
   return (
     <>
       <Button size={size} variant="secondary" onClick={() => setOpen(true)}>
-        Export…
+        Export SBOM…
       </Button>
 
       <Modal

@@ -1,3 +1,4 @@
+import { ExportTableButton, exportList } from "../../components/ExportTable.tsx";
 import { useEffect, useState } from "react";
 import { useClientSort } from "../../lib/useSort.ts";
 import type { AttributeDefinition, AttributeType } from "@sbom/shared";
@@ -123,9 +124,26 @@ export function AdminAttributesPage() {
           title="Application attributes"
           subtitle="Anything added here appears on every application's edit form. Tribe and Squad are linked to Access: their values are the tribes and squads a project is assigned to. A required attribute must be filled whenever an administrator creates, edits or confirms a project; CI uploads are never refused over one."
           actions={
-            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-              New attribute
-            </Button>
+            <>
+              <ExportTableButton
+                title="Application attributes"
+                filename="application-attributes"
+                rows={sort.rows}
+                columns={[
+                  { header: "Label", value: (d) => d.label, width: 24 },
+                  { header: "Key", value: (d) => d.key, width: 18 },
+                  { header: "Type", value: (d) => d.type, width: 12 },
+                  { header: "Options", value: (d) => exportList(d.options ?? []), width: 40 },
+                  { header: "Order", value: (d) => d.sortOrder, width: 8 },
+                  { header: "Required", value: (d) => (d.isRequired ? "yes" : "no"), width: 10 },
+                  { header: "Active", value: (d) => (d.isActive ? "yes" : "no"), width: 8 },
+                  { header: "Linked to", value: (d) => d.linkedTo, width: 10 },
+                ]}
+              />
+              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+                New attribute
+              </Button>
+            </>
           }
         />
 

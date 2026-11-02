@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate, fetchAllPages } from "../../components/ExportTable.tsx";
 import { Link } from "react-router";
 import type { AuditLogEntry } from "@sbom/shared";
 import { auditSort, sortDirections } from "@sbom/shared";
@@ -73,14 +74,15 @@ const spec = {
 export function AdminAuditPage() {
   const { state, setState } = useUrlState(spec);
 
-  const entries = useAuditLog({
+  const params = {
     targetType: state.targetType || undefined,
     action: state.action || undefined,
     sortBy: state.sortBy,
     sortDir: state.sortDir,
     page: state.page,
     pageSize: 50,
-  });
+  };
+  const entries = useAuditLog(params);
   const sort = useServerSort(auditSort, state, setState);
 
   return (
@@ -88,6 +90,21 @@ export function AdminAuditPage() {
       <CardHeader
         title="Audit log"
         subtitle="Every administrative change, oldest entries retained indefinitely. Ingest activity is not recorded here - scans are their own history."
+        actions={
+          <ExportTableButton
+            title="Audit log"
+            filename="audit-log"
+            fetchRows={(progress) => fetchAllPages<AuditLogEntry>("/admin/audit-log", params, progress)}
+            columns={[
+              { header: "When", value: (e) => exportDate(e.createdAt), width: 18 },
+              { header: "Who", value: (e) => e.actorEmail, width: 28 },
+              { header: "Action", value: (e) => e.action, width: 24 },
+              { header: "Object type", value: (e) => e.targetType, width: 16 },
+              { header: "Object id", value: (e) => e.targetId, width: 38 },
+              { header: "Detail", value: (e) => JSON.stringify(e.metadata), width: 80 },
+            ]}
+          />
+        }
       />
 
       <div className="flex flex-wrap items-center gap-2 border-b border-border-base px-4 py-2.5">

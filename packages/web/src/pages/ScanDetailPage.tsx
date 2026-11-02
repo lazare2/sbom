@@ -1,7 +1,8 @@
+import { ExportTableButton, fetchAllPages, locationColumns } from "../components/ExportTable.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ExportMenu } from "../components/ExportMenu.tsx";
-import { componentListSort } from "@sbom/shared";
+import { componentListSort, type ScanComponentEntry } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
 import { useScan, useScanComponents } from "../lib/queries.ts";
 import { formatBytes, formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
@@ -317,14 +318,28 @@ export function ScanDetailPage() {
           title="Components in this build"
           subtitle={components.data ? `${formatNumber(components.data.total)} matching` : undefined}
           actions={
-            <div className="w-52">
-              <TextInput
-                value={searchInput}
-                onChange={setSearchInput}
-                placeholder="Filter packages…"
-                ariaLabel="Filter components by name"
+            <>
+              <ExportTableButton
+                title="Components"
+                filename={`${scan.applicationName}-build-${scan.buildNumber ?? scan.id.slice(0, 8)}-components`}
+                fetchRows={(progress) => fetchAllPages<ScanComponentEntry>(`/scans/${scan.id}/components`, params, progress)}
+                columns={[
+                  { header: "Package", value: (c) => c.name, width: 32 },
+                  { header: "Version", value: (c) => c.version, width: 18 },
+                  { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
+                  ...locationColumns<ScanComponentEntry>((c) => c.location),
+                  { header: "Package URL", value: (c) => c.purl, width: 50 },
+                ]}
               />
-            </div>
+              <div className="w-52">
+                <TextInput
+                  value={searchInput}
+                  onChange={setSearchInput}
+                  placeholder="Filter packages…"
+                  ariaLabel="Filter components by name"
+                />
+              </div>
+            </>
           }
         />
         {components.isLoading ? (
@@ -427,6 +442,7 @@ function ScanFindings({ scanId }: { scanId: string }) {
       subtitle="Evaluated against the vulnerability database installed now, not the one current when this build was scanned."
       filters={filters}
       onChange={(patch) => setFilters((prev) => ({ ...prev, ...patch }))}
+      exportFrom={{ path: `/scans/${scanId}/vulnerabilities`, filename: "build-findings" }}
     >
       {data ? <BreakdownTiles breakdown={data.breakdown} /> : null}
       <FindingsTable

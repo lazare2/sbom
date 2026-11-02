@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate } from "../../components/ExportTable.tsx";
 import { useState } from "react";
 import type { IngestTokenSummary } from "@sbom/shared";
 import { useClientSort } from "../../lib/useSort.ts";
@@ -101,9 +102,25 @@ export function AdminTokensPage() {
           title="CI ingest tokens"
           subtitle="Presented as an Authorization: Bearer header on POST /api/v1/scans. Store in the Jenkins credentials store or a GitLab group-level CI/CD variable."
           actions={
-            <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
-              New token
-            </Button>
+            <>
+              <ExportTableButton
+                title="CI ingest tokens"
+                filename="ci-ingest-tokens"
+                rows={sort.rows}
+                columns={[
+                  { header: "Name", value: (t) => t.name, width: 28 },
+                  { header: "Ends in", value: (t) => t.tokenSuffix, width: 10 },
+                  { header: "Defined in", value: (t) => (t.source === "env" ? "Environment" : "Database"), width: 12 },
+                  { header: "Status", value: (t) => (t.isActive ? "active" : "revoked"), width: 10 },
+                  { header: "Created", value: (t) => exportDate(t.createdAt), width: 18 },
+                  { header: "Last used", value: (t) => exportDate(t.lastUsedAt), width: 18 },
+                  { header: "Revoked", value: (t) => exportDate(t.revokedAt), width: 18 },
+                ]}
+              />
+              <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
+                New token
+              </Button>
+            </>
           }
         />
 

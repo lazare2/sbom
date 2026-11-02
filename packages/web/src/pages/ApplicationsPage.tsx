@@ -16,6 +16,7 @@ import { CriticalHighBadges } from "../components/Severity.tsx";
 import { formatDateTime, formatNumber, formatRelative, humanizeKey } from "../lib/format.ts";
 import { readBool, readEnum, readEnumList, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
+import { attributeText, ExportTableButton, exportDate, exportList, fetchAllPages } from "../components/ExportTable.tsx";
 import {
   Badge,
   Button,
@@ -224,6 +225,40 @@ export function ApplicationsPage() {
           data
             ? `${formatNumber(data.total)} application${data.total === 1 ? "" : "s"}`
             : "Loading inventory…"
+        }
+        actions={
+          <ExportTableButton
+            title="Applications"
+            filename="applications"
+            fetchRows={(progress) => fetchAllPages<ApplicationSummary>("/applications", queryParams, progress)}
+            columns={[
+              { header: "Application", value: (a) => a.name, width: 36 },
+              { header: "Groups", value: (a) => exportList(a.groups.map((g) => g.name)), width: 24 },
+              {
+                header: "Status",
+                value: (a) =>
+                  a.status === "pending_confirmation" ? "Unconfirmed" : a.status === "active" ? "Active" : "Inactive",
+              },
+              { header: "Stale", value: (a) => (a.isStale ? "yes" : "no"), width: 8 },
+              { header: labelFor("tribe"), value: (a) => attributeText(a.attributes.tribe) },
+              { header: labelFor("squad"), value: (a) => attributeText(a.attributes.squad) },
+              { header: labelFor("owner"), value: (a) => attributeText(a.attributes.owner) },
+              { header: labelFor("severity"), value: (a) => attributeText(a.attributes.severity) },
+              { header: "Runs on", value: (a) => a.platform?.summary ?? null, width: 32 },
+              { header: "Components", value: (a) => a.latestComponentCount, width: 12 },
+              ...(showFindings
+                ? [
+                    { header: "Findings", value: (a: ApplicationSummary) => a.vulnerabilities?.total ?? null, width: 10 },
+                    { header: "App findings", value: (a: ApplicationSummary) => a.vulnerabilities?.app ?? null, width: 12 },
+                    { header: "Image findings", value: (a: ApplicationSummary) => a.vulnerabilities?.os ?? null, width: 14 },
+                    { header: "Critical", value: (a: ApplicationSummary) => a.vulnerabilities?.critical ?? null, width: 10 },
+                    { header: "High", value: (a: ApplicationSummary) => a.vulnerabilities?.high ?? null, width: 10 },
+                  ]
+                : []),
+              { header: "Scans", value: (a) => a.scanCount, width: 8 },
+              { header: "Last scan", value: (a) => exportDate(a.lastScanAt), width: 18 },
+            ]}
+          />
         }
       />
 

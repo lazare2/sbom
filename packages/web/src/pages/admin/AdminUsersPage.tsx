@@ -2,7 +2,8 @@ import { useState } from "react";
 import type { AccessRequest, UserSummary } from "@sbom/shared";
 import { sortDirections, userSort } from "@sbom/shared";
 import { useServerSort } from "../../lib/useSort.ts";
-import { useAuth } from "../../auth/AuthProvider.tsx";
+import { useAuth } from "../../auth/AuthProvider.tsx";
+import { ExportTableButton, exportDate, exportList, fetchAllPages } from "../../components/ExportTable.tsx";
 import { formatDate, formatRelative } from "../../lib/format.ts";
 import {
   useCreateUser,
@@ -180,19 +181,51 @@ export function AdminUsersPage() {
           title="Accounts"
           subtitle="Sign-in identifiers are usernames, not mailboxes - the platform never sends email. Passwords are issued here and handed over directly."
           actions={
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                // Cleared, or a create started from the queue and cancelled would silently
-                // resolve the next request made from this button.
-                setCreateFrom(null);
-                setNotice(null);
-                setCreateOpen(true);
-              }}
-            >
-              New account
-            </Button>
+            <>
+              <ExportTableButton
+                title="Accounts"
+                filename="accounts"
+                fetchRows={(progress) => fetchAllPages<UserSummary>("/admin/users", query, progress)}
+                columns={[
+                  { header: "Username", value: (u) => u.email, width: 30 },
+                  { header: "First name", value: (u) => u.firstName, width: 16 },
+                  { header: "Last name", value: (u) => u.lastName, width: 16 },
+                  { header: "Role", value: (u) => u.role, width: 8 },
+                  { header: "Sign-in", value: (u) => u.authProvider, width: 10 },
+                  { header: "Active", value: (u) => (u.isActive ? "yes" : "no"), width: 8 },
+                  {
+                    header: "Access",
+                    value: (u) =>
+                      u.role === "admin"
+                        ? "Everything (administrator)"
+                        : !u.hasAccess
+                          ? "No access"
+                          : u.applicationAccessRestricted
+                            ? "Restricted"
+                            : "Everything in granted environments",
+                    width: 30,
+                  },
+                  { header: "Squads", value: (u) => exportList(u.squads.map((s) => s.name)), width: 40 },
+                  { header: "Must change password", value: (u) => (u.mustChangePassword ? "yes" : "no"), width: 20 },
+                  { header: "Last sign-in", value: (u) => exportDate(u.lastLoginAt), width: 18 },
+                  { header: "Active sessions", value: (u) => u.activeSessions, width: 14 },
+                  { header: "Created", value: (u) => exportDate(u.createdAt), width: 18 },
+                ]}
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  // Cleared, or a create started from the queue and cancelled would silently
+                  // resolve the next request made from this button.
+                  setCreateFrom(null);
+                  setNotice(null);
+                  setCreateOpen(true);
+                }}
+              >
+                New account
+              </Button>
+            </>
           }
         />
 
@@ -1641,6 +1674,24 @@ function AccessRequestsCard({
           pending.length > 0 ? `Access requests (${pending.length})` : "Access requests"
         }
         subtitle="Recorded when somebody signs in through your organisation's directory and no account could be made for them - automatic account creation is off, their address is outside the allowed domains, or the directory sent no address."
+        actions={
+          pending.length > 0 ? (
+            <ExportTableButton
+              title="Access requests"
+              filename="access-requests"
+              rows={pending}
+              columns={[
+                { header: "Name", value: (r) => r.displayName, width: 24 },
+                { header: "Email", value: (r) => r.email, width: 30 },
+                { header: "Provider", value: (r) => r.provider, width: 12 },
+                { header: "Reason", value: (r) => r.reason, width: 20 },
+                { header: "Attempts", value: (r) => r.attempts, width: 10 },
+                { header: "First tried", value: (r) => exportDate(r.firstSeenAt), width: 18 },
+                { header: "Last tried", value: (r) => exportDate(r.lastSeenAt), width: 18 },
+              ]}
+            />
+          ) : undefined
+        }
       />
 
       {error ? (

@@ -9,7 +9,8 @@ import {
   type SortDirection,
 } from "@sbom/shared";
 import { useAuth } from "../auth/AuthProvider.tsx";
-import { useMaliciousFindings, useMaliciousStatus } from "../lib/queries.ts";
+import { useMaliciousFindings, useMaliciousStatus } from "../lib/queries.ts";
+import { ExportTableButton, exportDate, exportList, fetchAllPages } from "../components/ExportTable.tsx";
 import { useServerSort } from "../lib/useSort.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { CorroborationBadge } from "../components/CorroborationBadge.tsx";
@@ -170,6 +171,30 @@ export function MaliciousPage() {
               </strong>
             ) : null}
           </>
+        }
+        actions={
+          <ExportTableButton
+            title="Malicious packages"
+            filename="malicious-packages"
+            fetchRows={(progress) => fetchAllPages<MaliciousFinding>("/malicious", params, progress)}
+            columns={[
+              { header: "Report", value: (f) => f.id, width: 18 },
+              { header: "Package", value: (f) => f.packageName, width: 32 },
+              { header: "Ecosystem", value: (f) => f.ecosystem, width: 12 },
+              { header: "Versions found", value: (f) => exportList(f.observedVersions), width: 20 },
+              { header: "Summary", value: (f) => f.summary, width: 50 },
+              { header: "Reporters", value: (f) => exportList(f.sources), width: 24 },
+              { header: "Corroboration", value: (f) => f.corroboration, width: 14 },
+              { header: "Apps now", value: (f) => f.currentApplications, width: 10 },
+              { header: "Apps ever", value: (f) => f.affectedApplications, width: 10 },
+              { header: "First shipped", value: (f) => exportDate(f.firstShippedAt), width: 18 },
+              { header: "Last shipped", value: (f) => exportDate(f.lastShippedAt), width: 18 },
+              { header: "Acknowledgement", value: (f) => f.acknowledgement?.state ?? null, width: 16 },
+              { header: "Acknowledgement note", value: (f) => f.acknowledgement?.note ?? null, width: 40 },
+              { header: "Published", value: (f) => exportDate(f.publishedAt), width: 18 },
+              { header: "Reference", value: (f) => f.referenceUrl, width: 40 },
+            ]}
+          />
         }
       />
 

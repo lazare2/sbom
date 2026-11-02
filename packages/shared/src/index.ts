@@ -27,3 +27,4 @@ export * from "./schemas/tribe.js";
 export * from "./schemas/fix-recommendation.js";
 export * from "./schemas/environment.js";
 export * from "./schemas/vuln-provider.js";
+export * from "./xlsx.js";

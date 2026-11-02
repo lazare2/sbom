@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { API_TOKEN_SECRET_PREFIX, type ApiTokenSummary } from "@sbom/shared";
-import { useApiAccess, useApiTokens } from "../lib/queries.ts";
+import { useApiAccess, useApiTokens } from "../lib/queries.ts";
+import { ExportTableButton, exportDate, type ExportColumn } from "../components/ExportTable.tsx";
 import { useCreateApiToken, useDeleteApiToken, useRevokeApiToken } from "../lib/mutations.ts";
 import { formatDate, formatRelative } from "../lib/format.ts";
 import {
@@ -129,6 +130,18 @@ function EndpointCard({
   );
 }
 
+/** Never the secret, which is not stored: only what the table shows about each token. */
+export const API_TOKEN_EXPORT_COLUMNS: ExportColumn<ApiTokenSummary>[] = [
+  { header: "Name", value: (t) => t.name, width: 28 },
+  { header: "Access", value: (t) => (t.scope === "write" ? "Read and write" : "Read only"), width: 14 },
+  { header: "Ends in", value: (t) => t.tokenSuffix, width: 10 },
+  { header: "Status", value: (t) => (t.active ? "active" : (t.inactiveReason ?? "inactive")), width: 16 },
+  { header: "Created", value: (t) => exportDate(t.createdAt), width: 18 },
+  { header: "Expires", value: (t) => exportDate(t.expiresAt), width: 18 },
+  { header: "Last used", value: (t) => exportDate(t.lastUsedAt), width: 18 },
+  { header: "Revoked", value: (t) => exportDate(t.revokedAt), width: 18 },
+];
+
 function TokenCard({
   tokens,
   maxDays,
@@ -172,6 +185,11 @@ function TokenCard({
       <CardHeader
         title="Your tokens"
         subtitle="Shown once at creation and stored only as a hash - a lost token cannot be recovered, only replaced."
+        actions={
+          rows.length > 0 ? (
+            <ExportTableButton title="API tokens" filename="api-tokens" rows={rows} columns={API_TOKEN_EXPORT_COLUMNS} />
+          ) : undefined
+        }
       />
 
       <div className="space-y-4 p-4 pt-0">

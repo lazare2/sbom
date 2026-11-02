@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate } from "../../components/ExportTable.tsx";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import type {
@@ -743,6 +744,25 @@ function HistoryCard() {
       <CardHeader
         title="Update history"
         subtitle="Every attempt, including the ones that found no route to the internet - that is how an old database becomes explainable rather than mysterious."
+        actions={
+          <ExportTableButton
+            title="Database update history"
+            filename="vulnerability-db-history"
+            rows={sort.rows}
+            columns={[
+              { header: "Started", value: (a) => exportDate(a.startedAt), width: 18 },
+              { header: "Finished", value: (a) => exportDate(a.finishedAt), width: 18 },
+              { header: "Trigger", value: (a) => a.trigger, width: 12 },
+              { header: "Outcome", value: (a) => a.outcome ?? "running", width: 14 },
+              { header: "Who", value: (a) => a.actorEmail, width: 24 },
+              { header: "Database built before", value: (a) => exportDate(a.dbBuiltBefore), width: 20 },
+              { header: "Database built after", value: (a) => exportDate(a.dbBuiltAfter), width: 20 },
+              { header: "Schema", value: (a) => a.schemaVersion, width: 10 },
+              { header: "Message", value: (a) => a.message, width: 50 },
+              { header: "Source", value: (a) => a.sourceUrl, width: 50 },
+            ]}
+          />
+        }
       />
       {isLoading ? (
         <LoadingBlock label="Loading history" />
@@ -849,6 +869,30 @@ function SuppressionsCard() {
       <CardHeader
         title="Accepted risks"
         subtitle="Findings an administrator has assessed and excluded from every count. Excluded, never deleted - so the decision stays auditable."
+        actions={
+          <ExportTableButton
+            title="Accepted risks"
+            filename="accepted-risks"
+            rows={sort.rows}
+            columns={[
+              { header: "Advisory", value: (s) => s.vulnerabilityId, width: 22 },
+              { header: "Severity", value: (s) => s.severity, width: 10 },
+              { header: "Application", value: (s) => s.applicationName ?? "Every application", width: 30 },
+              {
+                header: "Package",
+                value: (s) => (s.componentName ? `${s.componentName} ${s.componentVersion ?? ""}`.trim() : "Every package"),
+                width: 30,
+              },
+              { header: "Status", value: (s) => (s.vexStatus ? VEX_STATUS_LABELS[s.vexStatus] : null), width: 20 },
+              { header: "Justification", value: (s) => (s.vexJustification ? VEX_JUSTIFICATION_LABELS[s.vexJustification] : null), width: 30 },
+              { header: "Reason", value: (s) => s.reason, width: 50 },
+              { header: "Accepted by", value: (s) => s.createdByEmail, width: 24 },
+              { header: "Accepted", value: (s) => exportDate(s.createdAt), width: 18 },
+              { header: "Expires", value: (s) => exportDate(s.expiresAt), width: 18 },
+              { header: "Expired", value: (s) => (s.expired ? "yes" : "no"), width: 9 },
+            ]}
+          />
+        }
       />
       {unclassified > 0 ? (
         <div

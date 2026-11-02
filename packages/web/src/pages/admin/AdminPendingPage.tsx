@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate, fetchAllPages } from "../../components/ExportTable.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { ApplicationSummary, Attributes, SortDirection } from "@sbom/shared";
@@ -56,12 +57,13 @@ export function AdminPendingPage() {
   const [sortBy, setSortBy] = useState<(typeof applicationSort)["fields"][number]>("lastScanAt");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
 
-  const pending = useApplications({
+  const params = {
     status: ["pending_confirmation"],
     sortBy,
     sortDir,
     pageSize: 100,
-  });
+  };
+  const pending = useApplications(params);
 
   const sort = useServerSort(applicationSort, { sortBy, sortDir }, (patch) => {
     if (patch.sortBy) setSortBy(patch.sortBy);
@@ -74,6 +76,20 @@ export function AdminPendingPage() {
         <CardHeader
           title="Applications awaiting confirmation"
           subtitle="Created automatically when a scan arrived under a name that matched no application or alias."
+          actions={
+            <ExportTableButton
+              title="Awaiting confirmation"
+              filename="applications-awaiting-confirmation"
+              fetchRows={(progress) => fetchAllPages<ApplicationSummary>("/applications", params, progress)}
+              columns={[
+                { header: "Name reported by CI", value: (a) => a.name, width: 36 },
+                { header: "Scans", value: (a) => a.scanCount, width: 8 },
+                { header: "Packages", value: (a) => a.latestComponentCount, width: 10 },
+                { header: "First seen", value: (a) => exportDate(a.createdAt), width: 18 },
+                { header: "Last scan", value: (a) => exportDate(a.lastScanAt), width: 18 },
+              ]}
+            />
+          }
         />
 
         {actionError ? (

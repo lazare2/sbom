@@ -1,3 +1,4 @@
+import { ExportTableButton, exportDate, exportList, fetchAllPages } from "../../components/ExportTable.tsx";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { ApplicationGroupSummary, ApplicationSummary } from "@sbom/shared";
@@ -61,6 +62,21 @@ export function AdminGroupsPage() {
         <CardHeader
           title="Groups"
           subtitle="Named sets of applications. One application can belong to as many as you like."
+          actions={
+            <ExportTableButton
+              title="Groups"
+              filename="admin-groups"
+              // Every group, not only the first page of 200 the screen fetches.
+              fetchRows={(progress) => fetchAllPages<ApplicationGroupSummary>("/groups", {}, progress)}
+              columns={[
+                { header: "Group", value: (g) => g.name, width: 28 },
+                { header: "Description", value: (g) => g.description, width: 40 },
+                { header: "Applications", value: (g) => g.applicationCount, width: 12 },
+                { header: "Members", value: (g) => exportList(g.memberNames), width: 60 },
+                { header: "Created", value: (g) => exportDate(g.createdAt), width: 18 },
+              ]}
+            />
+          }
         />
 
         {groups.error ? (
