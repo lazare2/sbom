@@ -109,3 +109,12 @@ body {
 .nums {
   font-variant-numeric: tabular-nums;
 }
+
+/*
+  Once a reader has resized a table its columns are fixed, so content has to fit the width
+  they chose: long words break instead of spilling over the next column.
+*/
+table[data-resized] :is(th, td) {
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}

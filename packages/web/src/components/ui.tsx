@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { ScanSource } from "@sbom/shared";
 import { STATUS_LABELS } from "../lib/format.ts";
 import { ApiError } from "../lib/api.ts";
@@ -178,14 +187,180 @@ export function TableWrap({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto">{children}</div>;
 }
 
+/**
+ * The default minimum for a column that names an application.
+ *
+ * A minimum rather than a width: these columns had no width at all and were squeezed by
+ * their fixed-width neighbours until every name wrapped. A fixed 280px would fix that and
+ * also cap the column in a table that used to give names more room.
+ */
+export const NAME_COLUMN_MIN_WIDTH = "280px";
+
+/** Narrowest a column can be dragged to. Below this the header text is unreadable. */
+const MIN_RESIZED_COLUMN_PX = 48;
+
+interface ColumnResize {
+  begin: (event: React.PointerEvent, th: HTMLTableCellElement) => void;
+  reset: () => void;
+}
+
+const ColumnResizeContext = createContext<ColumnResize | null>(null);
+
+/**
+ * The key a table's widths are remembered under: its column headings.
+ *
+ * Derived rather than passed so that every table gets resizing without each call site
+ * inventing an id. The headings identify a table well, and two tables that share every
+ * heading are the same table as far as a reader's column preferences go - the same list on
+ * two different applications, for instance. A table that shows or hides a column gets a
+ * separate entry per layout, which is correct: the stored widths are positional.
+ *
+ * The sort carets are stripped because they change on every click.
+ */
+function columnKey(table: HTMLTableElement): string | null {
+  const row = table.tHead?.rows[0];
+  if (!row) return null;
+  const labels = Array.from(row.cells, (cell) => (cell.textContent ?? "").replace(/[↕▲▼]/g, "").trim());
+  return `sbom.columns:${labels.join("|")}`;
+}
+
+function readWidths(key: string, columns: number): number[] | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === columns &&
+      parsed.every((w) => typeof w === "number" && Number.isFinite(w) && w > 0)
+    ) {
+      return parsed as number[];
+    }
+  } catch {
+    // Storage blocked or the entry is corrupt: fall back to the default layout.
+  }
+  return null;
+}
+
+function writeWidths(key: string, widths: number[] | null) {
+  try {
+    if (widths) window.localStorage.setItem(key, JSON.stringify(widths.map(Math.round)));
+    else window.localStorage.removeItem(key);
+  } catch {
+    // A width that is not remembered is a convenience lost, not an error.
+  }
+}
+
+/**
+ * A table whose columns can be resized by dragging the edge of any heading.
+ *
+ * The browser lays the table out as before until somebody drags. At that moment every
+ * column's rendered width is measured and frozen into a `<colgroup>` under fixed layout, so
+ * widening one column does not make the browser quietly reshuffle all the others - which is
+ * what automatic layout would do, and what makes resizing feel broken.
+ *
+ * Widths are remembered per browser (see `columnKey`). Double-clicking any handle returns the
+ * table to its default layout.
+ */
 export function Table({ children }: { children: ReactNode }) {
-  return <table className="w-full border-collapse text-sm">{children}</table>;
+  const ref = useRef<HTMLTableElement>(null);
+  const [layout, setLayout] = useState<{ key: string; widths: number[] | null } | null>(null);
+
+  /*
+    Runs after every render rather than once: a table can gain or lose a column (findings
+    appear when scanning is switched on), and that is a different layout with its own key.
+    It only sets state when the key actually changed, so it settles after one pass.
+  */
+  useLayoutEffect(() => {
+    const table = ref.current;
+    if (!table) return;
+    const key = columnKey(table);
+    if (!key || key === layout?.key) return;
+    const columns = table.tHead?.rows[0]?.cells.length ?? 0;
+    setLayout({ key, widths: readWidths(key, columns) });
+  });
+
+  const resize = useMemo<ColumnResize>(
+    () => ({
+      begin(event, th) {
+        const table = ref.current;
+        const key = table ? columnKey(table) : null;
+        const row = table?.tHead?.rows[0];
+        if (!table || !key || !row) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const start = Array.from(row.cells, (cell) => cell.getBoundingClientRect().width);
+        const index = th.cellIndex;
+        const originX = event.clientX;
+        let current = start;
+        setLayout({ key, widths: start });
+
+        const move = (e: PointerEvent) => {
+          current = start.slice();
+          current[index] = Math.max(MIN_RESIZED_COLUMN_PX, start[index]! + e.clientX - originX);
+          setLayout({ key, widths: current });
+        };
+        const end = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", end);
+          window.removeEventListener("pointercancel", end);
+          document.body.style.removeProperty("cursor");
+          document.body.style.removeProperty("user-select");
+          writeWidths(key, current);
+        };
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", end);
+        window.addEventListener("pointercancel", end);
+      },
+      reset() {
+        const table = ref.current;
+        const key = table ? columnKey(table) : null;
+        if (!key) return;
+        writeWidths(key, null);
+        setLayout({ key, widths: null });
+      },
+    }),
+    [],
+  );
+
+  const widths = layout?.widths ?? null;
+  return (
+    <ColumnResizeContext.Provider value={resize}>
+      <table
+        ref={ref}
+        data-resized={widths ? "" : undefined}
+        className={`border-collapse text-sm ${widths ? "" : "w-full"}`}
+        style={
+          widths
+            ? {
+                tableLayout: "fixed",
+                width: `${widths.reduce((sum, w) => sum + w, 0)}px`,
+                minWidth: "100%",
+              }
+            : undefined
+        }
+      >
+        {widths ? (
+          <colgroup>
+            {widths.map((w, i) => (
+              <col key={i} style={{ width: `${w}px` }} />
+            ))}
+          </colgroup>
+        ) : null}
+        {children}
+      </table>
+    </ColumnResizeContext.Provider>
+  );
 }
 
 export function Th({
   children,
   align = "left",
   width,
+  minWidth,
   onSort,
   sorted,
 }: {
@@ -193,10 +368,33 @@ export function Th({
   children?: ReactNode;
   align?: "left" | "right" | "center";
   width?: string;
+  /**
+   * A floor for the column under automatic layout, which can still grow past it. Use
+   * `NAME_COLUMN_MIN_WIDTH` for application names.
+   */
+  minWidth?: string;
   onSort?: () => void;
   sorted?: "asc" | "desc" | false;
 }) {
+  const resize = useContext(ColumnResizeContext);
   const alignClass = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+  const label = onSort ? (
+    <button
+      type="button"
+      onClick={onSort}
+      className="inline-flex items-center gap-1 hover:text-text-base"
+      // Names the action rather than leaving the button labelled by the column text
+      // alone, which reads as "Application" with no hint that it does anything.
+      title={`Sort by ${typeof children === "string" ? children : "this column"}`}
+    >
+      {children}
+      <span aria-hidden="true" className={sorted ? "text-accent" : "text-text-faint"}>
+        {sorted === "asc" ? "▲" : sorted === "desc" ? "▼" : "↕"}
+      </span>
+    </button>
+  ) : (
+    children
+  );
   return (
     <th
       style={width ? { width } : undefined}
@@ -213,25 +411,23 @@ export function Th({
       aria-sort={
         onSort ? (sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none") : undefined
       }
-      className={`sticky top-0 z-10 border-b border-border-base bg-bg-subtle px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted ${alignClass}`}
+      className={`group/th sticky top-0 z-10 border-b border-border-base bg-bg-subtle px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted ${alignClass}`}
     >
-      {onSort ? (
-        <button
-          type="button"
-          onClick={onSort}
-          className="inline-flex items-center gap-1 hover:text-text-base"
-          // Names the action rather than leaving the button labelled by the column text
-          // alone, which reads as "Application" with no hint that it does anything.
-          title={`Sort by ${typeof children === "string" ? children : "this column"}`}
-        >
-          {children}
-          <span aria-hidden="true" className={sorted ? "text-accent" : "text-text-faint"}>
-            {sorted === "asc" ? "▲" : sorted === "desc" ? "▼" : "↕"}
-          </span>
-        </button>
-      ) : (
-        children
-      )}
+      {minWidth ? <div style={{ minWidth }}>{label}</div> : label}
+      {resize ? (
+        <span
+          // A pointer convenience; the layout it changes is not information a screen reader lacks.
+          aria-hidden="true"
+          title="Drag to resize. Double-click to reset all columns."
+          onPointerDown={(e) => resize.begin(e, e.currentTarget.parentElement as HTMLTableCellElement)}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            resize.reset();
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-0 right-0 bottom-0 w-1.5 cursor-col-resize touch-none select-none group-hover/th:bg-border-strong hover:!bg-accent"
+        />
+      ) : null}
     </th>
   );
 }

@@ -39,6 +39,7 @@ import {
   Td,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "../components/ui.tsx";
 
 /**
@@ -518,7 +519,7 @@ function TopProjectsCard({ report }: { report: AnalyticsReport }) {
           <Table>
             <thead>
               <tr>
-                <Th onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
+                <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
                   Application
                 </Th>
                 <Th onSort={() => sort.toggle("platform")} sorted={sort.stateOf("platform")}>

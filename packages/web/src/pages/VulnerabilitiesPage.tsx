@@ -35,6 +35,7 @@ import {
   TextInput,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "../components/ui.tsx";
 
 const SCOPES = ["app", "os", "all"] as const;
@@ -464,7 +465,7 @@ function ImpactTable({
           <Table>
             <thead>
               <tr>
-                <Th>Application</Th>
+                <Th minWidth={NAME_COLUMN_MIN_WIDTH}>Application</Th>
                 <Th width="110px">Status</Th>
                 <Th>Affected packages</Th>
                 <Th width="160px">Fixed in</Th>

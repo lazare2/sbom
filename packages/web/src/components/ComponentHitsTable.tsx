@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import type { ComponentSearchHit, componentSearchSort } from "@sbom/shared";
 import { formatDateTime, formatRelative } from "../lib/format.ts";
 import type { SortControl } from "../lib/useSort.ts";
-import { Badge, EcosystemBadge, StatusBadge, Table, TableWrap, Td, Th, Tr } from "./ui.tsx";
+import { Badge, EcosystemBadge, StatusBadge, Table, TableWrap, Td, Th, Tr , NAME_COLUMN_MIN_WIDTH } from "./ui.tsx";
 
 type HitSortField = (typeof componentSearchSort)["fields"][number];
 
@@ -36,7 +36,7 @@ export function ComponentHitsTable({
       <Table>
         <thead>
           <tr>
-            <Th onSort={on("applicationName")} sorted={at("applicationName")}>
+            <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={on("applicationName")} sorted={at("applicationName")}>
               Application
             </Th>
             <Th onSort={on("applicationStatus")} sorted={at("applicationStatus")} width="120px">

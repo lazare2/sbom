@@ -31,6 +31,7 @@ import {
   Td,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "./ui.tsx";
 
 /**
@@ -474,7 +475,7 @@ export function TopVulnerableApplicationsCard({ report }: { report: Vulnerabilit
           <Table>
             <thead>
               <tr>
-                <Th onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
+                <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
                   Application
                 </Th>
                 {/*

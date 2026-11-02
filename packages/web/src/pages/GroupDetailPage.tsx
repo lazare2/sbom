@@ -33,6 +33,7 @@ import {
   Td,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "../components/ui.tsx";
 
 const DEFAULTS = {
@@ -188,7 +189,7 @@ export function GroupDetailPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th>Application</Th>
+                  <Th minWidth={NAME_COLUMN_MIN_WIDTH}>Application</Th>
                   <Th width="140px">Status</Th>
                   {showAdvisories ? (
                     <Th align="right" width="120px">

@@ -30,6 +30,7 @@ import {
   TextInput,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "../../components/ui.tsx";
 
 /**
@@ -97,7 +98,7 @@ export function AdminPendingPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                  <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
                     Name reported by CI
                   </Th>
                   <Th onSort={() => sort.toggle("scanCount")} sorted={sort.stateOf("scanCount")} align="right">

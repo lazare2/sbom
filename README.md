@@ -323,6 +323,18 @@ list by a custom attribute, where the target is administrator-defined and cannot
 enum - safe because a jsonb key is a *value* (`attributes->>$1`) and binds as an ordinary
 parameter.
 
+### Resizing columns
+
+Every table's columns can be resized by dragging the right edge of a heading; double-clicking
+an edge puts the table back to its default layout. Widths are remembered in the browser,
+keyed by the table's column headings, so the same list keeps its layout across applications.
+Columns that name an application start at a 280px minimum (`NAME_COLUMN_MIN_WIDTH`) so the
+name does not wrap beside fixed-width neighbours.
+
+The first drag measures every column and switches the table to fixed layout. Under automatic
+layout, widening one column makes the browser quietly redistribute all the others, which reads
+as the control not working.
+
 ### Searching a list of packages
 
 **Package search → A list** takes a pasted list and checks all of it against the

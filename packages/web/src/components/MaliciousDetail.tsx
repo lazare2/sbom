@@ -33,6 +33,7 @@ import {
   Td,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "./ui.tsx";
 
 /**
@@ -248,7 +249,7 @@ function ImpactTable({
         <Table>
           <thead>
             <tr>
-              <Th>Application</Th>
+              <Th minWidth={NAME_COLUMN_MIN_WIDTH}>Application</Th>
               <Th width="300px">Where it is</Th>
               <Th width="120px">Versions</Th>
               <Th align="right" width="80px">

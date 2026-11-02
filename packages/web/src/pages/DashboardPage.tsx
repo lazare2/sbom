@@ -35,6 +35,7 @@ import {
   Td,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "../components/ui.tsx";
 
 /**
@@ -280,7 +281,7 @@ export function DashboardPage() {
             <Table>
               <thead>
                 <tr>
-                  <Th onSort={() => recentSort.toggle("application")} sorted={recentSort.stateOf("application")}>
+                  <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => recentSort.toggle("application")} sorted={recentSort.stateOf("application")}>
                     Application
                   </Th>
                   <Th onSort={() => recentSort.toggle("build")} sorted={recentSort.stateOf("build")}>
@@ -382,7 +383,7 @@ function NeedsAttentionCard() {
           <Table>
             <thead>
               <tr>
-                <Th>Application</Th>
+                <Th minWidth={NAME_COLUMN_MIN_WIDTH}>Application</Th>
                 <Th>Last build</Th>
                 <Th align="right">Silent for</Th>
               </tr>

@@ -34,6 +34,7 @@ import {
   TextInput,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "../components/ui.tsx";
 
 const ALL_STATUSES = ["active", "inactive", "pending_confirmation"] as const;
@@ -386,7 +387,7 @@ export function ApplicationsPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                    <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
                       Application
                     </Th>
                     <Th onSort={() => sort.toggle("status")} sorted={sort.stateOf("status")} width="130px">

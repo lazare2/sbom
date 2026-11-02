@@ -26,6 +26,7 @@ import {
   TextInput,
   Th,
   Tr,
+  NAME_COLUMN_MIN_WIDTH,
 } from "../../components/ui.tsx";
 import { ApplicationFormModal } from "./ApplicationFormModal.tsx";
 
@@ -145,7 +146,7 @@ export function AdminApplicationsPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                    <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
                       Name
                     </Th>
                     <Th onSort={() => sort.toggle("status")} sorted={sort.stateOf("status")}>
