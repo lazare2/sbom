@@ -2,8 +2,8 @@ import { useState } from "react";
 import type { AccessRequest, UserSummary } from "@sbom/shared";
 import { sortDirections, userSort } from "@sbom/shared";
 import { useServerSort } from "../../lib/useSort.ts";
-import { useAuth } from "../../auth/AuthProvider.tsx";
-import { SquadBadges } from "../../components/SquadBadges.tsx";
+import { useAuth } from "../../auth/AuthProvider.tsx";
+import { SquadBadges } from "../../components/SquadBadges.tsx";
 import { ExportTableButton, exportDate, exportList, fetchAllPages } from "../../components/ExportTable.tsx";
 import { formatDate, formatRelative } from "../../lib/format.ts";
 import {
@@ -30,7 +30,7 @@ import {
   useUsers,
 } from "../../lib/queries.ts";
 import { useDebounced } from "../../lib/useDebounced.ts";
-import { ApplicationPicker, GroupPicker, ReachablePanel } from "./UserAccessPickers.tsx";
+import { ApplicationPicker, GroupPicker, ReachablePanel, SquadPicker } from "./UserAccessPickers.tsx";
 import { readEnum, readNumber, readString, useUrlState } from "../../lib/useUrlState.ts";
 import {
   Badge,
@@ -1364,23 +1364,12 @@ function UserAccessModal({ target, onClose }: { target: UserSummary | null; onCl
             */}
             <section className="border-t border-border-base pt-3">
               <h3 className="mb-1.5 text-xs font-medium text-text-muted">Squads</h3>
-              {(squads.data?.squads ?? []).length === 0 ? (
-                <p className="text-[11px] text-text-faint">
-                  No squads exist yet. Create them under Administration → Squads to grant a team
-                  its applications in one place.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                  {(squads.data?.squads ?? []).map((squad) => (
-                    <Checkbox
-                      key={squad.id}
-                      checked={currentSquads.includes(squad.id)}
-                      onChange={(on) => setSquadIds(toggle(currentSquads, squad.id, on))}
-                      label={`${squad.name} (${squad.reachableApplicationCount} apps)`}
-                    />
-                  ))}
-                </div>
-              )}
+              <SquadPicker
+                squads={squads.data?.squads ?? []}
+                selected={currentSquads}
+                onChange={setSquadIds}
+                loading={squads.isLoading}
+              />
               <p className="mt-1.5 text-[11px] text-text-faint">
                 A squad adds its applications, and the environments they live in, to whatever is
                 granted below.

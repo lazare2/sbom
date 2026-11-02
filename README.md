@@ -973,6 +973,13 @@ alphabetically, then a **+N more** badge that opens the full list (searchable fr
 squads up). The **Squad** filter beside the role and access filters lists the members of
 one squad, or the accounts on no squad at all (`GET /admin/users?squad=<id>|none`).
 
+In *Edit Access*, squads are picked from a searchable list rather than a block of
+checkboxes. The search matches squad **and tribe** names, so "commerce" lists every squad
+in that tribe. Each row shows the squad's tribes, how many applications it reaches and
+how many members it has. The current squads sit above the list as chips with a remove
+button, so they stay visible while the list is filtered. **Selected only** and
+**Select shown** cover the bulk cases.
+
 ### Tribes
 
 Tribe → squad → user. A tribe has a name, an optional email and description, the
