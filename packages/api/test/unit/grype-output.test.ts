@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildScanDocument,
   collectAliases,
+  collectCwes,
+  DESCRIPTION_MAX_CHARS,
+  pickDescription,
   parseGrypeReport,
   pickCvss,
   pickEpss,
@@ -165,7 +168,100 @@ describe("collectAliases", () => {
   });
 });
 
+describe("pickDescription", () => {
+  it("prefers the related NVD paragraph over a GitHub advisory's one-line title", () => {
+    // Recorded from spring-webflux 6.2.0 against the Grype database built 2026-11-02.
+    const title = "Spring Framework Header Predicate Bypass in WebFlux Functional Endpoints";
+    const nvd =
+      "A WebFlux application using functional endpoints and deployed with DispatcherServlet may be vulnerable to a header predicate bypass in a pre-flight request.\nSpring Framework 6.2.0 - 6.2.19";
+    expect(pickDescription(title, [nvd])).toEqual({ description: nvd, summary: title });
+  });
+
+  it("keeps the primary text alone when it is already the fullest", () => {
+    const text = "A long distro advisory that says everything there is to say about this flaw.";
+    expect(pickDescription(text, ["short"])).toEqual({ description: text, summary: null });
+  });
+
+  it("does not repeat identical text as a summary", () => {
+    expect(pickDescription("same", ["same"])).toEqual({ description: "same", summary: null });
+  });
+
+  it("uses a related description when the primary has none", () => {
+    expect(pickDescription(undefined, ["from nvd"])).toEqual({ description: "from nvd", summary: null });
+  });
+
+  it("caps very long text instead of storing it unbounded", () => {
+    const long = "x".repeat(DESCRIPTION_MAX_CHARS + 10);
+    expect(pickDescription(long, []).description).toHaveLength(DESCRIPTION_MAX_CHARS);
+  });
+});
+
+describe("collectCwes", () => {
+  it("unions CWE ids from the primary and related records, dropping NVD placeholders", () => {
+    expect(
+      collectCwes([
+        [{ cwe: "CWE-863" }, { cwe: "NVD-CWE-noinfo" }],
+        [{ cwe: "cwe-863" }, { cwe: "CWE-20" }, { cwe: "NVD-CWE-Other" }],
+        "not an array",
+      ]),
+    ).toEqual(["CWE-863", "CWE-20"]);
+  });
+});
+
 describe("parseGrypeReport", () => {
+  it("fills description, CWEs, scores and links from the related NVD record", () => {
+    const parsed = parseGrypeReport(
+      report([
+        match({
+          vulnerability: {
+            id: "GHSA-9qf2-26p9-2q2q",
+            description: "Header Predicate Bypass",
+            cvss: [],
+            epss: [],
+            cwes: [{ cwe: "CWE-863" }],
+            urls: ["https://nvd.nist.gov/vuln/detail/CVE-2026-47892"],
+          },
+          relatedVulnerabilities: [
+            {
+              id: "CVE-2026-47892",
+              namespace: "nvd:cpe",
+              description: "A WebFlux application using functional endpoints may be vulnerable to a header predicate bypass.",
+              cvss: [{ version: "3.1", vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", metrics: { baseScore: 9.8 } }],
+              epss: [{ epss: 0.005, percentile: 0.44 }],
+              cwes: [{ cwe: "CWE-863" }, { cwe: "CWE-287" }],
+              urls: ["https://spring.io/security/cve-2026-47892"],
+            },
+          ],
+        }),
+      ]),
+    );
+    const f = parsed.findings[0]!;
+    expect(f.summary).toBe("Header Predicate Bypass");
+    expect(f.description).toMatch(/^A WebFlux application/);
+    expect(f.cwes).toEqual(["CWE-863", "CWE-287"]);
+    expect(f.cvssBaseScore).toBe(9.8);
+    expect(f.cvssVector).toBe("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H");
+    expect(f.epssScore).toBe(0.005);
+    expect(f.urls).toEqual([
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-47892",
+      "https://spring.io/security/cve-2026-47892",
+    ]);
+  });
+
+  it("keeps the primary record's own scores over the related record's", () => {
+    const parsed = parseGrypeReport(
+      report([
+        match({
+          relatedVulnerabilities: [
+            { id: "CVE-2021-44228", cvss: [{ version: "3.1", metrics: { baseScore: 1 } }], epss: [{ epss: 0.1 }] },
+          ],
+        }),
+      ]),
+    );
+    expect(parsed.findings[0]!.cvssBaseScore).toBe(10);
+    expect(parsed.findings[0]!.epssScore).toBe(0.99999);
+  });
+
   it("maps a finding back to the exact component that was submitted", () => {
     /*
      * The single most important assertion in this file. `bom-ref` is set to the component

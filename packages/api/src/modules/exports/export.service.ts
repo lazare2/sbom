@@ -454,6 +454,8 @@ export class ExportService {
           epss_score: number | null;
           known_exploited: boolean;
           description: string | null;
+          summary: string | null;
+          cwes: string[] | null;
           fix_state: string;
           fix_versions: string[] | null;
           urls: string[] | null;
@@ -462,7 +464,7 @@ export class ExportService {
       >(sql`
         SELECT DISTINCT ON (c.identity_hash, v.id)
                c.identity_hash, v.id, v.severity, v.cvss_base_score, v.cvss_vector,
-               v.epss_score, v.known_exploited, v.description, v.data_source,
+               v.epss_score, v.known_exploited, v.description, v.summary, v.cwes, v.data_source,
                cv.fix_state, cv.fix_versions, v.urls
         FROM scan_component sc
         JOIN component c ON c.id = sc.component_id
@@ -486,6 +488,8 @@ export class ExportService {
         epssScore: r.epss_score,
         knownExploited: r.known_exploited,
         description: r.description,
+        summary: r.summary,
+        cwes: r.cwes ?? [],
         fixState: r.fix_state,
         fixVersions: r.fix_versions ?? [],
         urls: r.urls ?? [],

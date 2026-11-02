@@ -213,6 +213,33 @@ describe("CycloneDX: the shape of a finding", () => {
     expect(rating.severity).toBe("info");
   });
 
+  it("puts a separate title in description and the full write-up in detail, with CWEs as numbers", () => {
+    const bom = renderCycloneDx(
+      harness({
+        flavour: "enriched",
+        components: [
+          component({
+            vulnerabilities: [{ ...vuln, summary: "Command injection in lodash", cwes: ["CWE-77", "CWE-94"] }],
+          }),
+        ],
+      }),
+    );
+    const entry = (bom.vulnerabilities as Array<Record<string, unknown>>)[0]!;
+    expect(entry.description).toBe("Command injection in lodash");
+    expect(entry.detail).toBe("Command injection.");
+    expect(entry.cwes).toEqual([77, 94]);
+  });
+
+  it("uses the one text available as the description when there is no separate title", () => {
+    const bom = renderCycloneDx(
+      harness({ flavour: "enriched", components: [component({ vulnerabilities: [vuln] })] }),
+    );
+    const entry = (bom.vulnerabilities as Array<Record<string, unknown>>)[0]!;
+    expect(entry.description).toBe("Command injection.");
+    expect(entry.detail).toBeUndefined();
+    expect(entry.cwes).toBeUndefined();
+  });
+
   it("flags known-exploited only when it is true", () => {
     // A `false` on every entry would bury the handful that justify waking somebody up.
     const enriched = harness({

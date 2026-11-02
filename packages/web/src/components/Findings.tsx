@@ -17,6 +17,7 @@ import { useAuth } from "../auth/AuthProvider.tsx";
 import { useCreateSuppression } from "../lib/mutations.ts";
 import { formatNumber } from "../lib/format.ts";
 import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
+import { advisoryHeadline } from "../lib/advisory.ts";
 import { ExportTableButton, exportList, fetchAllPages, locationColumns, type ExportColumn } from "./ExportTable.tsx";
 import { SEVERITY_ORDER, SeverityBadge, SeverityBar } from "./Severity.tsx";
 import {
@@ -278,6 +279,12 @@ export function FindingsTable({
                     {finding.aliases.length > 0 ? (
                       <span className="font-mono text-[11px] text-text-faint">
                         {finding.aliases.slice(0, 2).join(", ")}
+                      </span>
+                    ) : null}
+                    {/* What the advisory is, not only its number - the full text is on its page. */}
+                    {advisoryHeadline(finding) ? (
+                      <span className="line-clamp-2 max-w-[340px] text-[11px] text-text-muted" title={finding.description ?? undefined}>
+                        {advisoryHeadline(finding)}
                       </span>
                     ) : null}
                     <span className="flex flex-wrap gap-1">
@@ -567,7 +574,9 @@ export const FINDING_EXPORT_COLUMNS: ExportColumn<VulnerabilityFinding>[] = [
   { header: "Accepted risk", value: (f) => (f.suppressed ? "yes" : "no"), width: 13 },
   { header: "Accepted risk reason", value: (f) => f.suppressionReason, width: 30 },
   ...locationColumns<VulnerabilityFinding>((f) => f.location),
+  { header: "Summary", value: (f) => f.summary, width: 40 },
   { header: "Description", value: (f) => f.description, width: 60 },
+  { header: "Weaknesses (CWE)", value: (f) => exportList(f.cwes), width: 18 },
   { header: "Data source", value: (f) => f.dataSource, width: 30 },
   { header: "References", value: (f) => exportList(f.urls), width: 50 },
   { header: "Package URL", value: (f) => f.purl, width: 50 },

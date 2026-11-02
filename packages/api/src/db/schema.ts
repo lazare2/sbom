@@ -1317,7 +1317,19 @@ export const vulnerability = pgTable(
      * scan.
      */
     knownExploited: boolean("known_exploited").notNull().default(false),
+    /**
+     * The fullest write-up any source gave, usually NVD's.
+     *
+     * Grype's primary record for a language package is a GitHub advisory whose
+     * "description" is its one-line title; the NVD paragraph that says what the flaw is and
+     * which versions it reaches arrives alongside it as a related record. This column holds
+     * whichever is longest, and the title goes in `summary`.
+     */
     description: text("description"),
+    /** A one-line title, when the source has one distinct from `description`. */
+    summary: text("summary"),
+    /** CWE weakness ids, e.g. `CWE-863`: what class of flaw this is. */
+    cwes: text("cwes").array().notNull().default([]),
     /** Which upstream feed reported it, e.g. `github:language:java`. */
     dataSource: text("data_source"),
     namespace: text("namespace"),

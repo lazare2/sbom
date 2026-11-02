@@ -455,6 +455,8 @@ export class SweepService {
           ${f.epssPercentile},
           ${f.knownExploited},
           ${f.description},
+          ${f.summary},
+          ${sql.param(f.cwes)}::text[],
           ${f.dataSource},
           ${f.namespace},
           ${sql.param(f.aliases)}::text[],
@@ -465,7 +467,7 @@ export class SweepService {
       await this.deps.db.execute(sql`
         INSERT INTO vulnerability (
           id, severity, cvss_base_score, cvss_vector, epss_score, epss_percentile,
-          known_exploited, description, data_source, namespace, aliases, urls
+          known_exploited, description, summary, cwes, data_source, namespace, aliases, urls
         )
         VALUES ${sql.join(values, sql`, `)}
         ON CONFLICT (id) DO UPDATE SET
@@ -476,6 +478,8 @@ export class SweepService {
           epss_percentile = EXCLUDED.epss_percentile,
           known_exploited = EXCLUDED.known_exploited,
           description = EXCLUDED.description,
+          summary = EXCLUDED.summary,
+          cwes = EXCLUDED.cwes,
           data_source = EXCLUDED.data_source,
           namespace = EXCLUDED.namespace,
           /*

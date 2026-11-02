@@ -1201,6 +1201,28 @@ ordinary CycloneDX `library` components. Splitting on `kind` looks right on synt
 and silently files the entire base image under "application dependencies" on real data.
 One definition lives in `modules/vulnerabilities/scope.ts` and every query uses it.
 
+### What an advisory says
+
+For a library package, Grype's primary record is usually a GitHub advisory, and its
+`description` is only the advisory's title ("Spring Framework Header Predicate Bypass in
+WebFlux Functional Endpoints"). The paragraph that explains the flaw and lists the affected
+release lines arrives on the same match as a related NVD record. The parser now keeps both:
+the longest text becomes `description`, and the shorter title becomes `summary`. It also
+reads the CWE weakness ids, and takes CVSS, EPSS and reference links from the NVD record
+when the primary record lacks them. Measured on spring-webflux 6.2.0, the NVD text was the
+longer of the two for all fourteen advisories.
+
+The advisory page shows the title, the full write-up, a plain-language reading of the CVSS
+vector ("exploitable over the network, without any privileges…"), the EPSS probability and
+percentile, the weakness class with its name, and the references grouped into advisories,
+fixes and reports. Everything comes from data already in the database. Nothing is fetched
+or generated. The findings table shows each advisory's title under its id, and the enriched
+CycloneDX export carries the title as `description`, the full text as `detail` and the CWE
+numbers as `cwes`.
+
+Existing advisories pick up the fuller text the next time they are matched. Every database
+update re-queues the estate, so that happens within a day without any backfill.
+
 ### Ingest stays fast
 
 `POST /api/v1/scans` returns **201 as soon as the SBOM is stored**, exactly as before.

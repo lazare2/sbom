@@ -60,6 +60,7 @@ export interface XrayVulnerability {
     cvss_v3_score?: number | string;
     cvss_v3_vector?: string;
     cvss_v2_score?: number | string;
+    cwe?: string[];
   }>;
   /** Keyed by the coordinate that was submitted. */
   components?: Record<

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { AdvisoryImpact, AdvisorySummary, VulnSeverity } from "@sbom/shared";
+import type { AdvisoryDetail, AdvisoryImpact, AdvisorySummary, VulnSeverity } from "@sbom/shared";
 import { useAdvisoryImpact, useAdvisorySearch, useVulnStatus } from "../lib/queries.ts";
 import { ComponentLocationCell, OriginBadge } from "../components/ComponentLocationCell.tsx";
 import {
@@ -13,6 +13,7 @@ import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/
 import { SEVERITY_ORDER, SeverityBadge, ScanningDisabledNotice } from "../components/Severity.tsx";
 import { advisorySort, sortDirections } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
+import { advisoryHeadline, cweName, cweUrl, decodeCvss, groupReferences, REFERENCE_KIND_LABELS } from "../lib/advisory.ts";
 import { ExportTableButton, exportDate, exportList, fetchAllPages, type ExportColumn } from "../components/ExportTable.tsx";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import {
@@ -292,8 +293,9 @@ export function VulnerabilitiesPage() {
                           ) : null}
                         </div>
                       </Td>
-                      <Td className="max-w-[520px] truncate text-text-muted" title={advisory.description ?? undefined}>
-                        {advisory.description ?? " - "}
+                      <Td className="max-w-[520px] text-text-muted" title={advisory.description ?? undefined}>
+                        {/* The title where there is one, else the first sentence: two lines at most. */}
+                        <span className="line-clamp-2">{advisoryHeadline(advisory) ?? " - "}</span>
                       </Td>
                       <AdvisoryPackagesCell advisory={advisory} />
                       <AdvisoryApplicationsCell advisory={advisory} />
@@ -384,47 +386,7 @@ export function AdvisoryDetailPage() {
         }
       />
 
-      <Card className="mb-4">
-        <CardHeader title="Advisory" />
-        <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-          <Field label="Severity">{advisory.severity}</Field>
-          <Field label="CVSS base score">{advisory.cvssBaseScore?.toFixed(1) ?? " - "}</Field>
-          <Field label="EPSS">
-            {/* Shown as a percentage because a raw 0.99999 reads as a score rather than a
-                probability, and this one genuinely means "almost certainly exploited". */}
-            {advisory.epssScore === null ? " - " : `${(advisory.epssScore * 100).toFixed(1)}%`}
-          </Field>
-          <Field label="Also known as">
-            {advisory.aliases.length > 0 ? <Mono>{advisory.aliases.join(", ")}</Mono> : " - "}
-          </Field>
-          {advisory.description ? (
-            <div className="col-span-2 sm:col-span-4">
-              <Field label="Description">
-                <span className="text-text-base">{advisory.description}</span>
-              </Field>
-            </div>
-          ) : null}
-          {advisory.urls.length > 0 ? (
-            <div className="col-span-2 sm:col-span-4">
-              <Field label="References">
-                <span className="flex flex-col gap-0.5">
-                  {advisory.urls.slice(0, 4).map((url) => (
-                    <a
-                      key={url}
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="truncate text-xs text-accent hover:underline"
-                    >
-                      {url}
-                    </a>
-                  ))}
-                </span>
-              </Field>
-            </div>
-          ) : null}
-        </dl>
-      </Card>
+      <AdvisoryAboutCard advisory={advisory} />
 
       <ImpactTable
         title="Affected now"
@@ -586,7 +548,9 @@ const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
   { header: "CVSS", value: (a) => a.cvssBaseScore, width: 7 },
   { header: "EPSS", value: (a) => a.epssScore, width: 8 },
   { header: "Known exploited", value: (a) => (a.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Summary", value: (a) => a.summary, width: 40 },
   { header: "Description", value: (a) => a.description, width: 60 },
+  { header: "Weaknesses (CWE)", value: (a) => exportList(a.cwes), width: 18 },
   { header: "Packages", value: (a) => a.affectedPackages, width: 10 },
   { header: "Package versions", value: (a) => exportList(a.affectedPackageList), width: 40 },
   { header: "Apps now", value: (a) => a.currentApplications, width: 10 },
@@ -595,3 +559,149 @@ const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
   { header: "Fix available", value: (a) => (a.fixAvailable ? "yes" : "no"), width: 12 },
   { header: "References", value: (a) => exportList(a.urls), width: 50 },
 ];
+
+/**
+ * What the advisory is, in the order a reader needs it: what it is called, what it does, how
+ * it is exploited, how likely that is, what class of flaw it is, and where to read more.
+ *
+ * Every line is drawn from the advisory's own data. The plain-language exploitability
+ * sentence is a translation of the CVSS vector beside it, so a reader can check one against
+ * the other.
+ */
+function AdvisoryAboutCard({ advisory }: { advisory: AdvisoryDetail }) {
+  const cvss = decodeCvss(advisory.cvssVector);
+  const references = groupReferences(advisory.urls);
+
+  return (
+    <Card className="mb-4">
+      <CardHeader title="About this vulnerability" />
+      <div className="space-y-5 p-4">
+        <section>
+          {advisory.summary ? (
+            <h3 className="mb-1.5 text-sm font-semibold text-text-base">{advisory.summary}</h3>
+          ) : null}
+          {advisory.description ? (
+            // pre-line: NVD separates the affected release lines with newlines, and running
+            // them together into one sentence makes them unreadable.
+            <p className="max-w-[90ch] text-sm leading-relaxed whitespace-pre-line text-text-base">
+              {advisory.description}
+            </p>
+          ) : (
+            <p className="text-sm text-text-faint">The vulnerability database carries no description for this advisory.</p>
+          )}
+        </section>
+
+        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <Field label="Severity">
+            <SeverityBadge severity={advisory.severity} />
+          </Field>
+          <Field label="CVSS base score">
+            {advisory.cvssBaseScore === null ? " - " : `${advisory.cvssBaseScore.toFixed(1)}${cvss ? ` (CVSS ${cvss.version})` : ""}`}
+          </Field>
+          <Field label="Chance of exploitation (EPSS)">
+            {/* Shown as a percentage because a raw 0.99999 reads as a score rather than a
+                probability, and this one genuinely means "almost certainly exploited". */}
+            {advisory.epssScore === null ? (
+              " - "
+            ) : (
+              <span title="Estimated probability of exploitation in the wild in the next 30 days.">
+                {(advisory.epssScore * 100).toFixed(2)}% in 30 days
+                {advisory.epssPercentile !== null ? (
+                  <span className="block text-[11px] text-text-faint">
+                    higher than {Math.floor(advisory.epssPercentile * 100)}% of all CVEs
+                  </span>
+                ) : null}
+              </span>
+            )}
+          </Field>
+          <Field label="Also known as">
+            {advisory.aliases.length > 0 ? <Mono>{advisory.aliases.join(", ")}</Mono> : " - "}
+          </Field>
+        </dl>
+
+        {advisory.knownExploited ? (
+          <p className="rounded-md border border-danger/40 bg-danger-subtle px-3 py-2 text-xs text-danger">
+            On CISA's Known Exploited Vulnerabilities catalogue: attackers are already using this in
+            the wild. Treat it as urgent regardless of its score.
+          </p>
+        ) : null}
+
+        {cvss ? (
+          <section>
+            <h3 className="mb-1.5 text-xs font-medium text-text-muted">How it can be exploited</h3>
+            <p className="mb-2 max-w-[90ch] text-sm text-text-base">{cvss.sentence}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {cvss.metrics.map((metric) => (
+                <Badge key={metric.label} tone={metric.severe ? "warn" : "neutral"}>
+                  {metric.label}: {metric.value}
+                </Badge>
+              ))}
+            </div>
+            <p className="mt-1.5">
+              <Mono title="The CVSS vector these are read from">{advisory.cvssVector}</Mono>
+            </p>
+          </section>
+        ) : null}
+
+        {advisory.cwes.length > 0 ? (
+          <section>
+            <h3 className="mb-1.5 text-xs font-medium text-text-muted">Type of weakness</h3>
+            <ul className="flex flex-col gap-0.5 text-sm">
+              {advisory.cwes.map((cwe) => (
+                <li key={cwe}>
+                  <a href={cweUrl(cwe)} target="_blank" rel="noreferrer noopener" className="text-accent hover:underline">
+                    <span className="font-mono text-xs">{cwe}</span>
+                    {cweName(cwe) ? <span className="ml-2">{cweName(cwe)}</span> : null}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {references.length > 0 ? (
+          <section>
+            <h3 className="mb-1.5 text-xs font-medium text-text-muted">References</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {references.map(([kind, urls]) => (
+                <div key={kind} className="min-w-0">
+                  <div className="mb-0.5 text-[11px] font-semibold tracking-wide text-text-faint uppercase">
+                    {REFERENCE_KIND_LABELS[kind]}
+                  </div>
+                  <ul className="flex flex-col gap-0.5">
+                    {urls.map((url) => (
+                      <li key={url} className="min-w-0">
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="block truncate text-xs text-accent hover:underline"
+                          title={url}
+                        >
+                          {url}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {advisory.dataSource ? (
+          <p className="text-[11px] text-text-faint">
+            Reported by{" "}
+            {/^https?:\/\//.test(advisory.dataSource) ? (
+              <a href={advisory.dataSource} target="_blank" rel="noreferrer noopener" className="hover:underline">
+                {advisory.dataSource}
+              </a>
+            ) : (
+              advisory.dataSource
+            )}
+          </p>
+        ) : null}
+      </div>
+    </Card>
+  );
+}

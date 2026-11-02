@@ -169,6 +169,13 @@
       "when": 1793089665908,
       "tag": "0023_tribes_required_attributes_scan_history",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793610609203,
+      "tag": "0024_vulnerability_summary_cwes",
+      "breakpoints": true
     }
   ]
 }

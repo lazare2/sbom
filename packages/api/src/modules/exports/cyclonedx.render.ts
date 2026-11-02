@@ -205,7 +205,21 @@ function vulnerabilityEntries(doc: ExportDocument): Array<Record<string, unknown
       const entry: Record<string, unknown> = { "bom-ref": v.id, id: v.id };
       if (v.dataSource) entry.source = { name: v.dataSource };
       if (ratings.length > 0) entry.ratings = ratings;
-      if (v.description) entry.description = v.description;
+      /*
+        CycloneDX has a field for each: `description` is the source's own short account and
+        `detail` the in-depth one. When there is a separate title, that is the description and
+        the full write-up is the detail; otherwise the one text available is the description.
+      */
+      if (v.summary && v.description) {
+        entry.description = v.summary;
+        entry.detail = v.description;
+      } else if (v.description) {
+        entry.description = v.description;
+      }
+      const cweNumbers = (v.cwes ?? [])
+        .map((cwe) => Number.parseInt(cwe.replace(/^CWE-/i, ""), 10))
+        .filter((n) => Number.isSafeInteger(n) && n > 0);
+      if (cweNumbers.length > 0) entry.cwes = cweNumbers;
       if (v.urls.length > 0) entry.advisories = v.urls.map((url) => ({ url }));
 
       const props: Array<{ name: string; value: string }> = [

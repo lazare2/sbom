@@ -31,7 +31,12 @@ export interface ParsedFinding {
   epssScore: number | null;
   epssPercentile: number | null;
   knownExploited: boolean;
+  /** The fullest write-up available - see `pickDescription`. */
   description: string | null;
+  /** The source's one-line title, when it is distinct from `description`. */
+  summary: string | null;
+  /** CWE weakness ids, e.g. `CWE-863`. */
+  cwes: string[];
   dataSource: string | null;
   namespace: string | null;
   urls: string[];
@@ -126,6 +131,56 @@ function asStringArray(value: unknown, max = 64): string[] {
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Longest an advisory's write-up may be. NVD descriptions run to a few thousand characters. */
+export const DESCRIPTION_MAX_CHARS = 16_000;
+
+/**
+ * The description to show, and the title to show above it.
+ *
+ * For a language package Grype's primary record is usually a GitHub advisory, whose
+ * `description` field is the advisory's *title* - "Spring Framework Header Predicate Bypass
+ * in WebFlux Functional Endpoints" - while the paragraph that says what the flaw does and
+ * which release lines it reaches comes back on the related NVD record. Measured on
+ * spring-webflux 6.2.0: the related text was longer for all fourteen advisories.
+ *
+ * So the longest text available becomes the description, and the primary text is kept as
+ * the summary when it is a different, shorter thing. For OS advisories the primary record is
+ * usually the CVE itself and already the longest, and the summary stays empty rather than
+ * repeating it.
+ */
+export function pickDescription(
+  primary: unknown,
+  related: readonly unknown[],
+): { description: string | null; summary: string | null } {
+  const own = asString(primary, DESCRIPTION_MAX_CHARS);
+  let longest = own;
+  for (const text of related) {
+    const candidate = asString(text, DESCRIPTION_MAX_CHARS);
+    if (candidate && (!longest || candidate.length > longest.length)) longest = candidate;
+  }
+  const summary = own && longest && own !== longest ? own : null;
+  return { description: longest, summary };
+}
+
+/**
+ * CWE ids from Grype's `cwes` arrays, in first-seen order.
+ *
+ * NVD's placeholders (`NVD-CWE-noinfo`, `NVD-CWE-Other`) are dropped: they say the
+ * weakness was not classified, which is the same thing as listing none.
+ */
+export function collectCwes(lists: readonly unknown[]): string[] {
+  const out: string[] = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const id = asString((entry as { cwe?: unknown }).cwe, 32)?.toUpperCase();
+      if (id && /^CWE-\d+$/.test(id) && !out.includes(id)) out.push(id);
+    }
+  }
+  return out;
 }
 
 /**
@@ -264,6 +319,15 @@ function readDescriptor(doc: {
   return { grypeVersion, dbBuiltAt, dbSchemaVersion };
 }
 
+/** The fields read from a `relatedVulnerabilities` entry - in practice, the NVD record. */
+interface RelatedRecord {
+  description?: unknown;
+  cvss?: unknown;
+  epss?: unknown;
+  cwes?: unknown;
+  urls?: unknown;
+}
+
 /**
  * Parse one Grype JSON report.
  *
@@ -318,6 +382,7 @@ export function parseGrypeReport(raw: string): ParsedReport {
       severity?: unknown;
       cvss?: unknown;
       epss?: unknown;
+      cwes?: unknown;
       knownExploited?: unknown;
       description?: unknown;
       dataSource?: unknown;
@@ -325,6 +390,11 @@ export function parseGrypeReport(raw: string): ParsedReport {
       urls?: unknown;
       fix?: unknown;
     };
+    const related = (
+      Array.isArray((match as { relatedVulnerabilities?: unknown }).relatedVulnerabilities)
+        ? ((match as { relatedVulnerabilities: unknown[] }).relatedVulnerabilities)
+        : []
+    ).filter((r): r is RelatedRecord => typeof r === "object" && r !== null);
 
     const vulnerabilityId = asString(v.id, 128);
     if (!vulnerabilityId) continue;
@@ -333,8 +403,15 @@ export function parseGrypeReport(raw: string): ParsedReport {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const cvss = pickCvss(v.cvss);
-    const epss = pickEpss(v.epss);
+    // The primary record's own scores win; the related NVD record fills only what it lacks.
+    let cvss = pickCvss(v.cvss);
+    for (const r of related) if (cvss.baseScore === null) cvss = pickCvss(r.cvss);
+    let epss = pickEpss(v.epss);
+    for (const r of related) if (epss.score === null) epss = pickEpss(r.epss);
+    const text = pickDescription(
+      v.description,
+      related.map((r) => r.description),
+    );
 
     const fix = typeof v.fix === "object" && v.fix !== null ? (v.fix as { state?: unknown; versions?: unknown }) : {};
 
@@ -357,10 +434,13 @@ export function parseGrypeReport(raw: string): ParsedReport {
       epssPercentile: epss.percentile,
       // Presence of any entry means CISA has recorded active exploitation.
       knownExploited: Array.isArray(v.knownExploited) && v.knownExploited.length > 0,
-      description: asString(v.description, 4000),
+      description: text.description,
+      summary: text.summary,
+      cwes: collectCwes([v.cwes, ...related.map((r) => r.cwes)]),
       dataSource: asString(v.dataSource, 512),
       namespace: asString(v.namespace, 128),
-      urls: asStringArray(v.urls, 16),
+      // The vendor's own page (spring.io, for one) often appears only on the related record.
+      urls: asStringArray([...asStringArray(v.urls, 32), ...related.flatMap((r) => asStringArray(r.urls, 32))], 24),
       fixState: toFixState(fix.state),
       fixVersions: asStringArray(fix.versions, 16),
       matchType,

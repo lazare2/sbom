@@ -163,7 +163,17 @@ export function toFindings(
           epssScore: null,
           epssPercentile: null,
           knownExploited: false,
+          // Xray's `summary` is its full write-up, not a title, so it is the description.
           description: vuln.summary?.trim() || null,
+          summary: null,
+          cwes: [
+            ...new Set(
+              (vuln.cves ?? [])
+                .flatMap((c) => c.cwe ?? [])
+                .map((c) => (typeof c === "string" ? c.trim().toUpperCase() : ""))
+                .filter((c) => /^CWE-\d+$/.test(c)),
+            ),
+          ],
           dataSource: "jfrog-xray",
           namespace: detail.package_type?.trim() || null,
           urls: (vuln.references ?? []).filter((u) => typeof u === "string" && u.trim() !== ""),

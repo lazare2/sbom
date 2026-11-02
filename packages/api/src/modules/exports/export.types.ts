@@ -53,6 +53,10 @@ export interface ExportVulnerability {
   epssScore: number | null;
   knownExploited: boolean;
   description: string | null;
+  /** The source's one-line title, when it has one distinct from `description`. */
+  summary?: string | null;
+  /** CWE ids, e.g. `CWE-863`. */
+  cwes?: string[];
   fixState: string;
   fixVersions: string[];
   urls: string[];
