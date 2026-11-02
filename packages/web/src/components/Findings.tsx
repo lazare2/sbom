@@ -17,9 +17,9 @@ import { useServerSort, type SortControl } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useCreateSuppression } from "../lib/mutations.ts";
 import { formatNumber } from "../lib/format.ts";
-import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
+import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
 import { advisoryHeadline } from "../lib/advisory.ts";
-import { FixCell, FoundBy } from "./ScannerSources.tsx";
+import { FixCell, FoundBy } from "./ScannerSources.tsx";
 import { ExportTableButton, exportList, fetchAllPages, locationColumns, type ExportColumn } from "./ExportTable.tsx";
 import { SEVERITY_ORDER, SeverityBadge, SeverityBar } from "./Severity.tsx";
 import {
@@ -615,6 +615,8 @@ export function FindingsCard({
         subtitle={subtitle}
         actions={
           <>
+
+            <FindingsFilterBar filters={filters} onChange={onChange} />
             {exportFrom ? (
               <ExportTableButton
                 title="Findings"
@@ -625,7 +627,6 @@ export function FindingsCard({
                 columns={FINDING_EXPORT_COLUMNS}
               />
             ) : null}
-            <FindingsFilterBar filters={filters} onChange={onChange} />
           </>
         }
       />

@@ -1285,6 +1285,25 @@ ordinary CycloneDX `library` components. Splitting on `kind` looks right on synt
 and silently files the entire base image under "application dependencies" on real data.
 One definition lives in `modules/vulnerabilities/scope.ts` and every query uses it.
 
+### Filtering the advisory list
+
+**Vulnerabilities** has a filter panel over its one-row-per-advisory table:
+
+| Group | Filters |
+|---|---|
+| Where it ships | application, squad, tribe, group (each several at once), owner |
+| What it is | severity, package type, minimum CVSS, weakness (CWE), known exploited |
+| Fix and risk | fix state (available / no fix / unknown / won't fix), minimum EPSS, scanners that found it, first seen between two dates |
+| Also | CVE / GHSA / package search, package scope, current or also older builds, findings only one scanner reported, accepted risks |
+
+Every filter narrows the rows the counts are taken from rather than hiding advisories
+afterwards. An advisory in nine applications, filtered to squad Payments, shows the two
+Payments applications and their packages. **Export table** downloads exactly that, with
+the affected applications' squads and tribes as columns. CVSS and EPSS are sortable. The
+filters live in the URL (`?squad=payments&cvssMin=7&fixState=fixed`), and the API takes
+the same parameters on `GET /vulnerabilities`. Squads and tribes mean direct assignment,
+as on the Applications list.
+
 ### What an advisory says
 
 For a library package, Grype's primary record is usually a GitHub advisory, and its

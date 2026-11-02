@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { AdvisoryDetail, AdvisoryImpact, AdvisorySummary, VulnSeverity } from "@sbom/shared";
-import { useAdvisoryImpact, useAdvisorySearch, useVulnStatus } from "../lib/queries.ts";
+import type { AdvisoryDetail, AdvisoryImpact, AdvisorySummary, VulnScanner, VulnSeverity } from "@sbom/shared";
+import {
+  useAdvisoryImpact,
+  useAdvisorySearch,
+  useApplications,
+  useAttributeValues,
+  useComponentEcosystems,
+  useGroups,
+  useVulnStatus,
+} from "../lib/queries.ts";
+import { MultiSelect } from "../components/MultiSelect.tsx";
 import { ComponentLocationCell, OriginBadge } from "../components/ComponentLocationCell.tsx";
 import {
   AdvisoryApplicationsCell,
@@ -9,7 +18,7 @@ import {
 } from "../components/ExpandableCounts.tsx";
 import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
-import { readBool, readEnum, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
+import { readBool, readEnum, readEnumList, readNumber, readString, readStringList, useUrlState } from "../lib/useUrlState.ts";
 import { SEVERITY_ORDER, SeverityBadge, ScanningDisabledNotice } from "../components/Severity.tsx";
 import { advisorySort, sortDirections, VULN_SCANNER_LABELS } from "@sbom/shared";
 import { useServerSort } from "../lib/useSort.ts";
@@ -19,6 +28,7 @@ import { ExportTableButton, exportDate, exportList, fetchAllPages, type ExportCo
 import { useAuth } from "../auth/AuthProvider.tsx";
 import {
   Badge,
+  Button,
   Card,
   CardHeader,
   Checkbox,
@@ -47,10 +57,24 @@ const SCOPES = ["app", "os", "all"] as const;
 const DEFAULTS = {
   q: "",
   scope: "app" as (typeof SCOPES)[number],
-  severity: "" as VulnSeverity | "",
-  fixable: false,
+  severity: [] as VulnSeverity[],
+  fixState: [] as Array<"fixed" | "not-fixed" | "unknown" | "wont-fix">,
   knownExploited: false,
   currentOnly: true,
+  application: [] as string[],
+  squad: [] as string[],
+  tribe: [] as string[],
+  group: [] as string[],
+  owner: "",
+  ecosystem: [] as string[],
+  cvssMin: "",
+  epssMin: "",
+  foundBy: [] as string[],
+  singleSource: false,
+  cwe: "",
+  firstSeenFrom: "",
+  firstSeenTo: "",
+  includeSuppressed: false,
   sortBy: advisorySort.defaultField,
   sortDir: advisorySort.defaultDirection,
   page: 1,
@@ -61,11 +85,28 @@ const urlSpec = {
   parse: (params: URLSearchParams) => ({
     q: readString(params, "q"),
     scope: readEnum(params, "scope", SCOPES, "app"),
-    severity: readEnum(params, "severity", ["", ...SEVERITY_ORDER] as const, ""),
-    fixable: readBool(params, "fixable"),
+    severity: readEnumList(params, "severity", SEVERITY_ORDER, []),
+    // `fixable=true` is how links made before the fix filter said "fix available".
+    fixState: readBool(params, "fixable")
+      ? (["fixed"] as Array<"fixed" | "not-fixed" | "unknown" | "wont-fix">)
+      : readEnumList(params, "fixState", ["fixed", "not-fixed", "unknown", "wont-fix"] as const, []),
     knownExploited: readBool(params, "knownExploited"),
     // Defaults true, so the URL carries `currentOnly=false` when it is turned off.
     currentOnly: params.get("currentOnly") !== "false",
+    application: readStringList(params, "application"),
+    squad: readStringList(params, "squad"),
+    tribe: readStringList(params, "tribe"),
+    group: readStringList(params, "group"),
+    owner: readString(params, "owner"),
+    ecosystem: readStringList(params, "ecosystem"),
+    cvssMin: readString(params, "cvssMin"),
+    epssMin: readString(params, "epssMin"),
+    foundBy: readStringList(params, "foundBy"),
+    singleSource: readBool(params, "singleSource"),
+    cwe: readString(params, "cwe"),
+    firstSeenFrom: readString(params, "firstSeenFrom"),
+    firstSeenTo: readString(params, "firstSeenTo"),
+    includeSuppressed: readBool(params, "includeSuppressed"),
     sortBy: readEnum(params, "sortBy", advisorySort.fields, advisorySort.defaultField),
     sortDir: readEnum(params, "sortDir", sortDirections, advisorySort.defaultDirection),
     page: readNumber(params, "page", 1),
@@ -86,31 +127,7 @@ export function VulnerabilitiesPage() {
   const { isAdmin } = useAuth();
   const { data: status, isLoading: statusLoading } = useVulnStatus();
 
-  const [searchInput, setSearchInput] = useState(state.q);
-  const debounced = useDebounced(searchInput, 300);
-
-  useEffect(() => {
-    if (debounced !== state.q) setState({ q: debounced, page: 1 });
-  }, [debounced, state.q, setState]);
-  useEffect(() => {
-    setSearchInput(state.q);
-  }, [state.q]);
-
-  const params = useMemo(
-    () => ({
-      q: state.q || undefined,
-      scope: state.scope,
-      severity: state.severity || undefined,
-      fixable: state.fixable ? "true" : undefined,
-      knownExploited: state.knownExploited ? "true" : undefined,
-      currentOnly: state.currentOnly ? undefined : "false",
-      sortBy: state.sortBy,
-      sortDir: state.sortDir,
-      page: state.page,
-      pageSize: 50,
-    }),
-    [state],
-  );
+  const params = useMemo(() => advisoryParams(state), [state]);
 
   const enabled = status?.enabled === true;
   const { data, isLoading, isFetching, error, refetch } = useAdvisorySearch(params, enabled);
@@ -157,56 +174,12 @@ export function VulnerabilitiesPage() {
 
       {error ? <ErrorBanner error={error} onRetry={() => void refetch()} /> : null}
 
+      <AdvisoryFilters state={state} setState={setState} />
+
       <Card>
         <CardHeader
           title={data ? `${formatNumber(data.total)} advisories` : "Advisories"}
-          subtitle="Search by CVE, GHSA or package name. A CVE number finds the advisory even when Grype reports it under a GHSA id."
-          actions={
-            <>
-              <div className="w-60">
-                <TextInput
-                  value={searchInput}
-                  onChange={setSearchInput}
-                  placeholder="CVE-2021-44228, GHSA-…, or a package"
-                  ariaLabel="Search advisories"
-                />
-              </div>
-              <Select
-                value={state.scope}
-                onChange={(scope) => setState({ scope: scope as (typeof SCOPES)[number], page: 1 })}
-                ariaLabel="Package scope"
-                options={[
-                  { value: "app", label: "Application dependencies" },
-                  { value: "os", label: "Base image and runtimes" },
-                  { value: "all", label: "Everything" },
-                ]}
-              />
-              <Select
-                value={state.severity}
-                onChange={(severity) => setState({ severity: severity as VulnSeverity | "", page: 1 })}
-                ariaLabel="Severity"
-                options={[
-                  { value: "", label: "Any severity" },
-                  ...SEVERITY_ORDER.map((s) => ({ value: s, label: s[0]!.toUpperCase() + s.slice(1) })),
-                ]}
-              />
-              <Checkbox
-                checked={state.fixable}
-                onChange={(fixable) => setState({ fixable, page: 1 })}
-                label="Fix available"
-              />
-              <Checkbox
-                checked={state.knownExploited}
-                onChange={(knownExploited) => setState({ knownExploited, page: 1 })}
-                label="Known exploited"
-              />
-              <Checkbox
-                checked={!state.currentOnly}
-                onChange={(all) => setState({ currentOnly: !all, page: 1 })}
-                label="Include dropped packages"
-              />
-            </>
-          }
+          subtitle="One row per advisory. Counts, packages and applications on each row cover only what the filters above let through."
         />
 
         <div className="border-b border-border-base px-4 py-2 text-xs text-text-muted">
@@ -244,6 +217,12 @@ export function VulnerabilitiesPage() {
                     </Th>
                     {/* Free prose. There is no ordering of it a reader would find useful. */}
                     <Th>Description</Th>
+                    <Th onSort={() => sort.toggle("cvss")} sorted={sort.stateOf("cvss")} align="right" width="80px">
+                      CVSS
+                    </Th>
+                    <Th onSort={() => sort.toggle("epss")} sorted={sort.stateOf("epss")} align="right" width="80px">
+                      EPSS
+                    </Th>
                     <Th onSort={() => sort.toggle("packages")} sorted={sort.stateOf("packages")} align="right" width="100px">
                       Packages
                     </Th>
@@ -298,6 +277,12 @@ export function VulnerabilitiesPage() {
                       <Td className="max-w-[520px] text-text-muted" title={advisory.description ?? undefined}>
                         {/* The title where there is one, else the first sentence: two lines at most. */}
                         <span className="line-clamp-2">{advisoryHeadline(advisory) ?? " - "}</span>
+                      </Td>
+                      <Td align="right" className="nums text-text-muted">
+                        {advisory.cvssBaseScore?.toFixed(1) ?? " - "}
+                      </Td>
+                      <Td align="right" className="nums text-text-muted" title="Chance of exploitation in the next 30 days">
+                        {advisory.epssScore === null ? " - " : `${(advisory.epssScore * 100).toFixed(1)}%`}
                       </Td>
                       <AdvisoryPackagesCell advisory={advisory} />
                       <AdvisoryApplicationsCell advisory={advisory} />
@@ -562,6 +547,8 @@ const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
   { header: "Package versions", value: (a) => exportList(a.affectedPackageList), width: 40 },
   { header: "Apps now", value: (a) => a.currentApplications, width: 10 },
   { header: "Applications now", value: (a) => exportList(a.currentApplicationList), width: 40 },
+  { header: "Squads", value: (a) => exportList(a.squads), width: 30 },
+  { header: "Tribes", value: (a) => exportList(a.tribes), width: 24 },
   { header: "Apps dropped", value: (a) => a.historicalApplications, width: 12 },
   { header: "Fix available", value: (a) => (a.fixAvailable ? "yes" : "no"), width: 12 },
   { header: "Found by", value: (a) => exportList(a.foundBy.map((s) => VULN_SCANNER_LABELS[s])), width: 22 },
@@ -712,6 +699,348 @@ function AdvisoryAboutCard({ advisory }: { advisory: AdvisoryDetail }) {
             )}
           </p>
         ) : null}
+      </div>
+    </Card>
+  );
+}
+
+const FIX_STATES = ["fixed", "not-fixed", "unknown", "wont-fix"] as const;
+const FIX_STATE_LABELS: Record<(typeof FIX_STATES)[number], string> = {
+  fixed: "Fix available",
+  "not-fixed": "No fix yet",
+  unknown: "Fix unknown",
+  "wont-fix": "Won't fix",
+};
+const SEVERITY_LABEL = (s: string) => s[0]!.toUpperCase() + s.slice(1);
+
+type FilterState = ReturnType<typeof urlSpec.parse>;
+
+/** How many filters are narrowing the list, for the header and "Clear all". */
+function activeFilterCount(s: FilterState): number {
+  return [
+    s.q !== "",
+    s.scope !== "app",
+    s.severity.length > 0,
+    s.fixState.length > 0,
+    s.knownExploited,
+    !s.currentOnly,
+    s.application.length > 0,
+    s.squad.length > 0,
+    s.tribe.length > 0,
+    s.group.length > 0,
+    s.owner !== "",
+    s.ecosystem.length > 0,
+    s.cvssMin !== "",
+    s.epssMin !== "",
+    s.foundBy.length > 0,
+    s.singleSource,
+    s.cwe !== "",
+    s.firstSeenFrom !== "",
+    s.firstSeenTo !== "",
+    s.includeSuppressed,
+  ].filter(Boolean).length;
+}
+
+/** The URL parameters for the advisory search, from the page state. */
+function advisoryParams(s: FilterState): Record<string, unknown> {
+  return {
+    q: s.q || undefined,
+    scope: s.scope,
+    severity: s.severity,
+    fixState: s.fixState,
+    knownExploited: s.knownExploited ? "true" : undefined,
+    currentOnly: s.currentOnly ? undefined : "false",
+    application: s.application,
+    squad: s.squad,
+    tribe: s.tribe,
+    group: s.group,
+    owner: s.owner || undefined,
+    ecosystem: s.ecosystem,
+    cvssMin: s.cvssMin || undefined,
+    epssMin: s.epssMin ? Number(s.epssMin) / 100 : undefined,
+    foundBy: s.foundBy,
+    singleSource: s.singleSource ? "true" : undefined,
+    cwe: s.cwe || undefined,
+    firstSeenFrom: s.firstSeenFrom || undefined,
+    firstSeenTo: s.firstSeenTo || undefined,
+    includeSuppressed: s.includeSuppressed ? "true" : undefined,
+    sortBy: s.sortBy,
+    sortDir: s.sortDir,
+    page: s.page,
+    pageSize: 50,
+  };
+}
+
+/** A labelled filter control. */
+function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    // Native selects size to their content; stretched so every control in a row lines up.
+    <div className="min-w-0 [&_select]:w-full">
+      <div className="mb-1 text-[11px] font-medium text-text-muted">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+/** Text typed into a filter, committed after a pause rather than on every keystroke. */
+function DebouncedText({
+  value,
+  onCommit,
+  placeholder,
+  ariaLabel,
+}: {
+  value: string;
+  onCommit: (value: string) => void;
+  placeholder: string;
+  ariaLabel: string;
+}) {
+  const [text, setText] = useState(value);
+  const debounced = useDebounced(text, 400);
+  useEffect(() => setText(value), [value]);
+  useEffect(() => {
+    if (debounced !== value) onCommit(debounced);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced]);
+  return <TextInput value={text} onChange={setText} placeholder={placeholder} ariaLabel={ariaLabel} />;
+}
+
+/**
+ * Every way the advisory list can be narrowed, in one card above it.
+ *
+ * Grouped the way the questions come: where it ships (application, squad, tribe, group,
+ * owner), what it is (severity, package type, CWE), how actionable and risky it is (fix,
+ * scores, known exploited), and where the finding came from (scanners, when it appeared,
+ * accepted risks). Every value lives in the URL, so a filtered view can be bookmarked or
+ * pasted into a ticket, and Export table downloads exactly it.
+ */
+function AdvisoryFilters({ state, setState }: { state: FilterState; setState: (patch: Partial<FilterState>) => void }) {
+  const [appTerm, setAppTerm] = useState("");
+  const debouncedAppTerm = useDebounced(appTerm, 250);
+  const applications = useApplications({ search: debouncedAppTerm || undefined, pageSize: 50, sortBy: "name", sortDir: "asc" });
+  const squads = useAttributeValues("squad");
+  const tribes = useAttributeValues("tribe");
+  const owners = useAttributeValues("owner");
+  const groups = useGroups({ pageSize: 200 });
+  const ecosystems = useComponentEcosystems();
+  const set = (patch: Partial<FilterState>) => setState({ ...patch, page: 1 });
+  // Attribute values can hold several names, comma-separated; offer each name once.
+  const names = (values: string[] | undefined) =>
+    [...new Set((values ?? []).flatMap((v) => v.split(",").map((s) => s.trim())).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b),
+    );
+  const active = activeFilterCount(state);
+
+  return (
+    <Card className="mb-4">
+      <CardHeader
+        title="Filters"
+        subtitle="Every filter narrows the counts, the applications and the packages on each row, and Export table downloads exactly what is shown."
+        actions={
+          active > 0 ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                setState({
+                  ...DEFAULTS,
+                  sortBy: state.sortBy,
+                  sortDir: state.sortDir,
+                })
+              }
+            >
+              Clear all filters ({active})
+            </Button>
+          ) : undefined
+        }
+      />
+      <div className="space-y-4 p-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="sm:col-span-2">
+            <FilterField label="CVE, GHSA or package">
+              <DebouncedText
+                value={state.q}
+                onCommit={(q) => set({ q })}
+                placeholder="CVE-2021-44228, GHSA-…, or a package"
+                ariaLabel="Search advisories"
+              />
+            </FilterField>
+          </div>
+          <FilterField label="Package scope">
+            <Select
+              value={state.scope}
+              onChange={(scope) => set({ scope: scope as (typeof SCOPES)[number] })}
+              ariaLabel="Package scope"
+              options={[
+                { value: "app", label: "Application dependencies" },
+                { value: "os", label: "Base image and runtimes" },
+                { value: "all", label: "Everything" },
+              ]}
+            />
+          </FilterField>
+          <FilterField label="Builds">
+            <Select
+              value={state.currentOnly ? "current" : "all"}
+              onChange={(v) => set({ currentOnly: v === "current" })}
+              ariaLabel="Builds"
+              options={[
+                { value: "current", label: "Current builds only" },
+                { value: "all", label: "Also older builds" },
+              ]}
+            />
+          </FilterField>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-text-faint uppercase">Where it ships</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <FilterField label="Application">
+              <MultiSelect
+                label="Applications"
+                options={(applications.data?.items ?? []).map((a) => a.name)}
+                selected={state.application}
+                onChange={(application) => set({ application })}
+                onSearch={setAppTerm}
+                loading={applications.isLoading}
+              />
+            </FilterField>
+            <FilterField label="Squad">
+              <MultiSelect label="Squads" options={names(squads.data)} selected={state.squad} onChange={(squad) => set({ squad })} />
+            </FilterField>
+            <FilterField label="Tribe">
+              <MultiSelect label="Tribes" options={names(tribes.data)} selected={state.tribe} onChange={(tribe) => set({ tribe })} />
+            </FilterField>
+            <FilterField label="Group">
+              <MultiSelect
+                label="Groups"
+                options={(groups.data?.items ?? []).map((g) => g.name).sort((a, b) => a.localeCompare(b))}
+                selected={state.group}
+                onChange={(group) => set({ group })}
+              />
+            </FilterField>
+            <FilterField label="Owner">
+              <Select
+                value={state.owner}
+                onChange={(owner) => set({ owner })}
+                ariaLabel="Owner"
+                options={[{ value: "", label: "Any" }, ...names(owners.data).map((o) => ({ value: o, label: o }))]}
+              />
+            </FilterField>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-text-faint uppercase">What it is</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <FilterField label="Severity">
+              <MultiSelect
+                label="Severities"
+                options={[...SEVERITY_ORDER]}
+                selected={state.severity}
+                onChange={(severity) => set({ severity: severity as VulnSeverity[] })}
+                renderOption={SEVERITY_LABEL}
+              />
+            </FilterField>
+            <FilterField label="Package type">
+              <MultiSelect
+                label="Package types"
+                options={(ecosystems.data ?? []).map((e) => e.ecosystem)}
+                selected={state.ecosystem}
+                onChange={(ecosystem) => set({ ecosystem })}
+              />
+            </FilterField>
+            <FilterField label="Minimum CVSS">
+              <Select
+                value={state.cvssMin}
+                onChange={(cvssMin) => set({ cvssMin })}
+                ariaLabel="Minimum CVSS"
+                options={[
+                  { value: "", label: "Any" },
+                  ...["4", "5", "6", "7", "8", "9", "9.5"].map((v) => ({ value: v, label: `${v} or higher` })),
+                ]}
+              />
+            </FilterField>
+            <FilterField label="Weakness (CWE)">
+              <DebouncedText value={state.cwe} onCommit={(cwe) => set({ cwe })} placeholder="CWE-79" ariaLabel="CWE" />
+            </FilterField>
+            <FilterField label="Known exploited">
+              <Select
+                value={state.knownExploited ? "yes" : ""}
+                onChange={(v) => set({ knownExploited: v === "yes" })}
+                ariaLabel="Known exploited"
+                options={[
+                  { value: "", label: "Any" },
+                  { value: "yes", label: "Only on CISA's KEV list" },
+                ]}
+              />
+            </FilterField>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-text-faint uppercase">Fix and risk</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <FilterField label="Fix">
+              <MultiSelect
+                label="Fix states"
+                options={[...FIX_STATES]}
+                selected={state.fixState}
+                onChange={(fixState) => set({ fixState: fixState as Array<(typeof FIX_STATES)[number]> })}
+                renderOption={(v) => FIX_STATE_LABELS[v as (typeof FIX_STATES)[number]] ?? v}
+              />
+            </FilterField>
+            <FilterField label="Chance of exploitation (EPSS)">
+              <Select
+                value={state.epssMin}
+                onChange={(epssMin) => set({ epssMin })}
+                ariaLabel="Minimum EPSS"
+                options={[
+                  { value: "", label: "Any" },
+                  ...["1", "5", "10", "25", "50"].map((v) => ({ value: v, label: `${v}% or higher` })),
+                ]}
+              />
+            </FilterField>
+            <FilterField label="Found by">
+              <MultiSelect
+                label="Scanners"
+                options={["grype", "trivy", "osv", "xray"]}
+                selected={state.foundBy}
+                onChange={(foundBy) => set({ foundBy })}
+                renderOption={(v) => VULN_SCANNER_LABELS[v as VulnScanner] ?? v}
+              />
+            </FilterField>
+            <FilterField label="First seen from">
+              <input
+                type="date"
+                value={state.firstSeenFrom}
+                onChange={(e) => set({ firstSeenFrom: e.target.value })}
+                aria-label="First seen from"
+                className="h-[34px] w-full rounded-md border border-border-strong bg-bg-raised px-2 text-sm text-text-base"
+              />
+            </FilterField>
+            <FilterField label="First seen to">
+              <input
+                type="date"
+                value={state.firstSeenTo}
+                onChange={(e) => set({ firstSeenTo: e.target.value })}
+                aria-label="First seen to"
+                className="h-[34px] w-full rounded-md border border-border-strong bg-bg-raised px-2 text-sm text-text-base"
+              />
+            </FilterField>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border-base pt-3">
+          <Checkbox
+            checked={state.singleSource}
+            onChange={(singleSource) => set({ singleSource })}
+            label="Only findings a single scanner reported"
+          />
+          <Checkbox
+            checked={state.includeSuppressed}
+            onChange={(includeSuppressed) => set({ includeSuppressed })}
+            label="Include accepted risks"
+          />
+        </div>
       </div>
     </Card>
   );

@@ -54,6 +54,9 @@ export function AdminTribesPage() {
           subtitle="Groups of squads. Projects assigned to a tribe are visible to everyone in its squads, and show the tribe in their Tribe attribute."
           actions={
             <>
+              <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
+                New tribe
+              </Button>
               <ExportTableButton
                 title="Tribes"
                 filename="tribes"
@@ -68,9 +71,6 @@ export function AdminTribesPage() {
                   { header: "Created", value: (t) => exportDate(t.createdAt), width: 18 },
                 ]}
               />
-              <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
-                New tribe
-              </Button>
             </>
           }
         />

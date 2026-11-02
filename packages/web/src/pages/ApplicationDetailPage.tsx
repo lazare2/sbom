@@ -403,20 +403,6 @@ function ComponentsTab({
           subtitle={data ? `${formatNumber(data.total)} matching` : undefined}
           actions={
             <>
-              <ExportTableButton
-                title="Components"
-                filename={`${applicationName}-components`}
-                fetchRows={(progress) =>
-                  fetchAllPages<ScanComponentEntry>(`/applications/${applicationId}/components`, params, progress)
-                }
-                columns={[
-                  { header: "Package", value: (c) => c.name, width: 32 },
-                  { header: "Version", value: (c) => c.version, width: 18 },
-                  { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
-                  ...locationColumns<ScanComponentEntry>((c) => c.location),
-                  { header: "Package URL", value: (c) => c.purl, width: 50 },
-                ]}
-              />
               <div className="w-52">
                 <TextInput
                   value={searchInput}
@@ -435,6 +421,20 @@ function ComponentsTab({
                     value: e.ecosystem,
                     label: `${e.ecosystem} (${e.count})`,
                   })),
+                ]}
+              />
+              <ExportTableButton
+                title="Components"
+                filename={`${applicationName}-components`}
+                fetchRows={(progress) =>
+                  fetchAllPages<ScanComponentEntry>(`/applications/${applicationId}/components`, params, progress)
+                }
+                columns={[
+                  { header: "Package", value: (c) => c.name, width: 32 },
+                  { header: "Version", value: (c) => c.version, width: 18 },
+                  { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
+                  ...locationColumns<ScanComponentEntry>((c) => c.location),
+                  { header: "Package URL", value: (c) => c.purl, width: 50 },
                 ]}
               />
             </>
@@ -609,6 +609,19 @@ function RemovedTab({
           }
           actions={
             <>
+              <div className="w-52">
+                <TextInput
+                  value={searchInput}
+                  onChange={setSearchInput}
+                  placeholder="Filter packages…"
+                  ariaLabel="Filter removed packages by name"
+                />
+              </div>
+              <Checkbox
+                checked={state.ignoreVersion}
+                onChange={(v) => setState({ ignoreVersion: v, removedPage: 1 })}
+                label="Hide version upgrades"
+              />
               <ExportTableButton
                 title="Removed packages"
                 filename={`${applicationName}-removed-packages`}
@@ -623,19 +636,6 @@ function RemovedTab({
                   { header: "Last seen in build", value: (c) => c.lastSeenBuildNumber, width: 16 },
                   { header: "Package URL", value: (c) => c.purl, width: 50 },
                 ]}
-              />
-              <div className="w-52">
-                <TextInput
-                  value={searchInput}
-                  onChange={setSearchInput}
-                  placeholder="Filter packages…"
-                  ariaLabel="Filter removed packages by name"
-                />
-              </div>
-              <Checkbox
-                checked={state.ignoreVersion}
-                onChange={(v) => setState({ ignoreVersion: v, removedPage: 1 })}
-                label="Hide version upgrades"
               />
             </>
           }
@@ -940,6 +940,9 @@ function HistoryTab({
           subtitle="Every build that submitted an SBOM. Nothing is trimmed automatically; select a build to see the components it shipped. Vulnerabilities are Critical / High / Medium / Low: Today is against the current database, When replaced is the count saved when a newer build took over."
           actions={
             <>
+              <Button size="sm" variant="primary" onClick={() => setUploading(true)}>
+                Upload SBOM
+              </Button>
               <ExportTableButton
                 title="Scan history"
                 filename={`${applicationName}-scan-history`}
@@ -963,9 +966,6 @@ function HistoryTab({
                   { header: "SBOM bytes", value: (s) => s.sbomSizeBytes, width: 12 },
                 ]}
               />
-              <Button size="sm" variant="primary" onClick={() => setUploading(true)}>
-                Upload SBOM
-              </Button>
             </>
           }
         />

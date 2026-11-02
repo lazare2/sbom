@@ -319,6 +319,14 @@ export function ScanDetailPage() {
           subtitle={components.data ? `${formatNumber(components.data.total)} matching` : undefined}
           actions={
             <>
+              <div className="w-52">
+                <TextInput
+                  value={searchInput}
+                  onChange={setSearchInput}
+                  placeholder="Filter packages…"
+                  ariaLabel="Filter components by name"
+                />
+              </div>
               <ExportTableButton
                 title="Components"
                 filename={`${scan.applicationName}-build-${scan.buildNumber ?? scan.id.slice(0, 8)}-components`}
@@ -331,14 +339,6 @@ export function ScanDetailPage() {
                   { header: "Package URL", value: (c) => c.purl, width: 50 },
                 ]}
               />
-              <div className="w-52">
-                <TextInput
-                  value={searchInput}
-                  onChange={setSearchInput}
-                  placeholder="Filter packages…"
-                  ariaLabel="Filter components by name"
-                />
-              </div>
             </>
           }
         />

@@ -103,6 +103,9 @@ export function AdminTokensPage() {
           subtitle="Presented as an Authorization: Bearer header on POST /api/v1/scans. Store in the Jenkins credentials store or a GitLab group-level CI/CD variable."
           actions={
             <>
+              <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
+                New token
+              </Button>
               <ExportTableButton
                 title="CI ingest tokens"
                 filename="ci-ingest-tokens"
@@ -117,9 +120,6 @@ export function AdminTokensPage() {
                   { header: "Revoked", value: (t) => exportDate(t.revokedAt), width: 18 },
                 ]}
               />
-              <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
-                New token
-              </Button>
             </>
           }
         />

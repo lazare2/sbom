@@ -7,7 +7,7 @@ import { formatNumber, formatRelative, humanizeKey } from "../../lib/format.ts";
 import { useDeleteApplication } from "../../lib/mutations.ts";
 import { useApplications, useAttributeDefinitions } from "../../lib/queries.ts";
 import { readEnum, readNumber, readString, useUrlState } from "../../lib/useUrlState.ts";
-import { useDebounced } from "../../lib/useDebounced.ts";
+import { useDebounced } from "../../lib/useDebounced.ts";
 import { attributeText, ExportTableButton, exportDate, exportList, fetchAllPages } from "../../components/ExportTable.tsx";
 import {
   Button,
@@ -98,6 +98,9 @@ export function AdminApplicationsPage() {
           subtitle="Register an application before its first scan to have CI land on a confirmed record with its attributes already set."
           actions={
             <>
+              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+                Register application
+              </Button>
               <ExportTableButton<ApplicationSummary>
                 title="Applications"
                 filename="admin-applications"
@@ -120,9 +123,6 @@ export function AdminApplicationsPage() {
                   { header: "Registered", value: (a) => exportDate(a.createdAt), width: 18 },
                 ]}
               />
-              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-                Register application
-              </Button>
             </>
           }
         />

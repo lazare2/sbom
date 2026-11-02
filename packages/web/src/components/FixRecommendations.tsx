@@ -74,6 +74,17 @@ export function FixRecommendationsCard({
         subtitle="One target version per package: the lowest that clears every advisory reported against it, then checked against the vulnerability database and moved forward if that version is itself affected."
         actions={
           <>
+            <Select
+              value={scope}
+              onChange={(value) => onScopeChange(value)}
+              ariaLabel="Package scope"
+              options={FINDINGS_SCOPE_OPTIONS}
+            />
+            <Checkbox
+              checked={showNoFix}
+              onChange={setShowNoFix}
+              label={`Show packages with no fix (${formatNumber(noFix)})`}
+            />
             <ExportTableButton
               title="Recommended upgrades"
               filename="recommended-upgrades"
@@ -97,17 +108,6 @@ export function FixRecommendationsCard({
                   width: 60,
                 },
               ]}
-            />
-            <Select
-              value={scope}
-              onChange={(value) => onScopeChange(value)}
-              ariaLabel="Package scope"
-              options={FINDINGS_SCOPE_OPTIONS}
-            />
-            <Checkbox
-              checked={showNoFix}
-              onChange={setShowNoFix}
-              label={`Show packages with no fix (${formatNumber(noFix)})`}
             />
           </>
         }

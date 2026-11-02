@@ -71,6 +71,9 @@ export function AdminSquadsPage() {
           subtitle="Teams of people granted applications together. Adding someone to a squad gives them everything the squad is granted; removing them takes it away."
           actions={
             <>
+              <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
+                New squad
+              </Button>
               <ExportTableButton
                 title="Squads"
                 filename="squads"
@@ -87,9 +90,6 @@ export function AdminSquadsPage() {
                   { header: "Created", value: (s) => exportDate(s.createdAt), width: 18 },
                 ]}
               />
-              <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
-                New squad
-              </Button>
             </>
           }
         />

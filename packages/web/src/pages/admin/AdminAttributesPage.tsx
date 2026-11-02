@@ -125,6 +125,9 @@ export function AdminAttributesPage() {
           subtitle="Anything added here appears on every application's edit form. Tribe and Squad are linked to Access: their values are the tribes and squads a project is assigned to. A required attribute must be filled whenever an administrator creates, edits or confirms a project; CI uploads are never refused over one."
           actions={
             <>
+              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+                New attribute
+              </Button>
               <ExportTableButton
                 title="Application attributes"
                 filename="application-attributes"
@@ -140,9 +143,6 @@ export function AdminAttributesPage() {
                   { header: "Linked to", value: (d) => d.linkedTo, width: 10 },
                 ]}
               />
-              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-                New attribute
-              </Button>
             </>
           }
         />

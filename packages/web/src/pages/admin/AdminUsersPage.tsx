@@ -188,6 +188,19 @@ export function AdminUsersPage() {
           subtitle="Sign-in identifiers are usernames, not mailboxes - the platform never sends email. Passwords are issued here and handed over directly."
           actions={
             <>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  // Cleared, or a create started from the queue and cancelled would silently
+                  // resolve the next request made from this button.
+                  setCreateFrom(null);
+                  setNotice(null);
+                  setCreateOpen(true);
+                }}
+              >
+                New account
+              </Button>
               <ExportTableButton
                 title="Accounts"
                 filename="accounts"
@@ -218,19 +231,6 @@ export function AdminUsersPage() {
                   { header: "Created", value: (u) => exportDate(u.createdAt), width: 18 },
                 ]}
               />
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  // Cleared, or a create started from the queue and cancelled would silently
-                  // resolve the next request made from this button.
-                  setCreateFrom(null);
-                  setNotice(null);
-                  setCreateOpen(true);
-                }}
-              >
-                New account
-              </Button>
             </>
           }
         />

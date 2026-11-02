@@ -142,7 +142,9 @@ export function CardHeader({
         <h2 className="text-sm font-semibold text-text-base">{title}</h2>
         {subtitle ? <p className="mt-0.5 text-xs text-text-muted">{subtitle}</p> : null}
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {/* Right-aligned even when they wrap, so the last control - an export, usually -
+          stays at the right edge where people look for it. */}
+      {actions ? <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{actions}</div> : null}
     </div>
   );
 }
