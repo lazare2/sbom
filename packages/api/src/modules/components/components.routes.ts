@@ -6,8 +6,11 @@ import {
   bulkSearchQuerySchema,
   componentSearchQuerySchema,
   componentSuggestQuerySchema,
+  packageDetailQuerySchema,
+  packageSearchQuerySchema,
   idParamSchema,
 } from "@sbom/shared";
+import { NotFoundError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
 import { renderBulkXlsx } from "./bulk-xlsx.js";
@@ -24,7 +27,7 @@ const XLSX_MATCH_CAP = 20_000;
 
 /** Global cross-application component search. Read-only, any authenticated user. */
 export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
-  const { components, bulkSearch } = fastify.ctx;
+  const { components, bulkSearch, packageSearch } = fastify.ctx;
 
   fastify.addHook("preHandler", fastify.requireAuth);
 
@@ -36,6 +39,26 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
     */
     const scopes = await selectedScopes(request, query.environments);
     return reply.send(await components.search(query, scopes));
+  });
+
+  /**
+   * Package-first search: one row per package per estate, with where it is used.
+   * Spans the estates selected exactly like /search, and refuses an unreachable one the same way.
+   */
+  fastify.get("/packages", async (request, reply) => {
+    const query = parseOrThrow(packageSearchQuerySchema, request.query, "Query");
+    const scopes = await selectedScopes(request, query.environments);
+    const vulnEnabled = await fastify.ctx.settings.vulnScanningEnabled();
+    return reply.send(await packageSearch.search(query, scopes, vulnEnabled));
+  });
+
+  /** One package in one estate: its versions and every application that uses or used it. */
+  fastify.get("/packages/detail", async (request, reply) => {
+    const query = parseOrThrow(packageDetailQuerySchema, request.query, "Query");
+    const [scope] = await selectedScopes(request, [query.environment]);
+    if (!scope) throw new NotFoundError("Environment");
+    const vulnEnabled = await fastify.ctx.settings.vulnScanningEnabled();
+    return reply.send(await packageSearch.detail(query, scope, vulnEnabled));
   });
 
   fastify.get(

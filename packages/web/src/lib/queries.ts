@@ -1,5 +1,7 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
+  PackageDetail,
+  PackageSearchResult,
   AccessRequestList,
   ApiAccessInfo,
   ApiTokenSummary,
@@ -92,6 +94,8 @@ export const queryKeys = {
   componentSuggest: (q: string) => ["components", "suggest", q] as const,
   componentEcosystems: ["components", "ecosystems"] as const,
   componentVersions: (name: string) => ["components", "versions", name] as const,
+  packageSearch: (params: Record<string, unknown>) => ["components", "packages", params] as const,
+  packageDetail: (params: Record<string, unknown>) => ["components", "packages", "detail", params] as const,
   recentScans: (limit: number) => ["scans", "recent", limit] as const,
   maliciousStatus: ["malicious", "status"] as const,
   maliciousList: (params: Record<string, unknown>) => ["malicious", "list", params] as const,
@@ -331,6 +335,24 @@ export function useComponentSearch(
     queryFn: () => api.get<ComponentSearchResponse>(`/components/search${toQueryString(params)}`),
     enabled: options.enabled ?? true,
     placeholderData: (previous) => previous,
+  });
+}
+
+/** Package-first search: one row per package per estate. */
+export function usePackageSearch(params: Record<string, unknown>, options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: queryKeys.packageSearch(params),
+    queryFn: () => api.get<PackageSearchResult>(`/components/packages${toQueryString(params)}`),
+    enabled: options.enabled ?? true,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** One package in one estate: versions and every application that uses or used it. */
+export function usePackageDetail(params: { name: string; ecosystem: string; environment: string; includeInactive?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.packageDetail(params),
+    queryFn: () => api.get<PackageDetail>(`/components/packages/detail${toQueryString(params)}`),
   });
 }
 

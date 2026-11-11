@@ -752,7 +752,8 @@ breakdown changes between one morning and the next, so it does not earn space on
 page opened every day; Analytics owns all of it, and no table appears on both.
 
 **Package search** has two modes behind one toggle. *One package* answers who
-ships X, now or at any point in history. *A list* checks a whole pasted list at
+ships X - one row per package, opening into where it is used - now or at any point
+in history. *A list* checks a whole pasted list at
 once and reports a verdict per package - see
 [Searching a list of packages](#searching-a-list-of-packages).
 
@@ -827,17 +828,26 @@ every difference is an upgrade, and without that folding the genuine adds and
 drops are buried. Where the pairing is ambiguous - two versions added, one removed
 - the rows stay unpaired rather than being matched arbitrarily.
 
-**Package search** answers the cross-application question. The usage selector is
-the point of the page:
+**Package search** answers the cross-application question, package first. Each
+row is one package (its name within an ecosystem, once per environment - a total summed
+across estates would mix them) with the applications that use it now, the applications
+that dropped it, how many versions are in use, and - with scanning on - the distinct
+advisories against the versions in current builds and how many of those applications
+are affected. Accepted risks are left out, as everywhere else. Opening a row lists every
+version with its own counts and every application that uses or used the package,
+vulnerable or not, each linked to the build it was last seen in.
+
+An upgrade is not a removal: an application that moved from 1.0 to 1.1 still uses the
+package. The usage selector decides which packages are listed:
 
 | Scope | Question it answers |
 |---|---|
-| Currently used | Which applications ship this package today? |
-| Previously used, not now | Which applications *dropped* it - and in which build was it last seen? |
-| Both | Everything, labelled |
+| Currently used | Which packages does some application ship today, in any version? |
+| Previously used, not now | Which packages did some application *drop* entirely - and in which build was it last seen? |
+| Both | Everything, with both counts on every row |
 
-The second scope is why full scan history is retained. Results link to the exact
-build a package was last seen in.
+The second scope is why full scan history is retained. *Export every application*
+still produces the flat application × version list for a spreadsheet.
 
 All filter and pagination state lives in the URL, so a filtered view can be pasted
 into a ticket and opens the same way for the next person.
@@ -1788,7 +1798,9 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `GET /scans/:id` | Build provenance, with previous/next ids |
 | `GET /scans/:id/components` | That build's packages |
 | `GET /scans/:id/raw` | The original CycloneDX bytes, as uploaded |
-| `GET /components/search` | Cross-application package search (`scope=current\|historical\|all`) |
+| `GET /components/packages` | Package-first search: one row per package per environment, with usage and advisory counts |
+| `GET /components/packages/detail` | One package in one environment: its versions and every application that uses or used it |
+| `GET /components/search` | Cross-application package search, one row per application and version (`scope=current\|historical\|all`) |
 | `POST /components/bulk-search` | Search a pasted package list; returns a verdict per line and a saved-list id |
 | `GET /components/bulk-search/:id` | Re-run a saved list, with its original text |
 | `GET /components/bulk-search/:id/export.xlsx` | The results as a four-sheet Excel workbook |

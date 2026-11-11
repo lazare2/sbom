@@ -339,6 +339,20 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
       "`match=exact` is the default; `match=substring` is the one that finds `react` inside " +
       "`react-dom`. `scope=current` searches current builds, `historical` searches every build.",
   },
+  "GET /api/v1/components/packages": {
+    summary: "Find packages by name: one row per package per environment, with where each is used.",
+    tag: "Components",
+    auth: "user",
+    notes:
+      "Counts applications currently shipping any version and applications that dropped it, the " +
+      "versions in use, and - with scanning on - distinct advisories over current builds, accepted " +
+      "risks excluded. `scope` picks which packages are listed; both counts are always returned.",
+  },
+  "GET /api/v1/components/packages/detail": {
+    summary: "One package in one environment: its versions and every application that uses or used it.",
+    tag: "Components",
+    auth: "user",
+  },
   "GET /api/v1/components/suggest": {
     summary: "Name completions for a partial package name.",
     tag: "Components",

@@ -170,6 +170,7 @@ export function ExportTableButton<T>({
   rows,
   fetchRows,
   size = "sm",
+  label = "Export table",
 }: {
   /** What the table is, for the workbook's info sheet: "Applications", "Audit log". */
   title: string;
@@ -179,6 +180,8 @@ export function ExportTableButton<T>({
   rows?: readonly T[];
   fetchRows?: (onProgress: (loaded: number, total: number) => void) => Promise<FetchedRows<T>>;
   size?: "sm" | "md";
+  /** Button text, for a card that offers more than one export. */
+  label?: string;
 }) {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -246,7 +249,7 @@ export function ExportTableButton<T>({
         disabled={progress !== null || (!fetchRows && (rows?.length ?? 0) === 0)}
         title="Download this table, with its current filters and sort, as an Excel workbook"
       >
-        {progress ?? "Export table"}
+        {progress ?? label}
       </Button>
     </span>
   );

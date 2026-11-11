@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { componentSearchSort, sortDirections, type ComponentSearchHit } from "@sbom/shared";
-import { useClientSort, useServerSort } from "../lib/useSort.ts";
+import { packageSearchSort, sortDirections, type ComponentSearchHit, type PackageSearchRow } from "@sbom/shared";
+import { useServerSort } from "../lib/useSort.ts";
 import {
   useComponentEcosystems,
-  useComponentSearch,
   useComponentSuggestions,
-  useComponentVersions,
   useEnvironments,
+  usePackageSearch,
 } from "../lib/queries.ts";
 import { formatNumber } from "../lib/format.ts";
 import {
@@ -19,11 +18,11 @@ import {
   useUrlState,
 } from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
-import { COMPONENT_HIT_EXPORT_COLUMNS, ComponentHitsTable } from "../components/ComponentHitsTable.tsx";
+import { COMPONENT_HIT_EXPORT_COLUMNS } from "../components/ComponentHitsTable.tsx";
+import { PACKAGE_EXPORT_COLUMNS, PackagesTable } from "../components/PackageResults.tsx";
 import { ExportTableButton, fetchAllPages } from "../components/ExportTable.tsx";
 import { BulkPackageSearch } from "./BulkPackageSearch.tsx";
-import {
-  Badge,
+import {
   Button,
   Card,
   CardHeader,
@@ -33,13 +32,8 @@ import {
   LoadingBlock,
   Pagination,
   PageHeader,
-  Select,
-  Table,
-  TableWrap,
-  Td,
-  TextInput,
-  Th,
-  Tr,
+  Select,
+  TextInput,
 } from "../components/ui.tsx";
 
 const SCOPES = ["current", "historical", "all"] as const;
@@ -49,7 +43,7 @@ const MATCHES = ["contains", "exact"] as const;
  * Sort defaults come from the shared declaration rather than being restated, so the URL
  * omits them exactly when the server would have chosen them anyway.
  */
-const SORT_FIELDS = componentSearchSort.fields;
+const SORT_FIELDS = packageSearchSort.fields;
 const SORT_DIRECTIONS = sortDirections;
 
 const DEFAULTS = {
@@ -66,8 +60,8 @@ const DEFAULTS = {
     someone to check production, find nothing, and stop.
   */
   environments: [] as string[],
-  sortBy: componentSearchSort.defaultField,
-  sortDir: componentSearchSort.defaultDirection,
+  sortBy: packageSearchSort.defaultField,
+  sortDir: packageSearchSort.defaultDirection,
   page: 1,
 };
 
@@ -81,8 +75,8 @@ const urlSpec = {
     match: readEnum(params, "match", MATCHES, "contains"),
     includeInactive: readBool(params, "includeInactive"),
     environments: readStringList(params, "environments"),
-    sortBy: readEnum(params, "sortBy", SORT_FIELDS, componentSearchSort.defaultField),
-    sortDir: readEnum(params, "sortDir", SORT_DIRECTIONS, componentSearchSort.defaultDirection),
+    sortBy: readEnum(params, "sortBy", SORT_FIELDS, packageSearchSort.defaultField),
+    sortDir: readEnum(params, "sortDir", SORT_DIRECTIONS, packageSearchSort.defaultDirection),
     page: readNumber(params, "page", 1),
   }),
 };
@@ -93,20 +87,17 @@ const SCOPE_LABELS: Record<(typeof SCOPES)[number], string> = {
   all: "Both",
 };
 
+/*
+  Package-level wording. An application that upgraded from 1.0 to 1.1 still uses the package,
+  so "previously used" means it ships no version of it any more - not that one version went away.
+*/
 const SCOPE_HINTS: Record<(typeof SCOPES)[number], string> = {
-  current: "Applications whose latest scan contains this package.",
+  current: "Packages some application's latest build ships, in any version.",
   historical:
-    "Applications that shipped this package in an earlier build but not in their current one - it was removed or upgraded away.",
-  all: "Every application that has ever shipped this package, labelled by whether it still does.",
+    "Packages some application shipped in an earlier build and ships no version of now - it was removed, not just upgraded.",
+  all: "Every package any application has ever shipped, counting both who uses it now and who dropped it.",
 };
 
-/**
- * Global cross-application package search.
- *
- * The scope selector is the point of the page: "who ships log4j today" and "who
- * used to ship it" are different questions, and the second one is the reason the
- * platform keeps full scan history.
- */
 /**
  * Package search, in two modes.
  *
@@ -196,28 +187,35 @@ function SinglePackageSearch() {
     [state],
   );
 
-  const { data, isLoading, isFetching, error, refetch } = useComponentSearch(params, { enabled: hasQuery });
+  const { data, isLoading, isFetching, error, refetch } = usePackageSearch(params, { enabled: hasQuery });
   // Server-side: the result set is paginated, so the ordering has to be decided by the query.
-  const sort = useServerSort(componentSearchSort, state, setState);
+  const sort = useServerSort(packageSearchSort, state, setState);
   const { data: ecosystems } = useComponentEcosystems();
   const { data: suggestions } = useComponentSuggestions(nameInput === state.name ? "" : nameInput);
-  const { data: versions } = useComponentVersions(
-    state.match === "exact" && hasQuery ? state.name : undefined,
-  );
-  /* Client-side: the endpoint returns every version of the one named package at once. */
-  const versionSort = useClientSort(
-    versions,
-    { version: "text", ecosystem: "text", currentApplications: "number", totalApplications: "number" } as const,
-    { sortBy: "currentApplications" },
-    (v, f) =>
-      f === "version"
-        ? v.version
-        : f === "ecosystem"
-          ? v.ecosystem
-          : f === "currentApplications"
-            ? v.currentApplications
-            : v.totalApplications,
-    (v) => v.componentId,
+  const { data: environmentList } = useEnvironments();
+  /*
+    The estate column appears only when the reader can see more than one estate. With one, every
+    row would repeat the same name; with several, the same package legitimately appears once per
+    estate and the column is what tells those rows apart.
+  */
+  const showEnvironment = (environmentList?.environments.length ?? 0) > 1;
+
+  /*
+    The per-application rows, for a spreadsheet. The package table is the reading view; this is
+    the one a ticket wants when it asks for every application and version, and it uses the
+    per-pair search so its scope semantics are the ones its columns describe.
+  */
+  const usageExportParams = useMemo(
+    () => ({
+      name: state.name,
+      version: state.version || undefined,
+      ecosystem: state.ecosystem || undefined,
+      scope: state.scope,
+      match: state.match,
+      includeInactive: state.includeInactive || undefined,
+      environments: state.environments.length > 0 ? state.environments : undefined,
+    }),
+    [state],
   );
 
   return (
@@ -347,130 +345,44 @@ function SinglePackageSearch() {
         </p>
       </Card>
 
-      {/* Version breakdown, shown for an exact-name search: which version is where. */}
-      {versions && versions.length > 1 ? (
-        <Card className="mb-4">
-          <CardHeader
-            title="Versions in use"
-            subtitle={`${versions.length} distinct versions of ${state.name} across the estate`}
-            actions={
-              <ExportTableButton
-                title="Versions in use"
-                filename={`versions-${state.name.trim().replace(/[^A-Za-z0-9._-]+/g, "-")}`}
-                rows={versionSort.rows}
-                columns={[
-                  { header: "Package", value: () => state.name, width: 32 },
-                  { header: "Version", value: (v) => v.version, width: 18 },
-                  { header: "Ecosystem", value: (v) => v.ecosystem, width: 12 },
-                  { header: "Current applications", value: (v) => v.currentApplications, width: 18 },
-                  { header: "Ever used by", value: (v) => v.totalApplications, width: 12 },
-                  {
-                    header: "Fully removed",
-                    value: (v) => (v.currentApplications === 0 && v.totalApplications > 0 ? "yes" : "no"),
-                    width: 13,
-                  },
-                ]}
-              />
-            }
-          />
-          <TableWrap>
-            <Table>
-              <thead>
-                <tr>
-                  <Th
-                    onSort={() => versionSort.toggle("version")}
-                    sorted={versionSort.stateOf("version")}
-                    width="220px"
-                  >
-                    Version
-                  </Th>
-                  <Th
-                    onSort={() => versionSort.toggle("ecosystem")}
-                    sorted={versionSort.stateOf("ecosystem")}
-                    width="120px"
-                  >
-                    Ecosystem
-                  </Th>
-                  <Th
-                    onSort={() => versionSort.toggle("currentApplications")}
-                    sorted={versionSort.stateOf("currentApplications")}
-                    align="right"
-                    width="140px"
-                  >
-                    Current apps
-                  </Th>
-                  <Th
-                    onSort={() => versionSort.toggle("totalApplications")}
-                    sorted={versionSort.stateOf("totalApplications")}
-                    align="right"
-                    width="150px"
-                  >
-                    Ever used by
-                  </Th>
-                  <Th />
-                </tr>
-              </thead>
-              <tbody>
-                {versionSort.rows.map((v) => (
-                  <Tr key={v.componentId}>
-                    <Td className="nums font-mono text-xs">{v.version ?? "unknown"}</Td>
-                    <Td>
-                      <span className="rounded bg-neutral-subtle px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
-                        {v.ecosystem}
-                      </span>
-                    </Td>
-                    <Td align="right" className="nums">
-                      {v.currentApplications > 0 ? (
-                        <span className="font-medium text-text-base">{formatNumber(v.currentApplications)}</span>
-                      ) : (
-                        <span className="text-text-faint">0</span>
-                      )}
-                    </Td>
-                    <Td align="right" className="nums text-text-muted">
-                      {formatNumber(v.totalApplications)}
-                    </Td>
-                    <Td>
-                      {v.currentApplications === 0 && v.totalApplications > 0 ? (
-                        <Badge tone="neutral" title="No application currently ships this version.">
-                          fully removed
-                        </Badge>
-                      ) : null}
-                    </Td>
-                  </Tr>
-                ))}
-              </tbody>
-            </Table>
-          </TableWrap>
-        </Card>
-      ) : null}
-
       {error ? <ErrorBanner error={error} onRetry={() => void refetch()} /> : null}
 
       {!hasQuery ? (
         <Card>
           <EmptyState
             title="Search for a package"
-            hint="Type a package name above. Switch to “Previously used, not now” to find applications that dropped a dependency - that view is powered by full scan history, not just the latest build."
+            hint="Type a package name above to see every application that uses it, which versions are in use, and what is known against them. Switch to “Previously used, not now” to find applications that dropped a dependency - that view is powered by full scan history, not just the latest build."
           />
         </Card>
       ) : (
         <Card>
           <CardHeader
-            title="Results"
+            title="Packages"
             subtitle={
               data
-                ? `${formatNumber(data.total)} application - package pair${data.total === 1 ? "" : "s"}` +
-                  (data.matchedComponents > 0 ? ` · ${formatNumber(data.matchedComponents)} distinct packages matched` : "")
+                ? `${formatNumber(data.total)} package${data.total === 1 ? "" : "s"} matched. Open one to see its versions and every application that uses it.`
                 : undefined
             }
             actions={
               data && data.total > 0 ? (
-                <ExportTableButton
-                  title="Package search"
-                  filename={`package-search-${state.name.trim().replace(/[^A-Za-z0-9._-]+/g, "-")}`}
-                  fetchRows={(progress) => fetchAllPages<ComponentSearchHit>("/components/search", params, progress)}
-                  columns={COMPONENT_HIT_EXPORT_COLUMNS}
-                />
+                <>
+                  <ExportTableButton
+                    title="Packages"
+                    label="Export packages"
+                    filename={`packages-${state.name.trim().replace(/[^A-Za-z0-9._-]+/g, "-")}`}
+                    fetchRows={(progress) => fetchAllPages<PackageSearchRow>("/components/packages", params, progress)}
+                    columns={PACKAGE_EXPORT_COLUMNS}
+                  />
+                  <ExportTableButton
+                    title="Every application and version"
+                    label="Export every application"
+                    filename={`package-usage-${state.name.trim().replace(/[^A-Za-z0-9._-]+/g, "-")}`}
+                    fetchRows={(progress) =>
+                      fetchAllPages<ComponentSearchHit>("/components/search", usageExportParams, progress)
+                    }
+                    columns={COMPONENT_HIT_EXPORT_COLUMNS}
+                  />
+                </>
               ) : undefined
             }
           />
@@ -483,6 +395,17 @@ function SinglePackageSearch() {
               This search matched more distinct packages than can be reported at once. Narrow it with a more
               specific name, an exact match, or an ecosystem filter.
             </div>
+          ) : null}
+
+          {data && !data.vulnScanningEnabled ? (
+            <p className="border-b border-border-base px-4 py-2 text-[11px] text-text-faint">
+              Vulnerability scanning is switched off, so advisory columns are not shown.
+            </p>
+          ) : data && data.total > 0 ? (
+            <p className="border-b border-border-base px-4 py-2 text-[11px] text-text-faint">
+              Advisories are distinct, counted over the versions in current builds only, with accepted risks left
+              out. A package with none is still listed with every application that uses it.
+            </p>
           ) : null}
 
           {isLoading ? (
@@ -500,7 +423,16 @@ function SinglePackageSearch() {
             />
           ) : (
             <>
-              <ComponentHitsTable hits={data.items} sort={sort} />
+              <PackagesTable
+                // Re-keyed per query so a new search starts with its rows closed again.
+                key={JSON.stringify(params)}
+                rows={data.items}
+                sort={sort}
+                showEnvironment={showEnvironment}
+                showVulns={data.vulnScanningEnabled}
+                includeInactive={state.includeInactive}
+                initiallyOpen={data.total === 1}
+              />
               <Pagination
                 page={data.page}
                 pageSize={data.pageSize}

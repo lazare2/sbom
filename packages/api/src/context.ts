@@ -17,6 +17,7 @@ import { AnalyticsService } from "./modules/analytics/analytics.service.js";
 import { ApplicationsService } from "./modules/applications/applications.service.js";
 import { BulkSearchService } from "./modules/components/bulk-search.service.js";
 import { ComponentsService } from "./modules/components/components.service.js";
+import { PackageSearchService } from "./modules/components/package-search.service.js";
 import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
@@ -94,6 +95,7 @@ export interface AppContext {
   applicationAccess: ApplicationAccessService;
   scans: ScansService;
   components: ComponentsService;
+  packageSearch: PackageSearchService;
   bulkSearch: BulkSearchService;
   diff: DiffService;
   dashboard: DashboardService;
@@ -242,6 +244,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const groups = new GroupsService({ db, settings });
   const scans = new ScansService({ db, blobStore });
   const components = new ComponentsService({ db });
+  const packageSearch = new PackageSearchService({ db });
   const bulkSearch = new BulkSearchService({ db });
   const diff = new DiffService({ db });
   const dashboard = new DashboardService({ db, config, settings });
@@ -491,6 +494,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     applicationAccess,
     scans,
     components,
+    packageSearch,
     bulkSearch,
     diff,
     dashboard,
