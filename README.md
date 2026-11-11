@@ -481,47 +481,25 @@ both, so what you print is what you were looking at.
 ### The monthly management report
 
 **Administration → Monthly report**, with its delivery settings under
-**Administration → Configuration**. A separate document from the analytics PDF above:
-that one is an inventory of what exists, this one is an argument about what changed.
+**Administration → Configuration**. The monthly report *is* the analytics report: the
+same payload and the same PDF as **Analytics → Download PDF**, generated for one
+environment over the month that just finished and emailed with the headline figures in
+the body - projects needing attention and why, progress per project, squad and tribe,
+build-to-build movement and the packages to upgrade first. One document, so what
+management is sent never disagrees with what the screen shows.
 
-The problem it exists to solve is attribution. Findings are matched against *today's*
-vulnerability database across every retained build, so a count that fell between two
-reports means one of two very different things - somebody upgraded a package, or the
-database changed its mind. A report that presents both as "47 fixed" tells management the
-team did work it did not do.
+Each run stores the report it was generated from alongside its PDF, so a report re-read a
+year later says exactly what it said when it was sent - live data and the vulnerability
+database will have moved on. The PDF is cached in the blob store, so the emailed
+attachment and a later download are the same bytes.
 
-So every movement is attributed to a cause:
+Reports filed before this format (which compared monthly snapshots and attributed each
+change to a cause) keep their stored PDFs and remain downloadable from the history. Their
+snapshots were dropped by migration `0027`; the application count they were filed with is
+kept, and the figures they did not measure show as blank rather than zero.
 
-| Resolved because | Meaning |
-|---|---|
-| **Fixed by upgrade or removal** | The vulnerable package has left the build. Work the teams did |
-| **Advisory withdrawn or re-scored** | The package is unchanged; the advisory changed. Nobody fixed anything |
-| **Application no longer tracked** | The findings left with the application; they were not resolved |
-
-| Introduced because | Meaning |
-|---|---|
-| **New or changed dependency** | A package entered a build carrying a known vulnerability |
-| **Newly published advisory** | The package was already in use; the advisory is new |
-| **Newly tracked application** | Existing risk becoming visible, not new risk |
-
-Findings resolved in an earlier period that have returned are counted as **reintroduced**,
-in addition to being introduced rather than instead of it - a regression is a property of
-a finding, not a fourth bucket, and counting it separately would stop the totals adding up.
-
-That distinction is only possible because **each report stores a snapshot of what it
-counted**, alongside the database build it counted against. Neither survives otherwise: a
-deleted application leaves no rows to diff, and re-running last month's query today answers
-with today's database. The delta is recomputed from those snapshots on every read rather
-than stored, so a later correction to the attribution logic fixes old reports instead of
-leaving them asserting the old answer forever.
-
-Base-image findings are separated from application dependencies throughout, and promoted to
-the headline. On a typical estate here they outnumber real dependency findings four to one,
-so a combined total is dominated by packages no application team can change.
-
-**Generate now** produces a report to look at. It is not emailed, and it does not become
-the comparison point for next month - the monthly series keeps that role, so pressing the
-button cannot quietly shorten the period the next report covers.
+**Generate now** produces the report for the month so far. It is not emailed and never
+stands in for the scheduled monthly report.
 
 #### Scheduling and delivery
 
@@ -530,7 +508,7 @@ set in the panel, covering the month that has just finished. If the service is d
 hour it sends when it comes back.
 
 It cannot send the same month twice. That guarantee lives in the database - a unique index
-on `(kind, period_start)` and a conditional claim on `sent_at` - not in application logic,
+on `(environment, kind, period_start)` and a conditional claim on `sent_at` - not in application logic,
 because a process that is restarting is precisely the process that cannot be trusted to
 remember what it already did.
 
@@ -551,12 +529,10 @@ visible, so a typo arrives as `{{aplications}}` rather than as a blank.
 
 #### Filtering the vulnerability figures
 
-The overview and the analytics page share one filter: **scope** (application dependencies
+The overview has one filter: **scope** (application dependencies
 / base image / both) and **severity** (Critical, High, Medium, Low, Other). It is URL
-state (`?scope=app&severity=critical,high`) and the PDF link carries it, so a filtered
-dashboard can be pasted into a ticket and a filtered report cannot be mistaken for a full
-one - the filter is named on the PDF cover and beside the figures, and the unfiltered
-totals are printed alongside as the reference point.
+state (`?scope=app&severity=critical,high`), so a filtered dashboard can be pasted into a
+ticket, and the unfiltered totals are printed alongside as the reference point.
 
 Four properties are load-bearing, each pinned by a test:
 

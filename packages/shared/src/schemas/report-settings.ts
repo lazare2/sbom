@@ -139,12 +139,18 @@ export interface ReportSettings {
 export const REPORT_TEMPLATE_PLACEHOLDERS = [
   "{{period}}",
   "{{applications}}",
+  /** Open findings in current builds, every severity. */
   "{{findings}}",
-  "{{resolved}}",
-  "{{introduced}}",
-  "{{reintroduced}}",
   "{{critical}}",
   "{{high}}",
+  /** Findings removed by builds in the period. `{{resolved}}` is the same figure, kept for older templates. */
+  "{{fixed}}",
+  "{{resolved}}",
+  "{{introduced}}",
+  /** introduced minus fixed, signed. */
+  "{{net}}",
+  /** Projects with at least one needs-attention flag. */
+  "{{attention}}",
   "{{generatedAt}}",
 ] as const;
 
@@ -157,11 +163,12 @@ Attached is the dependency and vulnerability report for {{period}}.
 Summary
   Applications tracked: {{applications}}
   Open findings: {{findings}} ({{critical}} critical, {{high}} high)
-  Resolved since the last report: {{resolved}}
-  Introduced since the last report: {{introduced}}
+  Fixed by builds this period: {{fixed}}
+  Introduced by builds this period: {{introduced}} (net {{net}})
+  Projects needing attention: {{attention}}
 
-The attached PDF attributes each change to a cause, and separates findings in
-application dependencies from those inherited from base images.
+The attached PDF lists each project that needs attention and why, progress per
+project, squad and tribe, and what each build changed compared with the one before.
 
 Generated automatically on {{generatedAt}}.`;
 

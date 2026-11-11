@@ -189,8 +189,7 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get("/:id", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    const { run, delta } = await reports.get(id);
-    return reply.send({ run, delta });
+    return reply.send(await reports.get(id));
   });
 
   /**
@@ -246,7 +245,6 @@ export async function reportRoutes(fastify: FastifyInstance): Promise<void> {
     // created, and a CI caller checking for 201 should be able to tell the two apart.
     return reply.status(result.alreadyExisted ? 200 : 201).send({
       run: result.run,
-      delta: result.delta,
       alreadyExisted: result.alreadyExisted,
     });
   });

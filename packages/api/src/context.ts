@@ -43,7 +43,6 @@ import { SbomBackfillService } from "./modules/ingestion/sbom-backfill.service.j
 import { Mailer } from "./modules/reports/mailer.js";
 import { ReportScheduler } from "./modules/reports/report-scheduler.js";
 import { ReportService } from "./modules/reports/report.service.js";
-import { SnapshotService } from "./modules/reports/snapshot.service.js";
 import { ScansService } from "./modules/scans/scans.service.js";
 import { SettingsService } from "./modules/settings/settings.service.js";
 import { SweepService } from "./modules/vulnerabilities/sweep.service.js";
@@ -114,14 +113,9 @@ export interface AppContext {
    */
   settings: SettingsService;
   /*
-   * The management report.
-   *
-   * Two objects rather than one because they answer to different pressures: the snapshot is
-   * a query over the live estate, while the report is a record with a baseline and a
-   * duplicate guard. Keeping the capture separable is also what lets the delta be tested
-   * against hand-written estates that no database has to contain.
+   * The monthly report: the analytics report for the month, filed with its payload so the record
+   * outlives the live data it was computed from, and guarded against duplicate monthly runs.
    */
-  snapshots: SnapshotService;
   reports: ReportService;
   mailer: Mailer;
   reportScheduler: ReportScheduler;
@@ -284,9 +278,8 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const progress = new ProgressService({ db });
   const analytics = new AnalyticsService({ db, config, settings, progress });
 
-  const snapshots = new SnapshotService({ db });
   const mailer = new Mailer({ logger });
-  const reports = new ReportService({ db, blobStore, snapshots, settings, mailer, logger });
+  const reports = new ReportService({ db, blobStore, analytics, settings, mailer, logger });
   const reportScheduler = new ReportScheduler({ settings, reports, environments, logger });
 
   // Vulnerability scanning. The scanner is a port so the wiring tests can supply a
@@ -507,7 +500,6 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     inventory,
     vulnReport,
     settings,
-    snapshots,
     reports,
     mailer,
     reportScheduler,
