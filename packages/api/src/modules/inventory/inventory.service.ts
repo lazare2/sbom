@@ -8,13 +8,15 @@ import {
   type InventoryPackageEntry,
   type InventoryReport,
   type InventoryRuntimeEntry,
+  type TopProjectEntry,
   type TeamFilter,
 } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
-import { rowsOf, type Row } from "../applications/applications.service.js";
+import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
 import type { ReadScope } from "../environments/environment.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { APP_DEPENDENCY_PREDICATE, NOT_SUPPRESSED } from "../vulnerabilities/scope.js";
+import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 import { filteredApplications } from "./team-filter.js";
 
 const CAP = sql.raw(String(EXPANDABLE_LIST_CAP));
@@ -58,7 +60,7 @@ export class InventoryService {
     const uncovered = new Set(vulnEnabled ? await this.deps.uncoveredEcosystems() : []);
     const osAssessable = vulnEnabled && OS_ECOSYSTEMS.some((eco) => !uncovered.has(eco));
 
-    const [totals, mostUsed, mostVulnerable, operatingSystems, runtimes, ecosystems, fragmentation] =
+    const [totals, mostUsed, mostVulnerable, operatingSystems, runtimes, ecosystems, fragmentation, largestApplications] =
       await Promise.all([
         this.totals(apps),
         this.packages(apps, limit, "usage", vulnEnabled),
@@ -67,6 +69,7 @@ export class InventoryService {
         this.runtimes(apps),
         this.ecosystems(apps),
         this.fragmentation(apps, limit),
+        this.largestApplications(apps, limit),
       ]);
 
     return {
@@ -85,6 +88,7 @@ export class InventoryService {
       runtimes,
       ecosystems,
       fragmentation,
+      largestApplications,
     };
   }
 
@@ -310,6 +314,31 @@ export class InventoryService {
       components: Number(r.components),
       applications: Number(r.applications),
       applicationList: r.application_list ?? [],
+    }));
+  }
+
+  /**
+   * Applications carrying the most packages in their current build. Moved here from Analytics.
+   * Reads scan.component_count, the figure recorded at ingest, so it matches the scan pages.
+   */
+  private async largestApplications(apps: SQL, limit: number): Promise<TopProjectEntry[]> {
+    const rows = await this.deps.db.execute<
+      Row<PlatformRow & { id: string; name: string; packages: number | string; scan_at: Date | string | null }>
+    >(sql`
+      SELECT a.id, a.name, s.component_count::int AS packages, s.created_at AS scan_at,
+             s.os_name, s.os_version, s.os_pretty, s.runtimes
+      FROM application a
+      JOIN scan s ON s.id = a.latest_scan_id
+      WHERE a.status <> 'inactive' AND ${apps}
+      ORDER BY s.component_count DESC, a.name ASC
+      LIMIT ${limit}
+    `);
+    return rowsOf(rows).map((r) => ({
+      applicationId: r.id,
+      name: r.name,
+      packages: Number(r.packages),
+      scanAt: toIso(r.scan_at),
+      platform: toScanPlatform(r).summary,
     }));
   }
 

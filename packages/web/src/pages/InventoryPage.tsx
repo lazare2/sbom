@@ -6,9 +6,10 @@ import type {
   InventoryPackageEntry,
   InventoryReport,
   InventoryRuntimeEntry,
+  TopProjectEntry,
 } from "@sbom/shared";
 import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
-import { ExportTableButton, exportList } from "../components/ExportTable.tsx";
+import { ExportTableButton, exportDate, exportList } from "../components/ExportTable.tsx";
 import { osLabel, runtimeLabel } from "../components/Platform.tsx";
 import { CriticalHighBadges, ScanningDisabledNotice } from "../components/Severity.tsx";
 import { ShareBar, StatTile } from "../components/StatTile.tsx";
@@ -159,10 +160,87 @@ function InventoryBody({ report, isAdmin }: { report: InventoryReport; isAdmin: 
         <EcosystemCard rows={report.ecosystems} />
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <FragmentationCard rows={report.fragmentation} />
+        <LargestApplicationsCard rows={report.largestApplications} />
       </div>
     </>
+  );
+}
+
+/** Size, not risk: a big image costs more to review and patch, but is not automatically worse. */
+function LargestApplicationsCard({ rows }: { rows: TopProjectEntry[] }) {
+  // Reduced over every row, not read off the first: the headers are sortable.
+  const max = rows.reduce((m, r) => Math.max(m, r.packages), 0);
+  const sort = useClientSort(
+    rows,
+    { application: "text", platform: "text", packages: "number" } as const,
+    { sortBy: "packages" },
+    (r, f) => (f === "application" ? r.name : f === "platform" ? r.platform : r.packages),
+    (r) => r.applicationId,
+  );
+  return (
+    <Card>
+      <CardHeader
+        title="Largest applications"
+        subtitle="Most packages in the current build. A size ranking, not a risk ranking - a big image costs more to review and patch, but is not automatically in worse shape."
+        actions={
+          <ExportTableButton
+            title="Largest applications"
+            filename="largest-applications"
+            rows={sort.rows}
+            columns={[
+              { header: "Application", value: (p) => p.name, width: 36 },
+              { header: "Runs on", value: (p) => p.platform, width: 32 },
+              { header: "Packages", value: (p) => p.packages, width: 10 },
+              { header: "Build received", value: (p) => exportDate(p.scanAt), width: 18 },
+            ]}
+          />
+        }
+      />
+      {rows.length === 0 ? (
+        <EmptyState title="No builds yet" hint="Applications appear here once they report an SBOM." />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
+                  Application
+                </Th>
+                <Th onSort={() => sort.toggle("platform")} sorted={sort.stateOf("platform")}>
+                  Runs on
+                </Th>
+                <Th onSort={() => sort.toggle("packages")} sorted={sort.stateOf("packages")} align="right">
+                  Packages
+                </Th>
+                <Th width="130px">Share</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {sort.rows.map((p) => (
+                <Tr key={p.applicationId}>
+                  <Td>
+                    <Link to={`/applications/${p.applicationId}`} className="font-medium text-accent hover:underline">
+                      {p.name}
+                    </Link>
+                  </Td>
+                  <Td>
+                    <Mono>{p.platform ?? "not detected"}</Mono>
+                  </Td>
+                  <Td align="right" className="nums">
+                    {formatNumber(p.packages)}
+                  </Td>
+                  <Td>
+                    <ShareBar value={p.packages} max={max} />
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
   );
 }
 

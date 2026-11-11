@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { EcosystemBreakdownEntry } from "./admin.js";
-import type { FragmentationEntry } from "./analytics.js";
+import type { FragmentationEntry, TopProjectEntry } from "./analytics.js";
 
 // ---------------------------------------------------------------------------
 // Team filter - shared by Inventory and Analytics
@@ -158,4 +158,6 @@ export interface InventoryReport {
   runtimes: InventoryRuntimeEntry[];
   ecosystems: EcosystemBreakdownEntry[];
   fragmentation: FragmentationEntry[];
+  /** Applications with the most packages in their current build. A size ranking, not a risk one. */
+  largestApplications: TopProjectEntry[];
 }

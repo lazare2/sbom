@@ -101,7 +101,8 @@ describe("read-scope leaks", () => {
   });
 
   it("scopes every inventory query, and the team filter only narrows on top of it", async () => {
-    const { db, queries } = capturingDb({});
+    // A null build time, as a row from the largest-applications query can carry.
+    const { db, queries } = capturingDb({ scan_at: null });
     const inventory = new InventoryService({
       db: db as never,
       settings: { vulnScanningEnabled: async () => true } as never,
@@ -113,8 +114,8 @@ describe("read-scope leaks", () => {
       limit: 5,
     });
 
-    // totals, two package rankings, distributions, runtimes, ecosystems, fragmentation.
-    expect(queries).toHaveLength(7);
+    // totals, two package rankings, distributions, runtimes, ecosystems, fragmentation, largest apps.
+    expect(queries).toHaveLength(8);
     for (const query of queries) {
       expect(query.params).toContain(ENV_ID);
       expect(query.params).toContainEqual([APP_ID]);
