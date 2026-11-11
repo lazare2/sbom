@@ -9,6 +9,7 @@ import type { BuildContextOverrides } from "./context.js";
 import { sha256Hex } from "./lib/crypto.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
 import { analyticsRoutes } from "./modules/analytics/analytics.routes.js";
+import { inventoryRoutes } from "./modules/inventory/inventory.routes.js";
 import { applicationRoutes } from "./modules/applications/applications.routes.js";
 import { groupRoutes } from "./modules/groups/groups.routes.js";
 import { attributeRoutes } from "./modules/attributes/attributes.routes.js";
@@ -182,6 +183,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       await api.register(attributeRoutes, { prefix: "/attribute-definitions" });
       await api.register(dashboardRoutes, { prefix: "/dashboard" });
       await api.register(analyticsRoutes, { prefix: "/analytics" });
+      await api.register(inventoryRoutes, { prefix: "/inventory" });
 
       /*
        * Vulnerability reads, in two scopes on purpose.

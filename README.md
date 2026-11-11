@@ -757,6 +757,16 @@ in history. *A list* checks a whole pasted list at
 once and reports a verdict per package - see
 [Searching a list of packages](#searching-a-list-of-packages).
 
+**Inventory** answers *what is the estate made of?* The application dependencies in
+the most applications and the ones with the most critical and high advisories against
+the versions in use (distinct advisories, accepted risks left out), the base images by
+how many applications run them with those applications' base-image findings and the
+average per application, language runtimes, the ecosystem mix and version
+fragmentation. Base-image packages appear only in the base-image table: ranked beside
+dependencies they would take every row. Everything describes current builds of the
+applications the reader can see in the selected environment, and can be narrowed to
+some squads, tribes or groups (`?squad=…&tribe=…&group=…`, by name).
+
 **Analytics** answers the other question: *what shape is the estate in, and how is
 it changing?* Coverage, the vulnerable-package and advisory rankings, base-image
 exposure, the most widely deployed packages - the blast-radius list that decides
@@ -1808,6 +1818,7 @@ signed-in user; everything under `/admin` needs `role = admin`.
 | `GET /dashboard/stats` | Estate counters |
 | `GET /dashboard/top-components` | Packages by application count |
 | `GET /dashboard/platforms` | OS and runtime counts; also the filter options |
+| `GET /inventory/report` | Most-used and most-vulnerable packages, base images, runtimes, ecosystems, fragmentation (`?squad=&tribe=&group=&limit=`) |
 | `GET /analytics/report` | The whole estate report as JSON (`?periodDays=7\|30\|90\|365`, plus the vulnerability filter) |
 | `GET /analytics/report.pdf` | The same report as a PDF, curl-able and date-stamped. Accepts the same filter, and prints it |
 | `GET /vuln-status` | Whether scanning is enabled, database age, sweep coverage. Readable when disabled |

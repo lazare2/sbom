@@ -1,5 +1,6 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
+  InventoryReport,
   PackageDetail,
   PackageSearchResult,
   AccessRequestList,
@@ -96,6 +97,7 @@ export const queryKeys = {
   componentVersions: (name: string) => ["components", "versions", name] as const,
   packageSearch: (params: Record<string, unknown>) => ["components", "packages", params] as const,
   packageDetail: (params: Record<string, unknown>) => ["components", "packages", "detail", params] as const,
+  inventoryReport: (params: Record<string, unknown>) => ["inventory", "report", params] as const,
   recentScans: (limit: number) => ["scans", "recent", limit] as const,
   maliciousStatus: ["malicious", "status"] as const,
   maliciousList: (params: Record<string, unknown>) => ["malicious", "list", params] as const,
@@ -552,6 +554,16 @@ export function bulkSearchXlsxUrl(id: string, options: BulkSearchOptions): strin
  * requests then a scan arriving mid-load would give the screen a mix of two
  * moments - and the printed report a third. One payload, one instant.
  */
+/** What the estate is made of, for the Inventory page. */
+export function useInventoryReport(params: Record<string, unknown>) {
+  return useQuery({
+    queryKey: queryKeys.inventoryReport(params),
+    queryFn: () => api.get<InventoryReport>(`/inventory/report${toQueryString(params)}`),
+    staleTime: 60 * 1000,
+    placeholderData: (previous) => previous,
+  });
+}
+
 export function useAnalyticsReport(periodDays: number, vulnFilter: Record<string, string> = {}) {
   return useQuery({
     queryKey: queryKeys.analyticsReport(periodDays, vulnFilter),

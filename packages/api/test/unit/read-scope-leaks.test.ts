@@ -4,6 +4,8 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { AnalyticsService } from "../../src/modules/analytics/analytics.service.js";
 import { ComponentsService } from "../../src/modules/components/components.service.js";
 import type { ReadScope } from "../../src/modules/environments/environment.service.js";
+import { InventoryService } from "../../src/modules/inventory/inventory.service.js";
+import { teamPredicate } from "../../src/modules/inventory/team-filter.js";
 
 /**
  * Aggregates that used to read past the caller's access.
@@ -96,6 +98,33 @@ describe("read-scope leaks", () => {
     const text = queries[0]!.sql;
     expect(text).toContain("count(a.id)::int AS total_applications");
     expect(text).toContain("HAVING count(a.id) > 0");
+  });
+
+  it("scopes every inventory query, and the team filter only narrows on top of it", async () => {
+    const { db, queries } = capturingDb({});
+    const inventory = new InventoryService({
+      db: db as never,
+      settings: { vulnScanningEnabled: async () => true } as never,
+      uncoveredEcosystems: async () => [],
+    });
+    await inventory.report({
+      scope: RESTRICTED,
+      filter: { squad: ["Payments"], tribe: [], group: [] },
+      limit: 5,
+    });
+
+    // totals, two package rankings, distributions, runtimes, ecosystems, fragmentation.
+    expect(queries).toHaveLength(7);
+    for (const query of queries) {
+      expect(query.params).toContain(ENV_ID);
+      expect(query.params).toContainEqual([APP_ID]);
+      // Lower-cased, so the match is case-insensitive like the advisory list's.
+      expect(query.params).toContainEqual(["payments"]);
+    }
+  });
+
+  it("renders no team condition at all when nothing is selected", () => {
+    expect(dialect.sqlToQuery(teamPredicate({ squad: [], tribe: [], group: [] })).sql).toBe("TRUE");
   });
 
   it("refuses to widen an empty selection into every estate", async () => {

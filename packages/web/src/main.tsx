@@ -10,6 +10,7 @@ import { EmptyState, Card } from "./components/ui.tsx";
 import { MaliciousPage } from "./pages/MaliciousPage.tsx";
 import { ApiAccessPage } from "./pages/ApiAccessPage.tsx";
 import { AnalyticsPage } from "./pages/AnalyticsPage.tsx";
+import { InventoryPage } from "./pages/InventoryPage.tsx";
 import { ApplicationDetailPage } from "./pages/ApplicationDetailPage.tsx";
 import { ApplicationsPage } from "./pages/ApplicationsPage.tsx";
 import { GroupsPage } from "./pages/GroupsPage.tsx";
@@ -139,6 +140,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/vulnerabilities" element={<VulnerabilitiesPage />} />
               <Route path="/vulnerabilities/:vulnerabilityId" element={<AdvisoryDetailPage />} />
               <Route path="/malicious" element={<MaliciousPage />} />
+              <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/api-access" element={<ApiAccessPage />} />
 

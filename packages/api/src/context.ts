@@ -18,6 +18,7 @@ import { ApplicationsService } from "./modules/applications/applications.service
 import { BulkSearchService } from "./modules/components/bulk-search.service.js";
 import { ComponentsService } from "./modules/components/components.service.js";
 import { PackageSearchService } from "./modules/components/package-search.service.js";
+import { InventoryService } from "./modules/inventory/inventory.service.js";
 import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
@@ -100,6 +101,7 @@ export interface AppContext {
   diff: DiffService;
   dashboard: DashboardService;
   analytics: AnalyticsService;
+  inventory: InventoryService;
   /*
    * Vulnerability scanning.
    *
@@ -254,29 +256,29 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   // guarantee that as either one changes.
   // The estate's vulnerability aggregates, which the report composes in alongside the
   // inventory sections it owns itself.
-  const vulnReport = new VulnReportService({
-    db,
+  /*
+    A thunk rather than a value: coverage is measured when an administrator tests the
+    connection, so a value captured at construction would be whatever was true when the
+    process started. Shared by every reader that must not report an unassessable base image
+    as clean.
+  */
+  const uncoveredEcosystems = async (): Promise<string[]> => {
+    // Only Xray running alone can leave ecosystems unassessed; the local scanners match all.
+    const scanners = await settings.vulnScanners();
+    if (!scanners.xray || scanners.grype || scanners.trivy || scanners.osv) return [];
+    const coverage = (await settings.xraySettings()).coverage;
     /*
-      A thunk rather than a value: coverage is measured when an administrator tests the
-      connection, so a value captured at construction would be whatever was true when the
-      process started.
+      Never measured is not the same as nothing uncovered, and defaulting to the empty
+      list would make the two identical -- reporting a base image with no vulnerabilities
+      on the strength of a probe that never ran. Selecting Xray requires a tested
+      connection, so this is reachable mainly when the probe itself failed; the answer
+      there is "we cannot vouch for these", not "they are clean".
     */
-    uncoveredEcosystems: async () => {
-      // Only Xray running alone can leave ecosystems unassessed; the local scanners match all.
-      const scanners = await settings.vulnScanners();
-      if (!scanners.xray || scanners.grype || scanners.trivy || scanners.osv) return [];
-      const coverage = (await settings.xraySettings()).coverage;
-      /*
-        Never measured is not the same as nothing uncovered, and defaulting to the empty
-        list would make the two identical -- reporting a base image with no vulnerabilities
-        on the strength of a probe that never ran. Selecting Xray requires a tested
-        connection, so this is reachable mainly when the probe itself failed; the answer
-        there is "we cannot vouch for these", not "they are clean".
-      */
-      if (!coverage) return ["deb", "rpm", "apk"];
-      return coverage.uncovered;
-    },
-  });
+    if (!coverage) return ["deb", "rpm", "apk"];
+    return coverage.uncovered;
+  };
+  const vulnReport = new VulnReportService({ db, uncoveredEcosystems });
+  const inventory = new InventoryService({ db, settings, uncoveredEcosystems });
   const analytics = new AnalyticsService({ db, config, dashboard, settings, vulnReport });
 
   const snapshots = new SnapshotService({ db });
@@ -499,6 +501,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     diff,
     dashboard,
     analytics,
+    inventory,
     settings,
     snapshots,
     reports,

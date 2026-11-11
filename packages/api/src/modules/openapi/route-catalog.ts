@@ -483,6 +483,15 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     tag: "Dashboard",
     auth: "user",
   },
+  "GET /api/v1/inventory/report": {
+    summary: "What the estate is made of: most-used and most-vulnerable packages, distributions, runtimes.",
+    tag: "Analytics",
+    auth: "user",
+    notes:
+      "Current builds of applications the caller can see, in one environment. `squad`, `tribe` and " +
+      "`group` (names, repeatable) narrow it further. Package tables count application dependencies; " +
+      "base-image packages are reported through the distribution table.",
+  },
   "GET /api/v1/analytics/report": {
     summary: "The full analytics report: inventory, coverage, churn and exposure.",
     tag: "Analytics",

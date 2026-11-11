@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
-import { ExportTableButton, exportDate, exportList } from "../components/ExportTable.tsx";
+import { ExportTableButton, exportDate } from "../components/ExportTable.tsx";
 import { Link } from "react-router";
 import type { AnalyticsReport } from "@sbom/shared";
 import { useClientSort } from "../lib/useSort.ts";
-import { osLabel, PlatformTable, runtimeLabel } from "../components/Platform.tsx";
-import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
+import { ShareBar, StatTile } from "../components/StatTile.tsx";
 import {
   BaseImageExposureCard,
   TopAdvisoriesCard,
@@ -25,8 +24,7 @@ import { useAuth } from "../auth/AuthProvider.tsx";
 import { formatDate, formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { analyticsReportPdfUrl, useAnalyticsReport } from "../lib/queries.ts";
 import { readNumber, useUrlState } from "../lib/useUrlState.ts";
-import {
-  Badge,
+import {
   Card,
   CardHeader,
   EcosystemBadge,
@@ -201,63 +199,26 @@ export function AnalyticsPage() {
       </section>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <TopPackagesCard report={report} />
         <TopProjectsCard report={report} />
+        <NewPackagesCard report={report} />
       </div>
 
       <div className="mt-4">
         <ChurnCard report={report} />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <FragmentationCard report={report} />
-        <NewPackagesCard report={report} />
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <EcosystemCard report={report} />
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <PlatformTable
-          title="Operating systems"
-          subtitle="Observed in each application's current build. Expand a count to see which."
-          what="run this operating system"
-          rows={report.platforms.operatingSystems.map((e) => ({
-            key: `${e.name ?? ""}|${e.version ?? ""}`,
-            label: osLabel(e.name) ?? "not detected",
-            version: e.version,
-            applications: e.applications,
-            applicationList: e.applicationList,
-            href: `/applications?os=${encodeURIComponent(e.name ?? "")}${
-              e.version ? `&osVersion=${encodeURIComponent(e.version)}` : ""
-            }`,
-          }))}
-          note={
-            report.platforms.unknown > 0
-              ? `${formatNumber(report.platforms.unknown)} application${
-                  report.platforms.unknown === 1 ? "" : "s"
-                } reported neither an OS nor a runtime - expected for scratch and distroless images.`
-              : undefined
-          }
-        />
-        <PlatformTable
-          title="Language runtimes"
-          subtitle="Observed in each application's current build. Expand a count to see which."
-          what="ship this runtime"
-          rows={report.platforms.runtimes.map((e) => ({
-            key: `${e.name}|${e.version ?? ""}`,
-            label: runtimeLabel(e.name),
-            version: e.version,
-            applications: e.applications,
-            applicationList: e.applicationList,
-            href: `/applications?runtime=${encodeURIComponent(e.name)}${
-              e.version ? `&runtimeVersion=${encodeURIComponent(e.version)}` : ""
-            }`,
-          }))}
-          note="An application appears once per runtime it ships, so these can sum to more than the application total."
-        />
-      </div>
+      {/*
+        The inventory tables - most-used packages, ecosystems, base images, runtimes and version
+        fragmentation - live on the Inventory page now. Said here, because someone who used to
+        find them on this page will look for them here first.
+      */}
+      <p className="mt-4 text-xs text-text-muted">
+        Looking for the most-used packages, base images, runtimes, ecosystem mix or version fragmentation? They are on the{" "}
+        <Link to="/inventory" className="text-accent hover:underline">
+          Inventory
+        </Link>{" "}
+        page.
+      </p>
 
       <Methodology report={report} />
     </>
@@ -267,55 +228,6 @@ export function AnalyticsPage() {
 // ---------------------------------------------------------------------------
 // building blocks
 // ---------------------------------------------------------------------------
-
-function Tile({
-  label,
-  value,
-  hint,
-  to,
-  tone,
-}: {
-  label: string;
-  value: number | string;
-  hint?: string;
-  to?: string;
-  tone?: "warn" | "ok" | "danger";
-}) {
-  const toneClass =
-    tone === "danger" ? "text-danger" : tone === "warn" ? "text-warn" : tone === "ok" ? "text-ok" : "text-text-base";
-
-  const body = (
-    <>
-      <p className="text-[11px] font-medium uppercase tracking-wide text-text-faint">{label}</p>
-      <p className={`nums mt-1 text-2xl font-semibold ${toneClass}`}>
-        {typeof value === "number" ? formatNumber(value) : value}
-      </p>
-      {hint ? <p className="mt-0.5 text-xs text-text-muted">{hint}</p> : null}
-    </>
-  );
-
-  if (!to) return <div className="rounded-lg border border-border-base bg-bg-raised px-4 py-3">{body}</div>;
-  return (
-    <Link
-      to={to}
-      className="block rounded-lg border border-border-base bg-bg-raised px-4 py-3 transition-colors hover:border-border-strong hover:bg-bg-subtle"
-    >
-      {body}
-    </Link>
-  );
-}
-
-function ShareBar({ value, max }: { value: number; max: number }) {
-  const pct = max > 0 ? Math.max(1, Math.round((value / max) * 100)) : 0;
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-subtle">
-        <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="nums w-9 text-right text-xs text-text-muted">{pct}%</span>
-    </div>
-  );
-}
 
 /**
  * The qualifier on every other number on this page, placed above them.
@@ -362,24 +274,24 @@ function Totals({ report }: { report: AnalyticsReport }) {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Tile
+        <StatTile
           label="Applications"
           value={totals.applications}
           hint={`${formatNumber(totals.activeApplications)} active, ${formatNumber(totals.inactiveApplications)} inactive`}
           to="/applications"
         />
-        <Tile
+        <StatTile
           label="Packages in use"
           value={totals.packagesInUse}
           hint={`${formatNumber(totals.distinctPackages)} known across all history`}
           to="/search"
         />
-        <Tile
+        <StatTile
           label="Scans in window"
           value={totals.scansInPeriod}
           hint={`${formatNumber(totals.scans)} received in total`}
         />
-        <Tile
+        <StatTile
           label="Last scan"
           value={totals.latestScanAt ? formatRelative(totals.latestScanAt) : "never"}
           hint={totals.latestScanAt ? formatDate(totals.latestScanAt) : "no builds received"}
@@ -387,27 +299,27 @@ function Totals({ report }: { report: AnalyticsReport }) {
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Tile
+        <StatTile
           label="Stale"
           value={coverage.stale}
           hint={`Active, no build in ${meta.staleThresholdDays} days`}
           tone={coverage.stale > 0 ? "warn" : "ok"}
           to="/applications?staleOnly=true"
         />
-        <Tile
+        <StatTile
           label="Never scanned"
           value={coverage.neverScanned}
           hint="Registered, no SBOM received"
           tone={coverage.neverScanned > 0 ? "warn" : "ok"}
         />
-        <Tile
+        <StatTile
           label="Unconfirmed"
           value={coverage.pendingConfirmation}
           hint="Auto-created, awaiting triage"
           tone={coverage.pendingConfirmation > 0 ? "warn" : "ok"}
           to="/applications?status=pending_confirmation"
         />
-        <Tile
+        <StatTile
           label="Scan coverage"
           value={`${coverage.coveragePct}%`}
           hint="Confidence interval on everything else"
@@ -415,97 +327,6 @@ function Totals({ report }: { report: AnalyticsReport }) {
         />
       </div>
     </>
-  );
-}
-
-function TopPackagesCard({ report }: { report: AnalyticsReport }) {
-  const rows = report.topPackages;
-  /*
-    Reduced over every row, not read off rows[0]. The bars are relative to the largest
-    value, and taking it from the first row silently assumed the array was still in the
-    server's descending order - which stopped being true the moment these headers became
-    sortable. Sorting by name would then scale every bar to whatever package happened to
-    sort first.
-  */
-  const max = rows.reduce((m, r) => Math.max(m, r.applications), 0);
-  const sort = useClientSort(
-    rows,
-    { package: "text", version: "text", applications: "number" } as const,
-    { sortBy: "applications" },
-    (r, f) => (f === "package" ? r.name : f === "version" ? r.version : r.applications),
-    (r) => `${r.componentId}:${r.version ?? ""}`,
-  );
-
-  return (
-    <Card>
-      <CardHeader
-        title={`Top ${rows.length} most widely deployed packages`}
-        subtitle="Present in the most applications' current builds - the blast radius if one turns out to be a problem. Operating systems and runtimes are excluded and shown separately."
-        actions={
-          <ExportTableButton
-            title="Most deployed packages"
-            filename="most-deployed-packages"
-            rows={sort.rows}
-            columns={[
-              { header: "Package", value: (c) => c.name, width: 32 },
-              { header: "Ecosystem", value: (c) => c.ecosystem, width: 12 },
-              { header: "Version", value: (c) => c.version, width: 16 },
-              { header: "Applications", value: (c) => c.applications, width: 12 },
-              { header: "Application names", value: (c) => exportList(c.applicationList), width: 40 },
-            ]}
-          />
-        }
-      />
-      {rows.length === 0 ? (
-        <EmptyState title="No package data yet" hint="Counts appear once the first SBOM is ingested." />
-      ) : (
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr>
-                <Th onSort={() => sort.toggle("package")} sorted={sort.stateOf("package")}>
-                  Package
-                </Th>
-                <Th onSort={() => sort.toggle("version")} sorted={sort.stateOf("version")}>
-                  Version
-                </Th>
-                <Th onSort={() => sort.toggle("applications")} sorted={sort.stateOf("applications")} align="right">
-                  Apps
-                </Th>
-                {/* A rendering of the Apps column. Sorting it would duplicate that header. */}
-                <Th width="130px">Share</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {sort.rows.map((c) => (
-                <Tr key={`${c.componentId}-${c.version ?? ""}`}>
-                  <Td>
-                    <Link
-                      to={`/search?name=${encodeURIComponent(c.name)}&match=exact&scope=all`}
-                      className="font-medium text-accent hover:underline"
-                    >
-                      {c.name}
-                    </Link>{" "}
-                    <EcosystemBadge ecosystem={c.ecosystem} />
-                  </Td>
-                  <Td>
-                    <Mono>{c.version ?? " - "}</Mono>
-                  </Td>
-                  <ApplicationsCell
-                    count={c.applications}
-                    names={c.applicationList}
-                    what="ship this package"
-                  />
-                  <Td>
-                    <ShareBar value={c.applications} max={max} />
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
-    </Card>
   );
 }
 
@@ -617,12 +438,12 @@ function ChurnCard({ report }: { report: AnalyticsReport }) {
       {v.applicationsCompared === 0 ? (
         <div className="p-4">
           <div className="grid grid-cols-2 gap-3">
-            <Tile
+            <StatTile
               label="Scans received"
               value={v.scans}
               hint={`${formatNumber(v.applicationsScanned)} applications reported`}
             />
-            <Tile
+            <StatTile
               label="First-time scans"
               value={v.applicationsWithoutBaseline}
               hint="No earlier build to compare"
@@ -642,14 +463,14 @@ function ChurnCard({ report }: { report: AnalyticsReport }) {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 p-4 lg:grid-cols-4">
-          <Tile
+          <StatTile
             label="Scans received"
             value={v.scans}
             hint={`${formatNumber(v.applicationsScanned)} applications reported`}
           />
-          <Tile label="Packages added" value={v.packagesAdded} hint="New to that application" />
-          <Tile label="Packages removed" value={v.packagesRemoved} hint="No longer shipped" />
-          <Tile label="Packages upgraded" value={v.packagesUpgraded} hint="Version changed" />
+          <StatTile label="Packages added" value={v.packagesAdded} hint="New to that application" />
+          <StatTile label="Packages removed" value={v.packagesRemoved} hint="No longer shipped" />
+          <StatTile label="Packages upgraded" value={v.packagesUpgraded} hint="Version changed" />
         </div>
       )}
 
@@ -712,92 +533,6 @@ function ChurnCard({ report }: { report: AnalyticsReport }) {
           ) : null}
         </div>
       ) : null}
-    </Card>
-  );
-}
-
-function FragmentationCard({ report }: { report: AnalyticsReport }) {
-  const rows = report.fragmentation;
-  const sort = useClientSort(
-    rows,
-    { package: "text", count: "number", applications: "number" } as const,
-    { sortBy: "count" },
-    (r, f) => (f === "package" ? r.name : f === "count" ? r.versions : r.applications),
-    (r) => `${r.name}|${r.ecosystem}`,
-  );
-  return (
-    <Card>
-      <CardHeader
-        title="Version fragmentation"
-        subtitle="Packages the estate runs several versions of at once. Each extra version multiplies the cost of the next upgrade - the section that names work that can actually be finished."
-        actions={
-          <ExportTableButton
-            title="Version fragmentation"
-            filename="version-fragmentation"
-            rows={sort.rows}
-            columns={[
-              { header: "Package", value: (r) => r.name, width: 32 },
-              { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
-              { header: "Versions in use", value: (r) => r.versions, width: 14 },
-              { header: "Example versions", value: (r) => exportList(r.examples), width: 40 },
-              { header: "Applications", value: (r) => r.applications, width: 12 },
-            ]}
-          />
-        }
-      />
-      {rows.length === 0 ? (
-        <EmptyState
-          title="No fragmentation"
-          hint="Every deployed package is on a single version across the estate."
-        />
-      ) : (
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr>
-                <Th onSort={() => sort.toggle("package")} sorted={sort.stateOf("package")}>
-                  Package
-                </Th>
-                {/* The list of versions. `Count` is the orderable form of the same thing. */}
-                <Th>Versions in use</Th>
-                <Th onSort={() => sort.toggle("count")} sorted={sort.stateOf("count")} align="right">
-                  Count
-                </Th>
-                <Th onSort={() => sort.toggle("applications")} sorted={sort.stateOf("applications")} align="right">
-                  Apps
-                </Th>
-              </tr>
-            </thead>
-            <tbody>
-              {sort.rows.map((f) => (
-                <Tr key={`${f.name}|${f.ecosystem}`}>
-                  <Td>
-                    <Link
-                      to={`/search?name=${encodeURIComponent(f.name)}&match=exact&scope=all`}
-                      className="font-medium text-accent hover:underline"
-                    >
-                      {f.name}
-                    </Link>{" "}
-                    <EcosystemBadge ecosystem={f.ecosystem} />
-                  </Td>
-                  <Td>
-                    <Mono>
-                      {f.examples.join(", ")}
-                      {f.versions > f.examples.length ? ", …" : ""}
-                    </Mono>
-                  </Td>
-                  <Td align="right" className="nums">
-                    <Badge tone={f.versions >= 4 ? "warn" : "neutral"}>{formatNumber(f.versions)}</Badge>
-                  </Td>
-                  <Td align="right" className="nums">
-                    {formatNumber(f.applications)}
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
     </Card>
   );
 }
@@ -884,88 +619,6 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
     </Card>
   );
 }
-
-function EcosystemCard({ report }: { report: AnalyticsReport }) {
-  const rows = report.ecosystems.slice(0, 12);
-  // Order-independent: see TopPackagesCard.
-  const max = rows.reduce((m, r) => Math.max(m, r.components), 0);
-  const sort = useClientSort(
-    rows,
-    { ecosystem: "text", components: "number", applications: "number" } as const,
-    { sortBy: "components" },
-    (r, f) => (f === "ecosystem" ? r.ecosystem : f === "components" ? r.components : r.applications),
-    (r) => r.ecosystem,
-  );
-  return (
-    <Card>
-      <CardHeader
-        title="Ecosystem mix"
-        subtitle="Distinct packages in current builds, by package manager."
-        actions={
-          <ExportTableButton
-            title="Ecosystem mix"
-            filename="ecosystem-mix"
-            rows={sort.rows}
-            columns={[
-              { header: "Ecosystem", value: (e) => e.ecosystem, width: 14 },
-              { header: "Packages", value: (e) => e.components, width: 10 },
-              { header: "Applications", value: (e) => e.applications, width: 12 },
-              { header: "Application names", value: (e) => exportList(e.applicationList), width: 40 },
-            ]}
-          />
-        }
-      />
-      {rows.length === 0 ? (
-        <EmptyState title="No components yet" />
-      ) : (
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr>
-                <Th onSort={() => sort.toggle("ecosystem")} sorted={sort.stateOf("ecosystem")}>
-                  Ecosystem
-                </Th>
-                <Th onSort={() => sort.toggle("components")} sorted={sort.stateOf("components")} align="right">
-                  Packages
-                </Th>
-                <Th onSort={() => sort.toggle("applications")} sorted={sort.stateOf("applications")} align="right">
-                  Apps
-                </Th>
-                <Th width="130px">Share</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {sort.rows.map((e) => (
-                <Tr key={e.ecosystem}>
-                  <Td>
-                    <Link
-                      to={`/search?ecosystem=${encodeURIComponent(e.ecosystem)}`}
-                      className="hover:underline"
-                    >
-                      <EcosystemBadge ecosystem={e.ecosystem} />
-                    </Link>
-                  </Td>
-                  <Td align="right" className="nums">
-                    {formatNumber(e.components)}
-                  </Td>
-                  <ApplicationsCell
-                    count={e.applications}
-                    names={e.applicationList}
-                    what="ship a package from this ecosystem"
-                  />
-                  <Td>
-                    <ShareBar value={e.components} max={max} />
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
-    </Card>
-  );
-}
-
 
 /**
  * Definitions, at the bottom.
