@@ -752,8 +752,9 @@ once and reports a verdict per package - see
 the most applications and the ones with the most critical and high advisories against
 the versions in use (distinct advisories, accepted risks left out), the base images by
 how many applications run them with those applications' base-image findings and the
-average per application, language runtimes, the ecosystem mix and version
-fragmentation. Base-image packages appear only in the base-image table: ranked beside
+average per application, language runtimes, the ecosystem mix, version fragmentation,
+and the largest applications by package count (a size ranking, not a risk one).
+Base-image packages appear only in the base-image table: ranked beside
 dependencies they would take every row. Everything describes current builds of the
 applications the reader can see in the selected environment, and can be narrowed to
 some squads, tribes or groups (`?squad=…&tribe=…&group=…`, by name).
