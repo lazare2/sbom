@@ -1,29 +1,24 @@
 import PDFDocument from "pdfkit";
-import {
-  bucketize,
-  INERT_VULN_FILTER,
-  dashboardSeverityBuckets,
-  SEVERITY_BUCKET_LABELS,
-  totalOf,
-  type AnalyticsReport,
-  type DashboardSeverityBucket,
+import type {
+  AnalyticsReport,
+  BuildDeltaCounts,
+  BuildDeltaSide,
+  ProgressRollup,
+  ProjectBuildDeltas,
+  ProjectProgress,
 } from "@sbom/shared";
-import { osLabel, runtimeLabel } from "../ingestion/platform.js";
 import {
   CONTENT_WIDTH,
   COLOR,
   Layout,
   MARGIN,
   PAGE,
-  fit,
   fmt,
   fmtDate,
   fmtDateTime,
   stampFooters,
   statRow,
   table,
-  type Column,
-  type Doc,
 } from "./pdf-layout.js";
 
 export interface RenderReportOptions {
@@ -31,51 +26,33 @@ export interface RenderReportOptions {
   title?: string;
 }
 
-
-
 /**
- * Renders the estate report as a PDF.
+ * Renders the analytics report as a PDF - the same payload the Analytics page shows, so a
+ * printed figure is always one the screen shows too. Also what the monthly email attaches.
  *
- * Server-side with pdfkit rather than HTML-to-PDF through a headless browser.
- * The output is vector text in a ~50 KB file, the API image stays free of a
- * 300 MB Chromium, and `GET /reports/estate.pdf` is a plain curl-able URL - so a
- * scheduled job can archive a monthly snapshot with no client involved. The cost
- * is that layout is manual, which is why the helpers below exist.
+ * Server-side with pdfkit rather than HTML-to-PDF through a headless browser: vector text in
+ * a small file, no Chromium in the API image, and a plain curl-able URL. Only the standard-14
+ * fonts are used, which cover Latin-1; package names are ASCII in every ecosystem ingested.
  *
- * Only the standard-14 fonts are used, so no font files ship with the build.
- * Those cover Latin-1; a package name in Cyrillic or CJK would render as
- * substituted glyphs. Package names are ASCII in every ecosystem the platform
- * ingests, and the alternative - embedding a full Unicode TTF - costs several
- * megabytes on every single report for a case that has not occurred.
- */
-
-/**
- * Builds the PDF and resolves with the complete buffer.
- *
- * Buffered rather than streamed straight to the reply: the whole document is
- * tens of kilobytes, and having it in hand means a rendering failure becomes a
- * clean 500 instead of a truncated file that a CI job would happily archive as
- * a valid report.
+ * Buffered rather than streamed, so a rendering failure is a clean 500 instead of a truncated
+ * file that a scheduled job would archive as a valid report.
  */
 export async function renderReportPdf(
   report: AnalyticsReport,
   options: RenderReportOptions = {},
 ): Promise<Buffer> {
-  const title = options.title ?? "SBOM estate report";
+  const title = options.title ?? "SBOM analytics report";
 
   const doc = new PDFDocument({
     size: [PAGE.width, PAGE.height],
     margin: MARGIN,
-    // Surfaces in the PDF viewer's title bar and document properties, which is
-    // what a reader sees when the file has been renamed by whoever forwarded it.
     info: {
       Title: title,
       Author: "SBOM Platform",
-      Subject: `Dependency inventory report, ${report.meta.periodDays}-day window`,
+      Subject: `Progress report for ${report.meta.environmentName}, ${report.meta.periodDays}-day window`,
       CreationDate: new Date(report.meta.generatedAt),
     },
-    // pdfkit's automatic page breaks would fire mid-table and mid-heading; every
-    // break in this document is placed deliberately by `ensureSpace`.
+    // Every page break is placed deliberately by `ensureSpace`.
     autoFirstPage: true,
     bufferPages: true,
   });
@@ -90,17 +67,17 @@ export async function renderReportPdf(
   const ctx = new Layout(doc);
 
   coverBlock(ctx, report);
-  // Immediately after the cover, ahead of the inventory sections: when a reader opens
-  // this file to answer one question, it is almost always this one.
-  vulnerabilitySection(ctx, report);
+  attentionSection(ctx, report);
+  progressSection(ctx, report);
+  rollupSection(ctx, report, "squads");
+  rollupSection(ctx, report, "tribes");
+  buildDeltaSection(ctx, report, "app");
+  buildDeltaSection(ctx, report, "os");
+  attentionPackagesSection(ctx, report);
+  fragmentationRisingSection(ctx, report);
   coverageSection(ctx, report);
-  topPackagesSection(ctx, report);
-  topProjectsSection(ctx, report);
-  fragmentationSection(ctx, report);
   velocitySection(ctx, report);
   newPackagesSection(ctx, report);
-  platformSection(ctx, report);
-  ecosystemSection(ctx, report);
   methodologySection(ctx, report);
 
   // Footers last: the page count is only known once the content is laid out.
@@ -111,20 +88,41 @@ export async function renderReportPdf(
 }
 
 // ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+const dash = " - ";
+const signed = (n: number) => (n > 0 ? `+${fmt(n)}` : fmt(n));
+const days = (n: number | null) => (n === null ? dash : `${n}`);
+
+/** Every project's in-window movement summed, for the cover. */
+function windowTotals(projects: readonly ProjectProgress[]) {
+  let fixed = 0;
+  let introduced = 0;
+  let compared = 0;
+  for (const p of projects) {
+    if (!p.vulnerabilities) continue;
+    fixed += p.vulnerabilities.fixed;
+    introduced += p.vulnerabilities.introduced;
+    compared += p.vulnerabilities.comparedBuilds;
+  }
+  return { fixed, introduced, compared };
+}
+
+// ---------------------------------------------------------------------------
 // sections
 // ---------------------------------------------------------------------------
 
 function coverBlock(ctx: Layout, report: AnalyticsReport): void {
   const { doc } = ctx;
-  const { meta, totals, coverage } = report;
+  const { meta, totals, coverage, progress, attention } = report;
 
   doc.y = MARGIN;
-
   doc
     .font("Helvetica-Bold")
     .fontSize(20)
     .fillColor(COLOR.text)
-    .text("SBOM estate report", MARGIN, doc.y, { width: CONTENT_WIDTH });
+    .text(`Analytics: ${meta.environmentName}`, MARGIN, doc.y, { width: CONTENT_WIDTH });
 
   ctx.gap(2);
   doc
@@ -141,46 +139,34 @@ function coverBlock(ctx: Layout, report: AnalyticsReport): void {
     );
 
   /*
-   * The vulnerability filter, on the cover.
-   *
-   * A filtered report is forwarded and quoted like any other, so the fact that it is
-   * filtered has to survive being read by someone who never saw the screen it came from.
-   * The first page is the only place that reliably gets read, which is why this is here
-   * as well as beside the figures themselves.
-   */
-  if (report.vulnerabilities?.filter?.active) {
+    The team filter, on the cover. A filtered report is forwarded and quoted like any other,
+    so the fact that it is filtered has to survive being read by someone who never saw the
+    screen it came from.
+  */
+  if (meta.filterLabel) {
     ctx.gap(6);
     doc
       .font("Helvetica-Bold")
       .fontSize(9)
       .fillColor(COLOR.warn)
-      .text(
-        `Vulnerability figures filtered: ${report.vulnerabilities.filter.label ?? ""}`,
-        MARGIN,
-        doc.y,
-        { width: CONTENT_WIDTH },
-      );
-    ctx.gap(1);
-    doc
-      .font("Helvetica")
-      .fontSize(8)
-      .fillColor(COLOR.muted)
-      .text(
-        "Inventory, coverage and churn figures are unfiltered and describe the whole estate. Unfiltered vulnerability totals are printed alongside the filtered ones.",
-        MARGIN,
-        doc.y,
-        { width: CONTENT_WIDTH },
-      );
+      .text(`Only applications in ${meta.filterLabel}.`, MARGIN, doc.y, { width: CONTENT_WIDTH });
   }
 
   ctx.gap(10);
   ctx.rule();
   ctx.gap(12);
 
+  const moved = windowTotals(progress.projects);
+  const net = moved.introduced - moved.fixed;
   statRow(ctx, [
     { label: "Applications", value: fmt(totals.applications), note: `${fmt(totals.activeApplications)} active` },
-    { label: "Packages in use", value: fmt(totals.packagesInUse), note: `${fmt(totals.distinctPackages)} all-time` },
-    { label: "Scans received", value: fmt(totals.scans), note: `${fmt(totals.scansInPeriod)} in window` },
+    { label: "Builds in window", value: fmt(totals.scansInPeriod), note: `${fmt(totals.scans)} in total` },
+    {
+      label: "Need attention",
+      value: fmt(attention.projects.length),
+      note: "projects with at least one flag",
+      tone: attention.projects.length > 0 ? "warn" : "ok",
+    },
     {
       label: "Scan coverage",
       value: `${coverage.coveragePct}%`,
@@ -189,36 +175,15 @@ function coverBlock(ctx: Layout, report: AnalyticsReport): void {
     },
   ]);
 
-  statRow(ctx, [
-    {
-      label: "Stale",
-      value: fmt(coverage.stale),
-      note: `no build in ${meta.staleThresholdDays} days`,
-      tone: coverage.stale > 0 ? "warn" : "ok",
-    },
-    {
-      label: "Never scanned",
-      value: fmt(coverage.neverScanned),
-      note: "registered, no SBOM",
-      tone: coverage.neverScanned > 0 ? "warn" : "ok",
-    },
-    {
-      label: "Unconfirmed",
-      value: fmt(coverage.pendingConfirmation),
-      note: "awaiting admin triage",
-      tone: coverage.pendingConfirmation > 0 ? "warn" : "ok",
-    },
-    { label: "Last scan", value: fmtDate(totals.latestScanAt), note: "most recent build seen" },
-  ]);
+  if (meta.vulnScanningEnabled) {
+    statRow(ctx, [
+      { label: "Findings fixed", value: fmt(moved.fixed), note: "removed by a build in the window" },
+      { label: "Findings introduced", value: fmt(moved.introduced), note: "brought in by a build" },
+      { label: "Net change", value: signed(net), note: "introduced minus fixed", tone: net > 0 ? "warn" : "ok" },
+      { label: "Builds compared", value: fmt(moved.compared), note: "consecutive pairs, rebuilds skipped" },
+    ]);
+  }
 
-  /**
-   * The qualifier on everything above.
-   *
-   * Deliberately on page one and not in an appendix: totals over an inventory
-   * with gaps get quoted as if the gaps were not there, and by the time someone
-   * reaches a methodology note at the back they have already written the number
-   * into a slide.
-   */
   ctx.gap(2);
   const caveat =
     coverage.coveragePct >= 100 && coverage.neverScanned === 0
@@ -227,9 +192,321 @@ function coverBlock(ctx: Layout, report: AnalyticsReport): void {
           coverage.stale === 1 ? " has" : "s have"
         } not reported a build in ${meta.staleThresholdDays} days and ${fmt(coverage.neverScanned)} ${
           coverage.neverScanned === 1 ? "has" : "have"
-        } never reported one; their dependencies are absent from every count in this report.`;
+        } never reported one.`;
   ctx.paragraph(caveat, { color: coverage.coveragePct >= 100 ? COLOR.muted : COLOR.warn, size: 8.5 });
+  if (meta.vulnScanningEnabled) {
+    ctx.gap(3);
+    ctx.paragraph(
+      "Every build is judged by today's vulnerability database, so 'introduced' means a change to a project's dependencies or base image brought a finding in; an advisory published between two builds is not counted against the team. Accepted risks are excluded throughout.",
+      { color: COLOR.muted, size: 8 },
+    );
+  }
   ctx.gap(14);
+}
+
+/** Projects with at least one flag, each with the sentence that explains it. */
+function attentionSection(ctx: Layout, report: AnalyticsReport): void {
+  const projects = report.attention.projects;
+  ctx.heading(
+    "Projects that need attention",
+    "A project is flagged for an open known-exploited advisory, a critical finding with a fix left open too long, a build overdue against its usual pace, or builds that introduced more than they fixed. Each flag states its reason.",
+  );
+  if (projects.length === 0) {
+    ctx.emptyNote("No project is flagged.");
+    ctx.gap(10);
+    return;
+  }
+
+  const { doc } = ctx;
+  for (const project of projects) {
+    ctx.ensureSpace(30 + project.flags.length * 12);
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .fillColor(COLOR.text)
+      .text(
+        project.name + (project.squads.length > 0 ? `  ·  ${project.squads.join(", ")}` : ""),
+        MARGIN,
+        doc.y,
+        { width: CONTENT_WIDTH },
+      );
+    for (const flag of project.flags) {
+      const urgent = flag.kind === "known_exploited" || flag.kind === "critical_fix_overdue";
+      doc
+        .font("Helvetica")
+        .fontSize(8)
+        .fillColor(urgent ? COLOR.warn : COLOR.muted)
+        .text(`-  ${flag.reason}`, MARGIN + 10, doc.y + 1, { width: CONTENT_WIDTH - 10, lineGap: 1 });
+    }
+    ctx.gap(6);
+  }
+  ctx.gap(6);
+}
+
+function progressSection(ctx: Layout, report: AnalyticsReport): void {
+  const vulns = report.meta.vulnScanningEnabled;
+  ctx.heading(
+    "Progress by project",
+    vulns
+      ? "Findings fixed and introduced by builds inside the window, what is open now and how that compares with the start, how often each project builds, and the average days a critical or high finding stayed before a build removed it."
+      : "How often each project builds. Vulnerability scanning is switched off, so no finding movement is shown.",
+  );
+  const rows = [...report.progress.projects].sort(
+    (a, b) => (b.vulnerabilities?.fixed ?? 0) - (a.vulnerabilities?.fixed ?? 0) || a.name.localeCompare(b.name),
+  );
+  if (rows.length === 0) {
+    ctx.emptyNote("No application in scope.");
+    ctx.gap(10);
+    return;
+  }
+
+  if (vulns) {
+    table(
+      ctx,
+      [
+        { header: "Project", width: 0.25, value: (p) => p.name },
+        { header: "Fixed", width: 0.08, align: "right", value: (p) => fmt(p.vulnerabilities?.fixed ?? 0) },
+        { header: "New", width: 0.08, align: "right", value: (p) => fmt(p.vulnerabilities?.introduced ?? 0) },
+        { header: "Net", width: 0.07, align: "right", value: (p) => signed(p.vulnerabilities?.net ?? 0) },
+        {
+          header: "Open C / H",
+          width: 0.11,
+          align: "right",
+          value: (p) =>
+            p.vulnerabilities?.openCritical == null
+              ? dash
+              : `${fmt(p.vulnerabilities.openCritical)} / ${fmt(p.vulnerabilities.openHigh ?? 0)}`,
+        },
+        {
+          header: "C+H chg",
+          width: 0.1,
+          align: "right",
+          value: (p) => (p.vulnerabilities?.criticalHighChange == null ? dash : signed(p.vulnerabilities.criticalHighChange)),
+        },
+        { header: "Builds", width: 0.09, align: "right", value: (p) => fmt(p.builds.inWindow) },
+        { header: "Every (d)", width: 0.1, align: "right", value: (p) => days(p.builds.averageDaysBetweenBuilds) },
+        { header: "Fix (d)", width: 0.1, align: "right", value: (p) => days(p.vulnerabilities?.meanDaysToFix ?? null) },
+      ],
+      rows,
+    );
+  } else {
+    table(
+      ctx,
+      [
+        { header: "Project", width: 0.4, value: (p) => p.name },
+        { header: "Builds in window", width: 0.2, align: "right", value: (p) => fmt(p.builds.inWindow) },
+        { header: "Every (d)", width: 0.2, align: "right", value: (p) => days(p.builds.averageDaysBetweenBuilds) },
+        { header: "Last build", width: 0.2, align: "right", value: (p) => fmtDate(p.builds.lastBuildAt) },
+      ],
+      rows,
+    );
+  }
+  ctx.gap(10);
+}
+
+function rollupSection(ctx: Layout, report: AnalyticsReport, key: "squads" | "tribes"): void {
+  const rows = report.progress[key];
+  // A rollup where every project is unassigned says nothing the project table did not.
+  if (rows.length === 0 || rows.every((r) => r.name === null)) return;
+  const noun = key === "squads" ? "squad" : "tribe";
+  const header = noun[0]!.toUpperCase() + noun.slice(1);
+  ctx.heading(
+    `Progress by ${noun}`,
+    `The project figures rolled up. A project on two ${key} counts in both; projects on none are grouped at the end.`,
+  );
+  const label = (r: ProgressRollup) => r.name ?? `(no ${noun})`;
+  table(
+    ctx,
+    report.meta.vulnScanningEnabled
+      ? [
+          { header, width: 0.21, value: label },
+          { header: "Apps", width: 0.07, align: "right", value: (r) => fmt(r.applications) },
+          { header: "Fixed", width: 0.08, align: "right", value: (r) => fmt(r.vulnerabilities?.fixed ?? 0) },
+          { header: "New", width: 0.08, align: "right", value: (r) => fmt(r.vulnerabilities?.introduced ?? 0) },
+          { header: "Net", width: 0.07, align: "right", value: (r) => signed(r.vulnerabilities?.net ?? 0) },
+          {
+            header: "Open C / H",
+            width: 0.11,
+            align: "right",
+            value: (r) =>
+              r.vulnerabilities ? `${fmt(r.vulnerabilities.openCritical)} / ${fmt(r.vulnerabilities.openHigh)}` : dash,
+          },
+          { header: "Builds", width: 0.08, align: "right", value: (r) => fmt(r.buildsInWindow) },
+          { header: "Every (d)", width: 0.1, align: "right", value: (r) => days(r.averageDaysBetweenBuilds) },
+          { header: "Fix (d)", width: 0.09, align: "right", value: (r) => days(r.vulnerabilities?.meanDaysToFix ?? null) },
+          { header: "Flags", width: 0.11, align: "right", value: (r) => fmt(r.flaggedApplications) },
+        ]
+      : [
+          { header, width: 0.4, value: label },
+          { header: "Apps", width: 0.15, align: "right", value: (r) => fmt(r.applications) },
+          { header: "Builds", width: 0.15, align: "right", value: (r) => fmt(r.buildsInWindow) },
+          { header: "Every (d)", width: 0.15, align: "right", value: (r) => days(r.averageDaysBetweenBuilds) },
+          { header: "Flagged", width: 0.15, align: "right", value: (r) => fmt(r.flaggedApplications) },
+        ],
+    rows,
+  );
+  ctx.gap(10);
+}
+
+/** "12 (2C 3H)" - a total with its critical and high counts, the shape every cell here uses. */
+function countsCell(c: BuildDeltaCounts | undefined): string {
+  if (!c) return dash;
+  const parts = [c.critical > 0 ? `${c.critical}C` : null, c.high > 0 ? `${c.high}H` : null].filter(Boolean);
+  return parts.length > 0 ? `${c.total} (${parts.join(" ")})` : `${c.total}`;
+}
+
+function buildDeltaSection(ctx: Layout, report: AnalyticsReport, half: "app" | "os"): void {
+  const section = report.buildDeltas;
+  if (!section) return;
+  const name = half === "app" ? "application dependencies" : "base image";
+  ctx.heading(
+    `Build to build: ${name}`,
+    "What each build did to the findings of the build before it, on average per build inside the window and for the latest build. " +
+      `Byte-identical rebuilds are skipped (${fmt(section.identicalRebuildsSkipped)} in this window). ` +
+      "F / N / S are fixed, new (introduced) and still there (unchanged); C+H counts critical and high only. A finding is a package name with an advisory, so an upgrade that leaves a package affected is unchanged.",
+  );
+  const rows = section.projects.filter((p) => p.average !== null || p.last !== null);
+  if (rows.length === 0) {
+    ctx.emptyNote("No project has two matched builds to compare yet.");
+    ctx.gap(10);
+    return;
+  }
+  const pick = (p: ProjectBuildDeltas, which: "average" | "last"): BuildDeltaSide | undefined =>
+    which === "average" ? p.average?.[half] : p.last?.[half];
+  const triple = (side: BuildDeltaSide | undefined, level: "all" | "ch") =>
+    side
+      ? [side.fixed, side.introduced, side.unchanged]
+          .map((c) => (level === "all" ? c.total : Math.round((c.critical + c.high) * 10) / 10))
+          .join(" / ")
+      : dash;
+  table(
+    ctx,
+    [
+      { header: "Project", width: 0.2, value: (p) => p.name },
+      { header: "Pairs", width: 0.08, align: "right", value: (p) => fmt(p.comparedBuilds) },
+      { header: "Avg F/N/S", width: 0.18, align: "right", value: (p) => triple(pick(p, "average"), "all") },
+      { header: "Avg C+H F/N/S", width: 0.18, align: "right", value: (p) => triple(pick(p, "average"), "ch") },
+      { header: "Last F/N/S", width: 0.18, align: "right", value: (p) => triple(pick(p, "last"), "all") },
+      { header: "Last C+H F/N/S", width: 0.18, align: "right", value: (p) => triple(pick(p, "last"), "ch") },
+    ],
+    rows,
+  );
+  const estate = section.estateAverage?.[half];
+  if (estate) {
+    ctx.gap(3);
+    ctx.paragraph(
+      `Estate average per build (every project weighs the same): ${countsCell(estate.fixed)} fixed, ${countsCell(estate.introduced)} introduced, ${countsCell(estate.unchanged)} unchanged.`,
+      { color: COLOR.muted, size: 8 },
+    );
+  }
+  ctx.gap(10);
+}
+
+function attentionPackagesSection(ctx: Layout, report: AnalyticsReport): void {
+  if (!report.meta.vulnScanningEnabled) return;
+  ctx.heading(
+    "Packages to upgrade first",
+    "Application dependencies with critical or known-exploited advisories that have a fixed version, ranked by how many applications one upgrade clears.",
+  );
+  const rows = report.attention.packages;
+  if (rows.length === 0) {
+    ctx.emptyNote("No application dependency carries a critical or known-exploited advisory with a fix.");
+    ctx.gap(10);
+    return;
+  }
+  table(
+    ctx,
+    [
+      { header: "Package", width: 0.26, value: (r) => r.name },
+      { header: "Ecosystem", width: 0.11, value: (r) => r.ecosystem, mono: true },
+      { header: "Apps", width: 0.07, align: "right", value: (r) => fmt(r.applications) },
+      { header: "Critical", width: 0.09, align: "right", value: (r) => fmt(r.critical) },
+      { header: "KEV", width: 0.07, align: "right", value: (r) => fmt(r.knownExploited) },
+      { header: "Versions", width: 0.09, align: "right", value: (r) => fmt(r.versionsInUse) },
+      { header: "Fixed in", width: 0.31, value: (r) => (r.fixVersions.length > 0 ? r.fixVersions.join(", ") : dash), mono: true },
+    ],
+    rows,
+  );
+  ctx.gap(10);
+}
+
+function fragmentationRisingSection(ctx: Layout, report: AnalyticsReport): void {
+  const rows = report.attention.fragmentationRising;
+  ctx.heading(
+    "Fragmentation getting worse",
+    "Application dependencies now run in more versions than at the start of the window, across projects that built on both sides of it.",
+  );
+  if (rows.length === 0) {
+    ctx.emptyNote("No package spread into more versions during the window.");
+    ctx.gap(10);
+    return;
+  }
+  table(
+    ctx,
+    [
+      { header: "Package", width: 0.4, value: (r) => r.name },
+      { header: "Ecosystem", width: 0.15, value: (r) => r.ecosystem, mono: true },
+      { header: "Versions then", width: 0.15, align: "right", value: (r) => fmt(r.versionsAtStart) },
+      { header: "Versions now", width: 0.15, align: "right", value: (r) => fmt(r.versionsNow) },
+      { header: "Apps", width: 0.15, align: "right", value: (r) => fmt(r.applications) },
+    ],
+    rows,
+  );
+  ctx.gap(10);
+}
+
+function methodologySection(ctx: Layout, report: AnalyticsReport): void {
+  ctx.heading("How to read this report");
+  const s = report.meta.attentionSettings;
+  const overdue =
+    s.buildOverdueMode === "fixed"
+      ? `A project is overdue for a build after ${s.fixedDays} days without one.`
+      : `A project is overdue for a build once it has gone ${s.useMultiplier ? `${s.multiplier} times` : "longer than"} its own average gap between builds over the last ${s.cadenceWindowDays} days, and never sooner than ${s.minimumDays} days. A project with fewer than ${s.minimumBuilds} builds in that time has no usable average, and the fixed ${s.fixedDays}-day limit applies to it instead.`;
+
+  const items: Array<[string, string]> = [
+    report.meta.vulnScanningEnabled
+      ? [
+          "Today's knowledge",
+          "Every build is compared using today's vulnerability database. 'Fixed' means a later build no longer carries a finding the earlier one did; 'introduced' means it carries one the earlier did not. An advisory published between two builds therefore appears in both and counts as unchanged - the report credits and blames changes the team made, not the calendar. Accepted risks are excluded everywhere.",
+        ]
+      : ["No vulnerability data", "Vulnerability scanning is switched off, so the report shows build activity only."],
+    [
+      "Finding identity",
+      "A finding is a package name within its ecosystem plus an advisory. Upgrading a package from one affected version to another leaves the finding unchanged rather than counting a fix and a new finding.",
+    ],
+    [
+      "Identical rebuilds",
+      "A build whose SBOM is byte-identical to the build before changed nothing, so the build-to-build comparison skips it. Build counts and the usual build pace still include it - a pipeline that ran is evidence the project is alive.",
+    ],
+    ["Build overdue", overdue],
+    [
+      "Critical fix overdue",
+      `A critical finding with a fixed version available, open in the current build for longer than ${s.criticalFixDays} days - counted from the later of when the project first shipped the package and when the finding was first recorded.`,
+    ],
+    [
+      "Days to fix",
+      "For critical and high findings removed by a build inside the window: the days from the first build of the project that carried the finding to the build that removed it.",
+    ],
+    [
+      "Inactive applications",
+      "Excluded from every count. A decommissioned service inflating a figure being used to judge work is worse than omitting it.",
+    ],
+    ["Staleness", `An active application is stale when its most recent build is older than ${report.meta.staleThresholdDays} days.`],
+  ];
+
+  for (const [term, body] of items) {
+    ctx.ensureSpace(30);
+    const { doc } = ctx;
+    const top = doc.y;
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(COLOR.text).text(term, MARGIN, top, { width: CONTENT_WIDTH * 0.24 });
+    const afterTerm = doc.y;
+    doc
+      .font("Helvetica")
+      .fontSize(8)
+      .fillColor(COLOR.muted)
+      .text(body, MARGIN + CONTENT_WIDTH * 0.26, top, { width: CONTENT_WIDTH * 0.74, lineGap: 1 });
+    doc.y = Math.max(afterTerm, doc.y) + 5;
+  }
 }
 
 function coverageSection(ctx: Layout, report: AnalyticsReport): void {
@@ -259,461 +536,6 @@ function coverageSection(ctx: Layout, report: AnalyticsReport): void {
       },
     ],
     rows,
-  );
-}
-
-/**
- * One row of the app/base-image breakdown table.
- *
- * Shared by the filtered figures and the unfiltered reference block so the two cannot be
- * laid out differently - a reader comparing them is comparing rows, and rows that do not
- * line up make that comparison work rather than a glance.
- */
-interface BreakdownRow {
-  label: string;
-  total: number;
-  buckets: Record<DashboardSeverityBucket, number>;
-  /** Null where the figure is not available for that block, printed as a dash. */
-  fixable: number | null;
-  knownExploited: number | null;
-  packages: number | null;
-}
-
-/**
- * Abbreviated headers for the breakdown table.
- *
- * Nine columns on a 507pt content width leaves about 40pt each, and `MEDIUM` does not fit
- * - `truncate()` would silently clip it, printing a header that is not the word it means.
- * Matches the `Crit` / `High` abbreviations the ranking tables already use.
- */
-const BUCKET_HEADER: Record<DashboardSeverityBucket, string> = {
-  critical: "Crit",
-  high: "High",
-  medium: "Med",
-  low: "Low",
-  other: "Other",
-};
-
-function breakdownTable(ctx: Layout, rows: BreakdownRow[], options: { detail: boolean }): void {
-  const severityColumns = dashboardSeverityBuckets.map((bucket) => ({
-    header: BUCKET_HEADER[bucket],
-    width: options.detail ? 0.08 : 0.11,
-    align: "right" as const,
-    value: (r: BreakdownRow) => fmt(r.buckets[bucket]),
-  }));
-
-  table(
-    ctx,
-    [
-      { header: "Scope", width: options.detail ? 0.25 : 0.3, value: (r: BreakdownRow) => r.label },
-      {
-        header: "Total",
-        width: options.detail ? 0.09 : 0.15,
-        align: "right" as const,
-        value: (r: BreakdownRow) => fmt(r.total),
-      },
-      ...severityColumns,
-      ...(options.detail
-        ? [
-            {
-              header: "Fixable",
-              width: 0.09,
-              align: "right" as const,
-              value: (r: BreakdownRow) => (r.fixable === null ? " - " : fmt(r.fixable)),
-            },
-            {
-              header: "Exploit",
-              width: 0.09,
-              align: "right" as const,
-              value: (r: BreakdownRow) => (r.knownExploited === null ? " - " : fmt(r.knownExploited)),
-            },
-            {
-              header: "Pkgs",
-              width: 0.08,
-              align: "right" as const,
-              value: (r: BreakdownRow) => (r.packages === null ? " - " : fmt(r.packages)),
-            },
-          ]
-        : []),
-    ],
-    rows,
-  );
-}
-
-/**
- * Vulnerability findings, or an explicit statement that nothing was assessed.
- *
- * The disabled branch is the important one. A printed report is forwarded, renamed and
- * quoted months later, so a page that silently omitted this section - or worse, showed
- * zeros - would be read as a clean bill of health for an estate nobody ever scanned.
- * It says so in as many words instead.
- *
- * When a filter is active the same concern applies one level down, which is why this
- * section names the filter before printing any figure and then prints the unfiltered
- * totals underneath. A filtered report that circulates without its filter stated is read
- * as the whole picture, and the reader has no way to discover what was left out.
- */
-function vulnerabilitySection(ctx: Layout, report: AnalyticsReport): void {
-  const vuln = report.vulnerabilities;
-
-  /*
-   * `== null`, not `=== null`: the field is typed as nullable, but a payload that
-   * predates it - a cached response, or a partially-built object - arrives with the
-   * key absent. Treating undefined as 'not assessed' is both correct and the safe
-   * direction to fail, since the alternative is a crash mid-render.
-   */
-  if (vuln == null) {
-    ctx.heading(
-      "Vulnerability findings",
-      "Not assessed. Vulnerability scanning is disabled on this platform, so no package in this report has been matched against a vulnerability database.",
-    );
-    ctx.emptyNote(
-      "The absence of findings below is not a clean result - nothing was checked. An administrator can enable scanning under Admin → Scanners → Vulnerabilities.",
-    );
-    ctx.gap(12);
-    return;
-  }
-
-  /*
-   * Same defensive reading as the null check above, for the same reason: this renderer is
-   * what a scheduled job emails, so a payload assembled before `filter` existed must
-   * produce an unfiltered report rather than a stack trace.
-   */
-  const filter = vuln.filter ?? INERT_VULN_FILTER;
-
-  const appTotal = vuln.app == null ? null : totalOf(vuln.app.counts);
-  const osTotal = vuln.baseImage == null ? null : totalOf(vuln.baseImage.counts);
-  const grandTotal = (appTotal ?? 0) + (osTotal ?? 0);
-
-  ctx.heading(
-    "Vulnerability findings",
-    `Matched against the Grype database built ${fmtDateTime(vuln.dbBuiltAt)}` +
-      (vuln.dbAgeHours === null ? "" : ` (${fmt(Math.round(vuln.dbAgeHours))}h old)`) +
-      ". Application dependencies and base-image packages are counted separately as well as together - base packages routinely outnumber dependencies by two orders of magnitude, so the combined total says more about base-image age than about anything a team chose.",
-  );
-
-  /*
-   * The filter, before any number it produced. Placed here rather than in a footnote for
-   * the same reason the coverage banner sits above the totals: by the time a reader
-   * reaches a footnote they have already believed the figure.
-   */
-  if (filter.active) {
-    ctx.paragraph(`Filtered: ${filter.label ?? ""}`, { color: COLOR.warn, size: 9 });
-    ctx.paragraph(
-      "Every figure in this section counts only findings matching that filter. The inventory sections elsewhere in this report describe the whole estate and are unaffected - severity does not apply to a package count.",
-      { color: COLOR.muted, size: 8 },
-    );
-    ctx.gap(4);
-  }
-
-  statRow(ctx, [
-    { label: "Total findings", value: fmt(grandTotal) },
-    { label: "Application deps", value: appTotal === null ? "excluded" : fmt(appTotal) },
-    { label: "Base image", value: osTotal === null ? "excluded" : fmt(osTotal) },
-    { label: "Apps affected", value: fmt(vuln.applicationsAffected) },
-  ]);
-
-  const rows: BreakdownRow[] = [];
-  if (vuln.app !== null) {
-    rows.push({
-      label: "Application dependencies",
-      total: appTotal ?? 0,
-      buckets: bucketize(vuln.app.counts),
-      fixable: vuln.app.fixable,
-      knownExploited: vuln.app.knownExploited,
-      packages: vuln.app.affectedPackages,
-    });
-  }
-  if (vuln.baseImage !== null) {
-    rows.push({
-      label: "Base image and runtimes",
-      total: osTotal ?? 0,
-      buckets: bucketize(vuln.baseImage.counts),
-      fixable: vuln.baseImage.fixable,
-      knownExploited: vuln.baseImage.knownExploited,
-      packages: vuln.baseImage.affectedPackages,
-    });
-  }
-
-  ctx.gap(4);
-  breakdownTable(ctx, rows, { detail: true });
-
-  /*
-   * "Other" is negligible plus unknown, and unknown is a real answer rather than missing
-   * data - stated because a reader who assumes it means "not yet rated" will treat it as
-   * a queue of work that does not exist.
-   */
-  ctx.paragraph(
-    "Other combines negligible and unrated advisories. Unrated is a real answer: many advisories carry no severity from any upstream feed, and promoting them to low would overstate them. Accepted risks are excluded from every figure above.",
-    { color: COLOR.muted, size: 8 },
-  );
-
-  if (filter.scope !== "all") {
-    ctx.paragraph(
-      filter.scope === "app"
-        ? "Base-image and runtime findings were excluded by the filter and are not counted anywhere above. Their absence here is not evidence that there are none."
-        : "Application-dependency findings were excluded by the filter and are not counted anywhere above. Their absence here is not evidence that there are none.",
-      { color: COLOR.muted, size: 8 },
-    );
-  }
-
-  if (vuln.applicationsPending > 0) {
-    // Said plainly: a partially-swept estate's totals are lower bounds, and a reader
-    // comparing two reports needs to know which one was still catching up.
-    ctx.paragraph(
-      `${fmt(vuln.applicationsPending)} application${vuln.applicationsPending === 1 ? " has" : "s have"} not been matched yet, so the counts above are a lower bound.`,
-      { color: COLOR.muted, size: 8 },
-    );
-  }
-  ctx.gap(8);
-
-  // --- unfiltered reference ------------------------------------------------
-  /*
-   * Present only when a filter narrowed the figures. This is what makes a filtered report
-   * safe to forward: whoever receives it can see the size of what was excluded without
-   * having to ask, or having to re-run the report themselves.
-   */
-  if (vuln.unfiltered != null) {
-    ctx.heading(
-      "For reference: unfiltered totals",
-      "The same estate with no filter applied, so the figures above can be read against the whole. Fix availability and package counts are omitted here - they belong to the filtered view and repeating them unfiltered would invite the two to be mixed.",
-    );
-    breakdownTable(
-      ctx,
-      [
-        {
-          label: "Application dependencies",
-          total: totalOf(vuln.unfiltered.app),
-          buckets: bucketize(vuln.unfiltered.app),
-          fixable: null,
-          knownExploited: null,
-          packages: null,
-        },
-        {
-          label: "Base image and runtimes",
-          total: totalOf(vuln.unfiltered.baseImage),
-          buckets: bucketize(vuln.unfiltered.baseImage),
-          fixable: null,
-          knownExploited: null,
-          packages: null,
-        },
-      ],
-      { detail: false },
-    );
-    ctx.gap(8);
-  }
-
-  // --- top vulnerable applications -----------------------------------------
-  const rankedByBaseImage = vuln.topVulnerableApplications[0]?.rankedBy === "os";
-  ctx.heading(
-    `Top ${vuln.topVulnerableApplications.length || 10} vulnerable applications`,
-    rankedByBaseImage
-      ? "Ranked by base-image findings, because the filter excluded application dependencies. Every count on a row is base-image only."
-      : "Ranked by findings in application dependencies only. Base-image findings are shown for context but take no part in the ranking - including them would rank base-image age instead.",
-  );
-
-  if (vuln.topVulnerableApplications.length === 0) {
-    ctx.emptyNote(
-      vuln.applicationsScanned === 0
-        ? "No application has been matched yet."
-        : filter.active
-          ? "No application has a finding matching this filter."
-          : "No application dependency has a known vulnerability.",
-    );
-    ctx.gap(10);
-  } else {
-    table(
-      ctx,
-      [
-        { header: "#", width: 0.05, align: "right", value: (_r, i) => String(i + 1) },
-        { header: "Application", width: 0.37, value: (r) => r.name },
-        {
-          // One column, matching the dashboards: two adjacent numbers under one heading
-          // read as a pair, where two separate columns invited them to be added up.
-          header: "Findings app/base",
-          width: 0.19,
-          align: "right",
-          value: (r) =>
-            `${r.findings === null ? " - " : fmt(r.findings)} / ${
-              r.baseImageFindings === null ? " - " : fmt(r.baseImageFindings)
-            }`,
-        },
-        { header: "Crit", width: 0.08, align: "right", value: (r) => fmt(r.critical) },
-        { header: "High", width: 0.08, align: "right", value: (r) => fmt(r.high) },
-        { header: "Fixable", width: 0.11, align: "right", value: (r) => fmt(r.fixable) },
-        { header: "Packages", width: 0.12, align: "right", value: (r) => fmt(r.affectedPackages) },
-      ],
-      vuln.topVulnerableApplications,
-    );
-  }
-
-  // --- top vulnerable packages ---------------------------------------------
-  ctx.heading(
-    `Top ${vuln.topVulnerablePackages.length || 10} vulnerable packages in use`,
-    (rankedByBaseImage
-      ? "Base-image packages present in some application's current build"
-      : "Application dependencies present in some application's current build") +
-      ", ranked by the number of distinct advisories against that exact version. `Apps` is the blast radius of fixing it.",
-  );
-
-  if (vuln.topVulnerablePackages.length === 0) {
-    ctx.emptyNote(
-      filter.active
-        ? "No package in current use has a finding matching this filter."
-        : "No package in current use has a known vulnerability.",
-    );
-    ctx.gap(10);
-  } else {
-    table(
-      ctx,
-      [
-        { header: "#", width: 0.05, align: "right", value: (_r, i) => String(i + 1) },
-        { header: "Package", width: 0.26, value: (r) => r.name },
-        { header: "Version", width: 0.17, value: (r) => r.version ?? " - ", mono: true },
-        { header: "Advisories", width: 0.12, align: "right", value: (r) => fmt(r.findings) },
-        { header: "Crit", width: 0.07, align: "right", value: (r) => fmt(r.critical) },
-        { header: "High", width: 0.07, align: "right", value: (r) => fmt(r.high) },
-        { header: "Apps", width: 0.08, align: "right", value: (r) => fmt(r.applications) },
-        {
-          header: "Fixed in",
-          width: 0.18,
-          value: (r) => (r.fixVersions.length > 0 ? r.fixVersions[0]! : r.fixAvailable ? "yes" : "no fix"),
-          mono: true,
-        },
-      ],
-      vuln.topVulnerablePackages,
-    );
-  }
-
-  // --- base image exposure -------------------------------------------------
-  /*
-   * Null means the filter excluded base-image packages entirely. Saying so beats printing
-   * an empty table, which would read as "no base image has a vulnerability" - a far
-   * stronger and quite different claim.
-   */
-  if (vuln.baseImageExposure == null) {
-    ctx.heading(
-      "Base image exposure",
-      "Not included. The active filter covers application dependencies only, so no base-image package was counted.",
-    );
-    ctx.gap(10);
-    return;
-  }
-
-  ctx.heading(
-    "Base image exposure",
-    "Findings from distribution packages and language runtimes, grouped by base image. Grouped this way because that is the unit of work: twelve services on one old image are a single upgrade, not twelve tasks.",
-  );
-
-  if (vuln.baseImageExposure.length === 0) {
-    ctx.emptyNote(
-      filter.active
-        ? "No base-image package has a finding matching this filter."
-        : "No base-image package has a known vulnerability.",
-    );
-    ctx.gap(10);
-  } else {
-    table(
-      ctx,
-      [
-        { header: "Base image", width: 0.4, value: (r) => [r.osName ?? "unknown", r.osVersion ?? ""].join(" ").trim() },
-        { header: "Applications", width: 0.2, align: "right", value: (r) => fmt(r.applications) },
-        { header: "Findings", width: 0.16, align: "right", value: (r) => fmt(r.findings) },
-        { header: "Critical", width: 0.12, align: "right", value: (r) => fmt(r.critical) },
-        { header: "High", width: 0.12, align: "right", value: (r) => fmt(r.high) },
-      ],
-      vuln.baseImageExposure,
-    );
-  }
-}
-
-function topPackagesSection(ctx: Layout, report: AnalyticsReport): void {
-  ctx.heading(
-    `Top ${report.topPackages.length} most widely deployed packages`,
-    "Present in the most applications' current builds. This is blast radius: the number that decides whether a problem package is one team's afternoon or an estate-wide exercise. Operating systems and language runtimes are excluded and reported separately.",
-  );
-
-  if (report.topPackages.length === 0) {
-    ctx.emptyNote("No package data yet - counts appear once the first SBOM is ingested.");
-    ctx.gap(10);
-    return;
-  }
-
-  const max = report.topPackages[0]?.applications ?? 0;
-  table(
-    ctx,
-    [
-      { header: "#", width: 0.05, align: "right", value: (_r, i) => String(i + 1) },
-      { header: "Package", width: 0.42, value: (r) => r.name },
-      { header: "Version", width: 0.23, value: (r) => r.version ?? " - ", mono: true },
-      { header: "Ecosystem", width: 0.16, value: (r) => r.ecosystem, mono: true },
-      {
-        header: "Apps",
-        width: 0.14,
-        align: "right",
-        value: (r) =>
-          max > 0 ? `${fmt(r.applications)}  (${Math.round((r.applications / max) * 100)}%)` : fmt(r.applications),
-      },
-    ],
-    report.topPackages,
-  );
-}
-
-function topProjectsSection(ctx: Layout, report: AnalyticsReport): void {
-  ctx.heading(
-    `Top ${report.topProjects.length} applications by package count`,
-    "Largest current builds. A size ranking, not a risk ranking - a big image costs more to review, rebuild and patch, but is not automatically in worse shape than a small one.",
-  );
-
-  if (report.topProjects.length === 0) {
-    ctx.emptyNote("No application has reported a build yet.");
-    ctx.gap(10);
-    return;
-  }
-
-  table(
-    ctx,
-    [
-      { header: "#", width: 0.05, align: "right", value: (_r, i) => String(i + 1) },
-      { header: "Application", width: 0.24, value: (r) => r.name },
-      // Not mono, and the widest column: a three-part platform summary is ~46
-      // characters, which Courier at this size cannot fit without truncating away
-      // the runtime version - the most useful part of the string.
-      { header: "Runs on", width: 0.4, value: (r) => r.platform ?? "not detected" },
-      { header: "Build date", width: 0.17, value: (r) => fmtDate(r.scanAt), mono: true },
-      { header: "Packages", width: 0.14, align: "right", value: (r) => fmt(r.packages) },
-    ],
-    report.topProjects,
-  );
-}
-
-function fragmentationSection(ctx: Layout, report: AnalyticsReport): void {
-  ctx.heading(
-    "Version fragmentation",
-    "Packages the estate runs several versions of at once. Each extra concurrent version multiplies the cost of the next upgrade of that package, which makes this the section that names work that can actually be finished.",
-  );
-
-  if (report.fragmentation.length === 0) {
-    ctx.emptyNote("Every deployed package is on a single version across the estate.");
-    ctx.gap(10);
-    return;
-  }
-
-  table(
-    ctx,
-    [
-      { header: "Package", width: 0.26, value: (r) => r.name },
-      { header: "Ecosystem", width: 0.12, value: (r) => r.ecosystem, mono: true },
-      {
-        header: "Versions in use",
-        width: 0.42,
-        value: (r) => r.examples.join(", ") + (r.versions > r.examples.length ? ", …" : ""),
-        mono: true,
-      },
-      { header: "Versions", width: 0.1, align: "right", value: (r) => fmt(r.versions) },
-      { header: "Apps", width: 0.1, align: "right", value: (r) => fmt(r.applications) },
-    ],
-    report.fragmentation,
   );
 }
 
@@ -885,170 +707,3 @@ function newPackagesSection(ctx: Layout, report: AnalyticsReport): void {
     report.newPackages,
   );
 }
-
-function platformSection(ctx: Layout, report: AnalyticsReport): void {
-  const { operatingSystems, runtimes, unknown } = report.platforms;
-
-  ctx.heading(
-    "Platform inventory",
-    "Observed contents of each application's current build, read from the SBOM itself. This is what the image contains, not what its Dockerfile said: an SBOM describes a flattened filesystem, so the base image name is not recoverable from it.",
-  );
-
-  if (operatingSystems.length === 0 && runtimes.length === 0) {
-    ctx.emptyNote(
-      "No OS or runtime detected in any current build. Scans ingested before platform detection existed need the backfill.",
-    );
-    ctx.gap(10);
-    return;
-  }
-
-  if (operatingSystems.length > 0) {
-    ctx.paragraph("Operating systems", { color: COLOR.muted, size: 8.5 });
-    ctx.gap(3);
-    table(
-      ctx,
-      [
-        { header: "Distribution", width: 0.5, value: (r) => osLabel(r.name) ?? "not detected" },
-        { header: "Version", width: 0.3, value: (r) => r.version ?? " - ", mono: true },
-        { header: "Applications", width: 0.2, align: "right", value: (r) => fmt(r.applications) },
-      ],
-      operatingSystems,
-    );
-  }
-
-  if (runtimes.length > 0) {
-    ctx.paragraph("Language runtimes and application servers", { color: COLOR.muted, size: 8.5 });
-    ctx.gap(3);
-    table(
-      ctx,
-      [
-        { header: "Runtime", width: 0.5, value: (r) => runtimeLabel(r.name) },
-        { header: "Version", width: 0.3, value: (r) => r.version ?? " - ", mono: true },
-        { header: "Applications", width: 0.2, align: "right", value: (r) => fmt(r.applications) },
-      ],
-      runtimes,
-    );
-    ctx.paragraph(
-      "An application appears once per runtime it ships, so these counts can legitimately sum to more than the application total.",
-      { color: COLOR.faint, size: 7.5 },
-    );
-    ctx.gap(6);
-  }
-
-  if (unknown > 0) {
-    ctx.paragraph(
-      `${fmt(unknown)} application${unknown === 1 ? "" : "s"} reported neither an OS nor a runtime, which is the expected result for a scratch or distroless image.`,
-      { color: COLOR.muted, size: 8 },
-    );
-    ctx.gap(8);
-  }
-}
-
-function ecosystemSection(ctx: Layout, report: AnalyticsReport): void {
-  ctx.heading("Ecosystem mix", "Distinct packages in current builds, by package manager.");
-
-  if (report.ecosystems.length === 0) {
-    ctx.emptyNote("No components recorded yet.");
-    return;
-  }
-
-  table(
-    ctx,
-    [
-      { header: "Ecosystem", width: 0.4, value: (r) => r.ecosystem, mono: true },
-      { header: "Distinct packages", width: 0.3, align: "right", value: (r) => fmt(r.components) },
-      { header: "Applications", width: 0.3, align: "right", value: (r) => fmt(r.applications) },
-    ],
-    report.ecosystems.slice(0, 14),
-  );
-}
-
-/**
- * What the numbers mean, and what they do not.
- *
- * At the back because it is reference, not news - but present, because a report
- * that circulates without its definitions gets its figures compared against
- * other tools' differently-defined ones.
- */
-function methodologySection(ctx: Layout, report: AnalyticsReport): void {
-  ctx.heading("How to read this report");
-
-  const items: Array<[string, string]> = [
-    /*
-     * This entry has to track the feature flag. It previously stated flatly that the
-     * platform holds no vulnerability data, which is the right thing to say when
-     * scanning is off and a falsehood when it is on - and a methodology note that
-     * contradicts the tables above it discredits both.
-     */
-    report.vulnerabilities == null
-      ? [
-          "No vulnerability data",
-          "Vulnerability scanning is disabled on this platform, so no package here has been matched against a vulnerability database. Nothing in this report ranks anything by vulnerability, and a package appearing near the top of a list means it is widely deployed, not that it is a problem.",
-        ]
-      : [
-          "Vulnerability data",
-          `Findings come from Grype matching this estate's SBOM contents against its vulnerability database, built ${fmtDateTime(report.vulnerabilities.dbBuiltAt)}. Severity, CVSS, EPSS and known-exploited status are reported as the upstream feeds state them; the platform computes no risk score of its own. Findings an administrator has accepted as risks are excluded from every count.`,
-        ],
-    report.vulnerabilities == null
-      ? [
-          "Rankings measure size, not risk",
-          "The package and application rankings below count how widely something is deployed or how large a build is.",
-        ]
-      : [
-          "App dependencies vs base image",
-          "The two are totalled separately as well as together, and every ranking is computed on one of them rather than on the sum - application dependencies, unless a filter excludes them. Measured on a typical container image, distribution packages and language runtimes account for around 99% of all findings, so a ranking on the combined figure would order applications by base-image age and bury everything a team chose. That is also why the combined total is the least useful number here despite being the one most often quoted.",
-        ],
-    [
-      "Current build",
-      "Every 'in use' figure counts each application's most recent scan. Historical scans are retained in full and searchable, but excluded from these counts.",
-    ],
-    [
-      "Inactive applications",
-      "Excluded from every count. A decommissioned service inflating a figure being used to size an upgrade is worse than omitting it.",
-    ],
-    [
-      "Packages vs platform",
-      "Package counts cover libraries and OS packages. The base distribution and language runtimes are excluded from those rankings and reported under Platform inventory instead.",
-    ],
-    [
-      "Staleness",
-      `An active application is stale when its most recent build is older than ${report.meta.staleThresholdDays} days. It is a signal about the pipeline, not about the application.`,
-    ],
-    [
-      "Coverage",
-      "The share of active applications with a build inside the staleness threshold. Treat it as the confidence interval on everything else in this report.",
-    ],
-  ];
-
-  for (const [term, body] of items) {
-    ctx.ensureSpace(30);
-    const { doc } = ctx;
-    const top = doc.y;
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(8)
-      .fillColor(COLOR.text)
-      .text(term, MARGIN, top, { width: CONTENT_WIDTH * 0.24 });
-    const afterTerm = doc.y;
-    doc
-      .font("Helvetica")
-      .fontSize(8)
-      .fillColor(COLOR.muted)
-      .text(body, MARGIN + CONTENT_WIDTH * 0.26, top, { width: CONTENT_WIDTH * 0.74, lineGap: 1 });
-    doc.y = Math.max(afterTerm, doc.y) + 5;
-  }
-}
-
-/**
- * Writes the footer onto every page.
- *
- * Deferred to the end because "page 3 of 7" needs the total, which is only known
- * once all the content has been laid out. `bufferPages` is what makes going back
- * possible.
- *
- * The footer sits below the page's bottom margin, and pdfkit responds to text
- * that far down by flowing it onto a *new* page - which appended one blank page
- * per footer fragment and left the real content pages unfooted, while the labels
- * still counted only the original pages. Zeroing the bottom margin on each page
- * before writing is what keeps the text where it was put.
- */

@@ -45,6 +45,7 @@ import type {
   XrayDiagnosis,
   XraySettings,
   PlatformSettings,
+  AttentionSettings,
   ReportRunSummary,
   ReportSettings,
   SmtpConnection,
@@ -849,6 +850,19 @@ export function useUpdatePlatformSettings() {
     onSuccess: (result) => {
       qc.setQueryData(queryKeys.platformSettings, result);
       void qc.invalidateQueries();
+    },
+  });
+}
+
+export function useUpdateAttentionSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AttentionSettings) =>
+      api.put<{ settings: AttentionSettings }>("/admin/settings/attention", body),
+    onSuccess: (result) => {
+      qc.setQueryData(queryKeys.attentionSettings, result);
+      // The analytics report is decided by these, so cached reports are now wrong.
+      void qc.invalidateQueries({ queryKey: ["analytics"] });
     },
   });
 }

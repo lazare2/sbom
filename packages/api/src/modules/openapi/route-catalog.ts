@@ -493,9 +493,12 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
       "base-image packages are reported through the distribution table.",
   },
   "GET /api/v1/analytics/report": {
-    summary: "The full analytics report: inventory, coverage, churn and exposure.",
+    summary: "The analytics report: progress per project, squad and tribe, projects and packages needing attention, and build-to-build movement.",
     tag: "Analytics",
     auth: "user",
+    notes:
+      "`periodDays` sets the window; `squad`, `tribe` and `group` (names, repeatable) narrow it. Findings are judged by " +
+      "today's vulnerability database and exclude accepted risks; vulnerability sections are null with scanning off.",
   },
   "GET /api/v1/analytics/report.pdf": {
     summary: "The same report, rendered as a PDF.",
@@ -901,6 +904,16 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
   },
 
   // --- admin: platform ------------------------------------------------------
+  "GET /api/v1/admin/settings/attention": {
+    summary: "When Analytics flags a project as needing attention: build-overdue mode and thresholds.",
+    tag: "Admin: platform",
+    auth: "admin",
+  },
+  "PUT /api/v1/admin/settings/attention": {
+    summary: "Replace the needs-attention thresholds. Audited.",
+    tag: "Admin: platform",
+    auth: "admin",
+  },
   "GET /api/v1/admin/settings": {
     summary: "Platform settings: the staleness threshold and related values.",
     tag: "Admin: platform",

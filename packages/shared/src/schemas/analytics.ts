@@ -1,9 +1,5 @@
 import { z } from "zod";
-import type {
-  EcosystemBreakdownEntry,
-  PlatformBreakdown,
-  TopComponentEntry,
-} from "./admin.js";
+import { teamFilterSchema, type TeamFilter } from "./inventory.js";
 import type { SeverityCounts, VulnFilterState } from "./vulnerability.js";
 
 /**
@@ -364,25 +360,262 @@ export interface VulnerabilityReport {
   unfiltered: { app: SeverityCounts; baseImage: SeverityCounts } | null;
 }
 
+// ---------------------------------------------------------------------------
+// "Needs attention" settings
+// ---------------------------------------------------------------------------
+
+/**
+ * When a project is flagged as needing attention. Administrator-owned, because the right
+ * thresholds are a property of how an organisation builds and patches, not of the software.
+ *
+ * Build overdue has two modes. `fixed` flags every project the same number of days after its
+ * last build. `average` judges each project against its own rhythm: a service built every two
+ * days that has gone quiet for a week is overdue long before a quarterly batch job is.
+ */
+export const buildOverdueModes = ["average", "fixed"] as const;
+export type BuildOverdueMode = (typeof buildOverdueModes)[number];
+
+export const attentionSettingsSchema = z.object({
+  buildOverdueMode: z.enum(buildOverdueModes),
+  /** Fixed mode's limit, and average mode's fallback for projects with too little history. */
+  fixedDays: z.coerce.number().int().min(1).max(3650),
+  /** Average mode: allow slack beyond the average rather than flagging at exactly 1x. */
+  useMultiplier: z.coerce.boolean(),
+  /** Average mode: flag after this many times the project's average days between builds. */
+  multiplier: z.coerce.number().min(1).max(20),
+  /** Average mode: never flag sooner than this, however often the project usually builds. */
+  minimumDays: z.coerce.number().int().min(0).max(3650),
+  /** Average mode: how much recent history the average is taken over. */
+  cadenceWindowDays: z.coerce.number().int().min(7).max(3650),
+  /** Average mode: builds needed in that history before an average is trusted. */
+  minimumBuilds: z.coerce.number().int().min(2).max(500),
+  /** Flag a critical finding with a fix available that has been open longer than this. */
+  criticalFixDays: z.coerce.number().int().min(1).max(3650),
+});
+export type AttentionSettings = z.infer<typeof attentionSettingsSchema>;
+
+export const DEFAULT_ATTENTION_SETTINGS: AttentionSettings = {
+  buildOverdueMode: "average",
+  fixedDays: 30,
+  useMultiplier: true,
+  multiplier: 1.5,
+  minimumDays: 7,
+  cadenceWindowDays: 90,
+  minimumBuilds: 3,
+  criticalFixDays: 30,
+};
+
+// ---------------------------------------------------------------------------
+// Progress
+// ---------------------------------------------------------------------------
+
+/**
+ * Query for the analytics report: the window, plus the squad / tribe / group narrowing shared
+ * with Inventory.
+ */
+export const analyticsReportQuerySchema = analyticsQuerySchema.merge(teamFilterSchema);
+export type AnalyticsReportQuery = z.infer<typeof analyticsReportQuerySchema>;
+
+/** How often a project builds and when it last did. Counts every build, identical rebuilds included. */
+export interface ProjectBuilds {
+  /** Builds received inside the reporting window. */
+  inWindow: number;
+  lastBuildAt: string | null;
+  daysSinceLastBuild: number | null;
+  /** Builds inside the cadence window the average is taken over (an admin setting). */
+  cadenceBuilds: number;
+  /** Mean days between those builds; null with fewer than two. */
+  averageDaysBetweenBuilds: number | null;
+}
+
+/**
+ * How a project's vulnerabilities moved over the window, judged by today's database.
+ *
+ * Every figure compares builds against what is known now, so "introduced" means a change the
+ * team made to its dependencies or base image brought it in - an advisory published between two
+ * builds is not counted against them. Accepted risks are excluded throughout.
+ */
+export interface ProjectVulnProgress {
+  /** Consecutive build pairs compared inside the window (identical rebuilds skipped). */
+  comparedBuilds: number;
+  fixed: number;
+  introduced: number;
+  /** introduced - fixed: positive is getting worse. */
+  net: number;
+  fixedCriticalHigh: number;
+  introducedCriticalHigh: number;
+  /** Open in the current build. Null when the current build has not been matched yet. */
+  openCritical: number | null;
+  openHigh: number | null;
+  /** Critical + high in the last build before the window, by today's database; null without one. */
+  criticalHighAtStart: number | null;
+  /** Open critical + high now minus at the start; negative is improvement. */
+  criticalHighChange: number | null;
+  /**
+   * Mean days from a critical or high finding first appearing in this project to the build that
+   * removed it, over the ones removed inside the window. Null when none was removed.
+   */
+  meanDaysToFix: number | null;
+  fixesTimed: number;
+}
+
+export interface ProjectProgress {
+  applicationId: string;
+  name: string;
+  status: string;
+  squads: string[];
+  tribes: string[];
+  builds: ProjectBuilds;
+  /** Null with vulnerability scanning switched off. */
+  vulnerabilities: ProjectVulnProgress | null;
+}
+
+/** The progress table rolled up to a squad or tribe. An application on two squads counts in both. */
+export interface ProgressRollup {
+  /** Null for the applications assigned to none. */
+  name: string | null;
+  applications: number;
+  buildsInWindow: number;
+  /** Mean of the member projects' own averages, over those that have one. */
+  averageDaysBetweenBuilds: number | null;
+  flaggedApplications: number;
+  /** Null with scanning off. */
+  vulnerabilities: {
+    comparedBuilds: number;
+    fixed: number;
+    introduced: number;
+    net: number;
+    openCritical: number;
+    openHigh: number;
+    criticalHighChange: number | null;
+    meanDaysToFix: number | null;
+  } | null;
+}
+
+// ---------------------------------------------------------------------------
+// Needs attention
+// ---------------------------------------------------------------------------
+
+export const attentionFlagKinds = [
+  "known_exploited",
+  "critical_fix_overdue",
+  "build_overdue",
+  "vulnerabilities_rising",
+] as const;
+export type AttentionFlagKind = (typeof attentionFlagKinds)[number];
+
+/** One reason a project is flagged, stated in a sentence a reader can act on. */
+export interface AttentionFlag {
+  kind: AttentionFlagKind;
+  reason: string;
+}
+
+export interface AttentionProject {
+  applicationId: string;
+  name: string;
+  squads: string[];
+  tribes: string[];
+  flags: AttentionFlag[];
+}
+
+/**
+ * An application dependency worth upgrading first: critical or known-exploited advisories with
+ * a fixed version available, ranked by how many applications one upgrade would clear.
+ */
+export interface AttentionPackage {
+  name: string;
+  ecosystem: string;
+  /** Applications whose current build carries such an advisory on this package. */
+  applications: number;
+  applicationList: string[];
+  critical: number;
+  knownExploited: number;
+  versionsInUse: number;
+  /** Fixed versions named by the advisories, a sample. */
+  fixVersions: string[];
+  reason: string;
+}
+
+/** A package now run in more versions than at the start of the window. */
+export interface FragmentationTrend {
+  name: string;
+  ecosystem: string;
+  versionsAtStart: number;
+  versionsNow: number;
+  applications: number;
+}
+
+// ---------------------------------------------------------------------------
+// Build to build
+// ---------------------------------------------------------------------------
+
+export interface BuildDeltaCounts {
+  total: number;
+  critical: number;
+  high: number;
+}
+
+/** What one build did to the findings of the build before it. */
+export interface BuildDeltaSide {
+  fixed: BuildDeltaCounts;
+  introduced: BuildDeltaCounts;
+  unchanged: BuildDeltaCounts;
+}
+
+/** Both halves of the app/base-image split, kept apart as everywhere else. */
+export interface BuildDeltaPair {
+  app: BuildDeltaSide;
+  os: BuildDeltaSide;
+}
+
+export interface ProjectBuildDeltas {
+  applicationId: string;
+  name: string;
+  /** Build pairs averaged over, inside the window. */
+  comparedBuilds: number;
+  /** Per build pair, one decimal. Null when no pair falls inside the window. */
+  average: BuildDeltaPair | null;
+  /** The latest build against the one before it, whenever it happened. */
+  last: (BuildDeltaPair & { scanId: string; buildNumber: string | null; at: string }) | null;
+}
+
+export interface BuildDeltaSection {
+  projects: ProjectBuildDeltas[];
+  /** The mean of the projects' own averages - every project weighs the same. */
+  estateAverage: BuildDeltaPair | null;
+  comparedBuilds: number;
+  /** Builds left out because their SBOM was byte-identical to the build before. */
+  identicalRebuildsSkipped: number;
+}
+
+// ---------------------------------------------------------------------------
+// The report
+// ---------------------------------------------------------------------------
+
 export interface AnalyticsReport {
-  meta: ReportMeta;
+  meta: ReportMeta & {
+    environmentName: string;
+    filter: TeamFilter;
+    filterLabel: string | null;
+    vulnScanningEnabled: boolean;
+    /** The thresholds the flags below were decided with, so a reader can see why. */
+    attentionSettings: AttentionSettings;
+  };
   totals: EstateTotals;
   coverage: CoverageReport;
-  /** Blast-radius list: packages present in the most applications. */
-  topPackages: TopComponentEntry[];
-  /** Size list: applications with the most packages. */
-  topProjects: TopProjectEntry[];
-  fragmentation: FragmentationEntry[];
+  progress: {
+    projects: ProjectProgress[];
+    squads: ProgressRollup[];
+    tribes: ProgressRollup[];
+  };
+  attention: {
+    projects: AttentionProject[];
+    packages: AttentionPackage[];
+    fragmentationRising: FragmentationTrend[];
+  };
+  /** Null with vulnerability scanning switched off. */
+  buildDeltas: BuildDeltaSection | null;
   newPackages: NewPackageEntry[];
   velocity: VelocitySummary;
   activity: ActivityBucket[];
-  ecosystems: EcosystemBreakdownEntry[];
-  platforms: PlatformBreakdown;
-  /**
-   * Vulnerability sections, or null when scanning is disabled.
-   *
-   * Null rather than empty for the reason given on `VulnerabilityReport`: the PDF and
-   * the page both have to say "not assessed" rather than render zeros.
-   */
-  vulnerabilities: VulnerabilityReport | null;
 }

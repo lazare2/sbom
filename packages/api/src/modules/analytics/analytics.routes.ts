@@ -1,12 +1,6 @@
-import { readAccess, requireScope } from "../environments/scope.js";
-import type { ReadAccess } from "../environments/environment.service.js";
+import { requireScope } from "../environments/scope.js";
 import type { FastifyInstance } from "fastify";
-import {
-  analyticsQuerySchema,
-  coverageQuerySchema,
-  normalizeVulnFilter,
-  vulnFilterQuerySchema,
-} from "@sbom/shared";
+import { analyticsReportQuerySchema, coverageQuerySchema } from "@sbom/shared";
 import { getUser } from "../../plugins/auth.plugin.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { renderReportPdf } from "../reports/pdf.js";
@@ -14,77 +8,38 @@ import { renderReportPdf } from "../reports/pdf.js";
 /**
  * Estate analytics and its printable form.
  *
- * Read-only and open to every authenticated user, matching the rest of the read
- * API: there is no per-application access model in this phase, so a report that
- * spans the estate is no more sensitive than the applications list it summarises.
- *
- * Both routes call `analytics.report()`. The JSON and the PDF are two renderings
- * of one payload rather than two query paths, which is what stops the printed
- * artifact and the screen from disagreeing about a figure.
- *
- * That is also why the PDF accepts the vulnerability filter. A screen showing four
- * critical findings next to a Download button that produced a report about four thousand
- * would be the precise drift this shape exists to prevent - so the filter travels with
- * the request, and the PDF prints what it was narrowed by.
+ * Read-only and open to every authenticated user. Every figure describes the applications the
+ * caller can see in the selected estate - access is applied before the squad / tribe / group
+ * narrowing, so the narrowing can only ever take applications away.
  */
 export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
-  const { analytics , groups } = fastify.ctx;
+  const { analytics } = fastify.ctx;
 
   fastify.addHook("preHandler", fastify.requireAuth);
 
-  /**
-   * Resolves the filter, looking up the selected group's name.
-   *
-   * The lookup happens here rather than inside `normalizeVulnFilter` because that function is
-   * pure and shared with the client. One extra query only when a group is actually selected.
-   */
-  async function resolveFilter(rawQuery: unknown, access: ReadAccess) {
-    const query = parseOrThrow(vulnFilterQuerySchema, rawQuery, "Query");
-    // A group the caller cannot reach resolves to no name, and the filter falls back to
-    // the whole estate rather than labelling itself with another estate's group.
-    const groupName = query.group ? await groups.nameById(query.group, access) : null;
-    return normalizeVulnFilter(query, groupName);
-  }
-
   fastify.get("/report", async (request, reply) => {
-    const query = parseOrThrow(analyticsQuerySchema, request.query, "Query");
+    const { periodDays, ...filter } = parseOrThrow(analyticsReportQuerySchema, request.query, "Query");
     const report = await analytics.report({
-      periodDays: query.periodDays,
+      periodDays,
+      filter,
       generatedBy: getUser(request).email,
       scope: await requireScope(request),
-      vulnFilter: await resolveFilter(request.query, await readAccess(request)),
     });
     return reply.send(report);
   });
 
-  /**
-   * Scan coverage on its own.
-   *
-   * The overview asks "which applications is nobody scanning" on every page load, and
-   * answering it from the full report would mean computing churn, fragmentation and the
-   * package rankings to display none of them. Same method as the report uses, so the two
-   * can never disagree about which applications are stale.
-   */
   fastify.get("/coverage", async (request, reply) => {
     const query = parseOrThrow(coverageQuerySchema, request.query, "Query");
     return reply.send(await analytics.coverage(query.limit, await requireScope(request)));
   });
 
-  /**
-   * The same report as a PDF.
-   *
-   * A distinct URL ending in `.pdf` rather than content negotiation on `/report`:
-   * this link is meant to be pasted into a browser, wired into a scheduled
-   * `curl`, and saved to disk, and all three of those work better when the path
-   * itself says what comes back.
-   */
   fastify.get("/report.pdf", async (request, reply) => {
-    const query = parseOrThrow(analyticsQuerySchema, request.query, "Query");
+    const { periodDays, ...filter } = parseOrThrow(analyticsReportQuerySchema, request.query, "Query");
     const report = await analytics.report({
-      periodDays: query.periodDays,
+      periodDays,
+      filter,
       generatedBy: getUser(request).email,
       scope: await requireScope(request),
-      vulnFilter: await resolveFilter(request.query, await readAccess(request)),
     });
 
     const pdf = await renderReportPdf(report);

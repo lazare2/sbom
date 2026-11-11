@@ -1,30 +1,34 @@
-import type { ReactNode } from "react";
-import { ExportTableButton, exportDate } from "../components/ExportTable.tsx";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import type { AnalyticsReport } from "@sbom/shared";
-import { useClientSort } from "../lib/useSort.ts";
-import { ShareBar, StatTile } from "../components/StatTile.tsx";
+import type {
+  AnalyticsReport,
+  AttentionFlagKind,
+  AttentionPackage,
+  AttentionProject,
+  BuildDeltaCounts,
+  BuildDeltaSide,
+  FragmentationTrend,
+  ProgressRollup,
+  ProjectBuildDeltas,
+  ProjectProgress,
+} from "@sbom/shared";
+import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
+import { ExportTableButton, exportDate, exportList } from "../components/ExportTable.tsx";
+import { CriticalHighBadges } from "../components/Severity.tsx";
+import { StatTile } from "../components/StatTile.tsx";
 import {
-  BaseImageExposureCard,
-  TopAdvisoriesCard,
-  TopVulnerablePackagesCard,
-  VulnBreakdownBlock,
-} from "../components/VulnSummary.tsx";
-import {
-  fromVulnFilter,
-  readVulnFilterParams,
-  toVulnFilter,
-  VULN_FILTER_URL_DEFAULTS,
-  VulnFilterBanner,
-  VulnFilterControl,
-  vulnFilterQuery,
-} from "../components/VulnFilter.tsx";
-import { ScanningDisabledNotice } from "../components/Severity.tsx";
-import { useAuth } from "../auth/AuthProvider.tsx";
+  readTeamFilterParams,
+  TEAM_FILTER_URL_DEFAULTS,
+  TeamFilterBanner,
+  TeamFilterBar,
+  teamFilterQuery,
+} from "../components/TeamFilter.tsx";
 import { formatDate, formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { analyticsReportPdfUrl, useAnalyticsReport } from "../lib/queries.ts";
+import { useClientSort } from "../lib/useSort.ts";
 import { readNumber, useUrlState } from "../lib/useUrlState.ts";
-import {
+import {
+  Badge,
   Card,
   CardHeader,
   EcosystemBadge,
@@ -42,24 +46,15 @@ import {
 } from "../components/ui.tsx";
 
 /**
- * Estate analytics.
+ * Analytics: how the estate is moving.
  *
- * The same payload the PDF is rendered from, shown interactively. Two properties
- * are load-bearing:
+ * Which projects are fixing more than they introduce, how often each one builds, which need
+ * attention and why, what each build did to the findings of the one before, and which packages
+ * to upgrade first. Always over what the reader can see, in the selected environment, and
+ * optionally narrowed to squads, tribes or groups - the narrowing applies to every section.
  *
- *   1. Every count that can be filtered for is a link. A metric you cannot drill
- *      into is trivia - "9 stale applications" only becomes work once you can see
- *      which nine.
- *   2. The window is in the URL, and the PDF link carries the same window. What
- *      you print is what you are looking at.
- *
- * The inventory sections are not vulnerability rankings: coverage gaps, version spread
- * and churn measure what they can actually measure, and each says so in its own subtitle
- * rather than leaving the reader to assume.
- *
- * The vulnerability sections are the exception and come from Grype. When scanning is
- * disabled they are replaced by an explicit notice, never by zeros - an unassessed estate
- * rendered as a clean one is the worst failure this page could have.
+ * The same payload the PDF and the monthly email are rendered from, so the window and the
+ * filter in the URL are what the download carries too.
  */
 
 const PERIODS = [
@@ -69,30 +64,19 @@ const PERIODS = [
   { days: 365, label: "12 months" },
 ] as const;
 
-/*
- * The vulnerability filter shares this page's URL with the reporting window, so one link
- * carries both. `scope` and `severity` use the same names the /vulnerabilities page uses,
- * which is what lets a drill-down from a filtered figure arrive pre-filtered.
- */
 const urlSpec = {
-  defaults: { periodDays: 30, ...VULN_FILTER_URL_DEFAULTS },
+  defaults: { periodDays: 30, ...TEAM_FILTER_URL_DEFAULTS },
   parse: (params: URLSearchParams) => ({
     periodDays: readNumber(params, "periodDays", 30),
-    ...readVulnFilterParams(params),
+    ...readTeamFilterParams(params),
   }),
 };
 
 export function AnalyticsPage() {
   const { state, setState } = useUrlState(urlSpec);
-  const { isAdmin } = useAuth();
-  const vulnFilter = toVulnFilter(state);
-  const filterParams = vulnFilterQuery(vulnFilter);
-  const query = useAnalyticsReport(state.periodDays, filterParams);
-
-  if (query.isLoading) return <LoadingBlock label="Building report" />;
-  if (query.error) return <ErrorBanner error={query.error} onRetry={() => void query.refetch()} />;
-  if (!query.data) return null;
-
+  const { periodDays, ...filter } = state;
+  const filterParams = teamFilterQuery(filter);
+  const query = useAnalyticsReport(periodDays, filterParams);
   const report = query.data;
 
   return (
@@ -100,28 +84,27 @@ export function AnalyticsPage() {
       <PageHeader
         title="Analytics"
         subtitle={
-          <>
-            Generated {formatDateTime(report.meta.generatedAt)}
-            {report.meta.generatedBy ? ` by ${report.meta.generatedBy}` : null} · window opens{" "}
-            {formatDate(report.meta.periodStart)}
-            {query.isFetching ? <span className="ml-2 text-text-faint">updating…</span> : null}
-          </>
+          report ? (
+            <>
+              Progress in {report.meta.environmentName} · generated {formatDateTime(report.meta.generatedAt)} · window
+              opens {formatDate(report.meta.periodStart)}
+              {query.isFetching ? <span className="ml-2 text-text-faint">updating…</span> : null}
+            </>
+          ) : (
+            "How the estate is moving: fixes, new findings, build pace and what needs attention."
+          )
         }
         actions={
           <>
-            <div
-              role="group"
-              aria-label="Reporting window"
-              className="flex overflow-hidden rounded-md border border-border-strong"
-            >
+            <div role="group" aria-label="Reporting window" className="flex overflow-hidden rounded-md border border-border-strong">
               {PERIODS.map((p) => (
                 <button
                   key={p.days}
                   type="button"
                   onClick={() => setState({ periodDays: p.days })}
-                  aria-pressed={state.periodDays === p.days}
+                  aria-pressed={periodDays === p.days}
                   className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                    state.periodDays === p.days
+                    periodDays === p.days
                       ? "bg-accent text-white"
                       : "bg-bg-raised text-text-muted hover:bg-bg-subtle hover:text-text-base"
                   }`}
@@ -130,14 +113,9 @@ export function AnalyticsPage() {
                 </button>
               ))}
             </div>
-            {/*
-              A plain anchor, not a fetch: the endpoint returns a PDF and the
-              browser already knows how to save one. Routing it through the JSON
-              client would mean buffering it into memory and synthesising a blob
-              URL for no gain. `download` names the file rather than opening a tab.
-            */}
+            {/* A plain anchor: the endpoint returns a PDF and the browser knows how to save one. */}
             <a
-              href={analyticsReportPdfUrl(state.periodDays, filterParams)}
+              href={analyticsReportPdfUrl(periodDays, filterParams)}
               download
               className="inline-flex items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
             >
@@ -147,71 +125,71 @@ export function AnalyticsPage() {
         }
       />
 
-      <CoverageBanner report={report} />
-
-      <Totals report={report} />
-
-      {/*
-        Vulnerability sections, immediately after the totals.
-        `null` means scanning is disabled - rendered as an explicit notice rather than
-        omitted, so a reader cannot mistake a report with no findings section for an estate
-        with no findings.
-      */}
-      <section className="mt-5">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-text-base">Vulnerabilities</h2>
-          {/*
-            The control lives here rather than in the page toolbar, because this section is
-            the whole extent of what it changes. Severity means nothing for churn, coverage
-            or platform mix, and a filter in the page header would imply otherwise.
-          */}
-          {report.vulnerabilities ? (
-            <VulnFilterControl
-              filter={vulnFilter}
-              onChange={(next) => setState(fromVulnFilter(next))}
-            />
-          ) : null}
+      <Card className="mb-4">
+        <div className="p-3">
+          <TeamFilterBar filter={filter} onChange={(next) => setState(next)} />
         </div>
-        {report.vulnerabilities ? (
-          <>
-            <VulnFilterBanner
-              label={report.vulnerabilities.filter.label}
-              groupScoped={report.vulnerabilities.filter.group !== null}
-            />
-            <VulnBreakdownBlock report={report.vulnerabilities} />
-            {/*
-              Packages and advisories, not applications. Which application is worst is a
-              triage question the overview answers; this page answers what to fix, which is
-              usually one package upgrade clearing several applications at once. Paired in
-              one row because they are two views of the same question.
-            */}
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <TopVulnerablePackagesCard report={report.vulnerabilities} />
-              <TopAdvisoriesCard />
-            </div>
-            <div className="mt-4">
-              <BaseImageExposureCard report={report.vulnerabilities} />
-            </div>
-          </>
-        ) : (
-          <ScanningDisabledNotice what="Vulnerability figures" isAdmin={isAdmin} />
-        )}
-      </section>
+      </Card>
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <TopProjectsCard report={report} />
-        <NewPackagesCard report={report} />
+      {query.isLoading ? (
+        <LoadingBlock label="Building report" />
+      ) : query.error ? (
+        <ErrorBanner error={query.error} onRetry={() => void query.refetch()} />
+      ) : report ? (
+        <AnalyticsBody report={report} />
+      ) : null}
+    </>
+  );
+}
+
+function AnalyticsBody({ report }: { report: AnalyticsReport }) {
+  const vulns = report.meta.vulnScanningEnabled;
+  return (
+    <>
+      <TeamFilterBanner label={report.meta.filterLabel} />
+      <CoverageBanner report={report} />
+      <Headline report={report} />
+
+      {vulns ? (
+        <p className="mt-3 rounded-md border border-border-base bg-bg-raised px-4 py-2 text-xs text-text-muted">
+          Every build is judged by <strong className="font-medium text-text-base">today's vulnerability database</strong>,
+          so "introduced" means a change to a project's dependencies or base image brought a finding in. An advisory
+          published between two builds is counted as unchanged, not against the team. Accepted risks are left out
+          everywhere.
+        </p>
+      ) : (
+        <p className="mt-3 rounded-md border border-border-base bg-bg-raised px-4 py-2 text-xs text-text-muted">
+          Vulnerability scanning is switched off, so this page shows build activity only.
+        </p>
+      )}
+
+      <div className="mt-4">
+        <AttentionCard report={report} />
+      </div>
+
+      <div className="mt-4">
+        <ProgressCard report={report} />
+      </div>
+
+      {report.buildDeltas ? (
+        <div className="mt-4">
+          <BuildDeltaCard report={report} />
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        {vulns ? <AttentionPackagesCard rows={report.attention.packages} /> : null}
+        <FragmentationRisingCard rows={report.attention.fragmentationRising} periodDays={report.meta.periodDays} />
       </div>
 
       <div className="mt-4">
         <ChurnCard report={report} />
       </div>
 
-      {/*
-        The inventory tables - most-used packages, ecosystems, base images, runtimes and version
-        fragmentation - live on the Inventory page now. Said here, because someone who used to
-        find them on this page will look for them here first.
-      */}
+      <div className="mt-4">
+        <NewPackagesCard report={report} />
+      </div>
+
       <p className="mt-4 text-xs text-text-muted">
         Looking for the most-used packages, base images, runtimes, ecosystem mix or version fragmentation? They are on the{" "}
         <Link to="/inventory" className="text-accent hover:underline">
@@ -226,8 +204,912 @@ export function AnalyticsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// building blocks
+// headline
 // ---------------------------------------------------------------------------
+
+function Headline({ report }: { report: AnalyticsReport }) {
+  const { totals, attention, progress, meta } = report;
+  let fixed = 0;
+  let introduced = 0;
+  let compared = 0;
+  for (const p of progress.projects) {
+    if (!p.vulnerabilities) continue;
+    fixed += p.vulnerabilities.fixed;
+    introduced += p.vulnerabilities.introduced;
+    compared += p.vulnerabilities.comparedBuilds;
+  }
+  const net = introduced - fixed;
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <StatTile
+        label="Builds in window"
+        value={totals.scansInPeriod}
+        hint={`${formatNumber(totals.applications)} applications, ${formatNumber(totals.scans)} builds in total`}
+      />
+      <StatTile
+        label="Need attention"
+        value={attention.projects.length}
+        hint="Projects with at least one flag"
+        tone={attention.projects.length > 0 ? "warn" : "ok"}
+      />
+      {meta.vulnScanningEnabled ? (
+        <>
+          <StatTile
+            label="Fixed / introduced"
+            value={`${formatNumber(fixed)} / ${formatNumber(introduced)}`}
+            hint={`Across ${formatNumber(compared)} build-to-build comparisons`}
+          />
+          <StatTile
+            label="Net change"
+            value={net > 0 ? `+${formatNumber(net)}` : formatNumber(net)}
+            hint="Findings introduced minus fixed"
+            tone={net > 0 ? "danger" : "ok"}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// needs attention
+// ---------------------------------------------------------------------------
+
+const FLAG_LABEL: Record<AttentionFlagKind, string> = {
+  known_exploited: "Known exploited",
+  critical_fix_overdue: "Critical fix overdue",
+  build_overdue: "Build overdue",
+  vulnerabilities_rising: "Vulnerabilities rising",
+};
+
+const FLAG_TONE: Record<AttentionFlagKind, "danger" | "warn" | "info"> = {
+  known_exploited: "danger",
+  critical_fix_overdue: "danger",
+  vulnerabilities_rising: "warn",
+  build_overdue: "info",
+};
+
+function AttentionCard({ report }: { report: AnalyticsReport }) {
+  const all = report.attention.projects;
+  const [kind, setKind] = useState<AttentionFlagKind | "all">("all");
+  const rows = kind === "all" ? all : all.filter((p) => p.flags.some((f) => f.kind === kind));
+  const counts = Object.fromEntries(
+    (Object.keys(FLAG_LABEL) as AttentionFlagKind[]).map((k) => [k, all.filter((p) => p.flags.some((f) => f.kind === k)).length]),
+  ) as Record<AttentionFlagKind, number>;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Projects that need attention"
+        subtitle="Every flag says why it was raised. Thresholds are set by an administrator under Admin → Configuration."
+        actions={
+          <ExportTableButton
+            title="Needs attention"
+            filename="needs-attention"
+            rows={rows.flatMap((p) => p.flags.map((f) => ({ p, f })))}
+            columns={[
+              { header: "Project", value: (r) => r.p.name, width: 30 },
+              { header: "Squads", value: (r) => exportList(r.p.squads), width: 20 },
+              { header: "Tribes", value: (r) => exportList(r.p.tribes), width: 20 },
+              { header: "Flag", value: (r) => FLAG_LABEL[r.f.kind], width: 20 },
+              { header: "Reason", value: (r) => r.f.reason, width: 90 },
+            ]}
+          />
+        }
+      />
+      {all.length > 0 ? (
+        <div className="flex flex-wrap gap-1 border-b border-border-base px-4 py-2" role="group" aria-label="Show flag">
+          {(["all", ...(Object.keys(FLAG_LABEL) as AttentionFlagKind[])] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={kind === k}
+              onClick={() => setKind(k)}
+              className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                kind === k ? "bg-accent-subtle font-medium text-accent" : "text-text-muted hover:bg-bg-subtle hover:text-text-base"
+              }`}
+            >
+              {k === "all" ? `All (${all.length})` : `${FLAG_LABEL[k]} (${counts[k]})`}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {rows.length === 0 ? (
+        <EmptyState title="Nothing flagged" hint="No project in this view meets any of the attention thresholds." />
+      ) : (
+        <ul className="divide-y divide-border-base">
+          {rows.map((p) => (
+            <AttentionRow key={p.applicationId} project={p} />
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function AttentionRow({ project }: { project: AttentionProject }) {
+  return (
+    <li className="px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Link to={`/applications/${project.applicationId}`} className="font-medium text-accent hover:underline">
+          {project.name}
+        </Link>
+        {project.squads.map((s) => (
+          <Badge key={s} tone="neutral">
+            {s}
+          </Badge>
+        ))}
+      </div>
+      <ul className="mt-1.5 space-y-1">
+        {project.flags.map((f) => (
+          <li key={f.kind} className="flex flex-wrap items-start gap-2 text-xs">
+            <Badge tone={FLAG_TONE[f.kind]}>{FLAG_LABEL[f.kind]}</Badge>
+            <span className="min-w-0 flex-1 text-text-muted">{f.reason}</span>
+          </li>
+        ))}
+      </ul>
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// progress
+// ---------------------------------------------------------------------------
+
+type ProgressView = "projects" | "squads" | "tribes";
+
+function signed(n: number): string {
+  return n > 0 ? `+${formatNumber(n)}` : formatNumber(n);
+}
+
+function NetCell({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-text-faint">-</span>;
+  return (
+    <span className={`nums font-medium ${value > 0 ? "text-danger" : value < 0 ? "text-ok" : "text-text-muted"}`}>
+      {signed(value)}
+    </span>
+  );
+}
+
+function ProgressCard({ report }: { report: AnalyticsReport }) {
+  const [view, setView] = useState<ProgressView>("projects");
+  return (
+    <Card>
+      <CardHeader
+        title="Progress"
+        subtitle={
+          report.meta.vulnScanningEnabled
+            ? `Findings fixed and introduced by builds in the last ${report.meta.periodDays} days, what is open now against the start of the window, how often each project builds, and the average days a critical or high finding stayed before a build removed it.`
+            : "How often each project builds and when it last did."
+        }
+        actions={
+          <div role="group" aria-label="Group by" className="flex overflow-hidden rounded-md border border-border-strong">
+            {(["projects", "squads", "tribes"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={view === v}
+                onClick={() => setView(v)}
+                className={`px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
+                  view === v ? "bg-accent text-white" : "bg-bg-raised text-text-muted hover:bg-bg-subtle hover:text-text-base"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        }
+      />
+      {view === "projects" ? (
+        <ProjectProgressTable rows={report.progress.projects} vulns={report.meta.vulnScanningEnabled} />
+      ) : (
+        <RollupTable
+          rows={report.progress[view]}
+          noun={view === "squads" ? "squad" : "tribe"}
+          vulns={report.meta.vulnScanningEnabled}
+        />
+      )}
+    </Card>
+  );
+}
+
+function ProjectProgressTable({ rows, vulns }: { rows: ProjectProgress[]; vulns: boolean }) {
+  const sort = useClientSort(
+    rows,
+    {
+      name: "text",
+      fixed: "number",
+      introduced: "number",
+      net: "number",
+      open: "number",
+      change: "number",
+      builds: "number",
+      cadence: "number",
+      lastBuild: "number",
+      fixDays: "number",
+    } as const,
+    { sortBy: vulns ? "fixed" : "builds" },
+    (p, f) => {
+      const v = p.vulnerabilities;
+      switch (f) {
+        case "name":
+          return p.name;
+        case "fixed":
+          return v?.fixed ?? null;
+        case "introduced":
+          return v?.introduced ?? null;
+        case "net":
+          return v?.net ?? null;
+        case "open":
+          return v?.openCritical == null ? null : v.openCritical * 100_000 + (v.openHigh ?? 0);
+        case "change":
+          return v?.criticalHighChange ?? null;
+        case "builds":
+          return p.builds.inWindow;
+        case "cadence":
+          return p.builds.averageDaysBetweenBuilds;
+        case "lastBuild":
+          return p.builds.daysSinceLastBuild;
+        default:
+          return v?.meanDaysToFix ?? null;
+      }
+    },
+    (p) => p.name.toLowerCase(),
+  );
+
+  if (rows.length === 0) return <EmptyState title="No applications" hint="Nothing in scope for this filter." />;
+
+  return (
+    <>
+      <div className="flex justify-end border-b border-border-base px-4 py-2">
+        <ExportTableButton
+          title="Progress by project"
+          filename="progress-by-project"
+          rows={sort.rows}
+          columns={[
+            { header: "Project", value: (p) => p.name, width: 32 },
+            { header: "Squads", value: (p) => exportList(p.squads), width: 20 },
+            { header: "Tribes", value: (p) => exportList(p.tribes), width: 20 },
+            { header: "Builds compared", value: (p) => p.vulnerabilities?.comparedBuilds ?? null, width: 10 },
+            { header: "Fixed", value: (p) => p.vulnerabilities?.fixed ?? null, width: 10 },
+            { header: "Introduced", value: (p) => p.vulnerabilities?.introduced ?? null, width: 10 },
+            { header: "Net", value: (p) => p.vulnerabilities?.net ?? null, width: 10 },
+            { header: "Critical/high fixed", value: (p) => p.vulnerabilities?.fixedCriticalHigh ?? null, width: 12 },
+            { header: "Critical/high introduced", value: (p) => p.vulnerabilities?.introducedCriticalHigh ?? null, width: 12 },
+            { header: "Open critical", value: (p) => p.vulnerabilities?.openCritical ?? null, width: 10 },
+            { header: "Open high", value: (p) => p.vulnerabilities?.openHigh ?? null, width: 10 },
+            { header: "Critical+high at start", value: (p) => p.vulnerabilities?.criticalHighAtStart ?? null, width: 12 },
+            { header: "Critical+high change", value: (p) => p.vulnerabilities?.criticalHighChange ?? null, width: 12 },
+            { header: "Mean days to fix", value: (p) => p.vulnerabilities?.meanDaysToFix ?? null, width: 12 },
+            { header: "Builds in window", value: (p) => p.builds.inWindow, width: 10 },
+            { header: "Average days between builds", value: (p) => p.builds.averageDaysBetweenBuilds, width: 12 },
+            { header: "Last build", value: (p) => exportDate(p.builds.lastBuildAt), width: 18 },
+          ]}
+        />
+      </div>
+      <TableWrap>
+        <Table>
+          <thead>
+            <tr>
+              <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                Project
+              </Th>
+              {vulns ? (
+                <>
+                  <Th align="right" width="80px" onSort={() => sort.toggle("fixed")} sorted={sort.stateOf("fixed")}>
+                    Fixed
+                  </Th>
+                  <Th align="right" width="100px" onSort={() => sort.toggle("introduced")} sorted={sort.stateOf("introduced")}>
+                    Introduced
+                  </Th>
+                  <Th align="right" width="80px" onSort={() => sort.toggle("net")} sorted={sort.stateOf("net")}>
+                    Net
+                  </Th>
+                  <Th width="120px" onSort={() => sort.toggle("open")} sorted={sort.stateOf("open")}>
+                    Open now
+                  </Th>
+                  <Th align="right" width="110px" onSort={() => sort.toggle("change")} sorted={sort.stateOf("change")}>
+                    C+H change
+                  </Th>
+                </>
+              ) : null}
+              <Th align="right" width="80px" onSort={() => sort.toggle("builds")} sorted={sort.stateOf("builds")}>
+                Builds
+              </Th>
+              <Th align="right" width="120px" onSort={() => sort.toggle("cadence")} sorted={sort.stateOf("cadence")}>
+                Built every
+              </Th>
+              <Th width="120px" onSort={() => sort.toggle("lastBuild")} sorted={sort.stateOf("lastBuild")}>
+                Last build
+              </Th>
+              {vulns ? (
+                <Th align="right" width="110px" onSort={() => sort.toggle("fixDays")} sorted={sort.stateOf("fixDays")}>
+                  Days to fix
+                </Th>
+              ) : null}
+            </tr>
+          </thead>
+          <tbody>
+            {sort.rows.map((p) => {
+              const v = p.vulnerabilities;
+              return (
+                <Tr key={p.applicationId}>
+                  <Td>
+                    <Link to={`/applications/${p.applicationId}`} className="font-medium text-accent hover:underline">
+                      {p.name}
+                    </Link>
+                    {p.squads.length > 0 ? <span className="ml-1.5 text-[11px] text-text-faint">{p.squads.join(", ")}</span> : null}
+                  </Td>
+                  {vulns ? (
+                    <>
+                      <Td align="right" className="nums" title={v ? `${v.fixedCriticalHigh} critical or high` : undefined}>
+                        {v && v.comparedBuilds > 0 ? formatNumber(v.fixed) : <span className="text-text-faint">-</span>}
+                      </Td>
+                      <Td align="right" className="nums" title={v ? `${v.introducedCriticalHigh} critical or high` : undefined}>
+                        {v && v.comparedBuilds > 0 ? formatNumber(v.introduced) : <span className="text-text-faint">-</span>}
+                      </Td>
+                      <Td align="right">
+                        <NetCell value={v && v.comparedBuilds > 0 ? v.net : null} />
+                      </Td>
+                      <Td>
+                        {v?.openCritical == null ? (
+                          <span className="text-xs text-text-faint">not assessed</span>
+                        ) : v.openCritical + (v.openHigh ?? 0) === 0 ? (
+                          <span className="text-text-faint">none</span>
+                        ) : (
+                          <CriticalHighBadges critical={v.openCritical} high={v.openHigh ?? 0} />
+                        )}
+                      </Td>
+                      <Td
+                        align="right"
+                        title={
+                          v?.criticalHighAtStart != null
+                            ? `${v.criticalHighAtStart} critical and high in the last build before the window`
+                            : "No assessed build before the window to compare with"
+                        }
+                      >
+                        <NetCell value={v?.criticalHighChange ?? null} />
+                      </Td>
+                    </>
+                  ) : null}
+                  <Td align="right" className="nums">
+                    {formatNumber(p.builds.inWindow)}
+                  </Td>
+                  <Td
+                    align="right"
+                    className="nums text-text-muted"
+                    title={`${p.builds.cadenceBuilds} build(s) in the cadence window`}
+                  >
+                    {p.builds.averageDaysBetweenBuilds === null ? <span className="text-text-faint">-</span> : `${p.builds.averageDaysBetweenBuilds} d`}
+                  </Td>
+                  <Td className="text-xs" title={p.builds.lastBuildAt ? formatDateTime(p.builds.lastBuildAt) : undefined}>
+                    {p.builds.lastBuildAt ? formatRelative(p.builds.lastBuildAt) : <span className="text-text-faint">never</span>}
+                  </Td>
+                  {vulns ? (
+                    <Td align="right" className="nums" title={v && v.fixesTimed > 0 ? `over ${v.fixesTimed} fix(es)` : undefined}>
+                      {v?.meanDaysToFix == null ? <span className="text-text-faint">-</span> : `${v.meanDaysToFix} d`}
+                    </Td>
+                  ) : null}
+                </Tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      </TableWrap>
+    </>
+  );
+}
+
+function RollupTable({ rows, noun, vulns }: { rows: ProgressRollup[]; noun: string; vulns: boolean }) {
+  const label = (r: ProgressRollup) => r.name ?? `No ${noun}`;
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-base px-4 py-2">
+        <span className="text-[11px] text-text-faint">
+          A project on two {noun}s counts in both. Days to fix is weighted by fixes, not by project.
+        </span>
+        <ExportTableButton
+          title={`Progress by ${noun}`}
+          filename={`progress-by-${noun}`}
+          rows={rows}
+          columns={[
+            { header: noun[0]!.toUpperCase() + noun.slice(1), value: label, width: 26 },
+            { header: "Applications", value: (r) => r.applications, width: 12 },
+            { header: "Fixed", value: (r) => r.vulnerabilities?.fixed ?? null, width: 10 },
+            { header: "Introduced", value: (r) => r.vulnerabilities?.introduced ?? null, width: 10 },
+            { header: "Net", value: (r) => r.vulnerabilities?.net ?? null, width: 10 },
+            { header: "Open critical", value: (r) => r.vulnerabilities?.openCritical ?? null, width: 10 },
+            { header: "Open high", value: (r) => r.vulnerabilities?.openHigh ?? null, width: 10 },
+            { header: "Critical+high change", value: (r) => r.vulnerabilities?.criticalHighChange ?? null, width: 12 },
+            { header: "Mean days to fix", value: (r) => r.vulnerabilities?.meanDaysToFix ?? null, width: 12 },
+            { header: "Builds in window", value: (r) => r.buildsInWindow, width: 10 },
+            { header: "Average days between builds", value: (r) => r.averageDaysBetweenBuilds, width: 12 },
+            { header: "Flagged applications", value: (r) => r.flaggedApplications, width: 12 },
+          ]}
+        />
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState title="No applications" />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th minWidth="200px">{noun[0]!.toUpperCase() + noun.slice(1)}</Th>
+                <Th align="right" width="70px">
+                  Apps
+                </Th>
+                {vulns ? (
+                  <>
+                    <Th align="right" width="80px">
+                      Fixed
+                    </Th>
+                    <Th align="right" width="100px">
+                      Introduced
+                    </Th>
+                    <Th align="right" width="80px">
+                      Net
+                    </Th>
+                    <Th width="120px">Open now</Th>
+                    <Th align="right" width="110px">
+                      C+H change
+                    </Th>
+                    <Th align="right" width="100px">
+                      Days to fix
+                    </Th>
+                  </>
+                ) : null}
+                <Th align="right" width="80px">
+                  Builds
+                </Th>
+                <Th align="right" width="110px">
+                  Built every
+                </Th>
+                <Th align="right" width="90px">
+                  Flagged
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const v = r.vulnerabilities;
+                return (
+                  <Tr key={r.name ?? "\u0000"}>
+                    <Td className={r.name === null ? "text-text-faint italic" : "font-medium"}>{label(r)}</Td>
+                    <Td align="right" className="nums">
+                      {formatNumber(r.applications)}
+                    </Td>
+                    {vulns ? (
+                      <>
+                        <Td align="right" className="nums">
+                          {v ? formatNumber(v.fixed) : "-"}
+                        </Td>
+                        <Td align="right" className="nums">
+                          {v ? formatNumber(v.introduced) : "-"}
+                        </Td>
+                        <Td align="right">
+                          <NetCell value={v?.net ?? null} />
+                        </Td>
+                        <Td>{v ? <CriticalHighBadges critical={v.openCritical} high={v.openHigh} /> : null}</Td>
+                        <Td align="right">
+                          <NetCell value={v?.criticalHighChange ?? null} />
+                        </Td>
+                        <Td align="right" className="nums">
+                          {v?.meanDaysToFix == null ? <span className="text-text-faint">-</span> : `${v.meanDaysToFix} d`}
+                        </Td>
+                      </>
+                    ) : null}
+                    <Td align="right" className="nums">
+                      {formatNumber(r.buildsInWindow)}
+                    </Td>
+                    <Td align="right" className="nums text-text-muted">
+                      {r.averageDaysBetweenBuilds === null ? "-" : `${r.averageDaysBetweenBuilds} d`}
+                    </Td>
+                    <Td align="right" className="nums">
+                      {r.flaggedApplications > 0 ? (
+                        <Badge tone="warn">{formatNumber(r.flaggedApplications)}</Badge>
+                      ) : (
+                        <span className="text-text-faint">0</span>
+                      )}
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// build to build
+// ---------------------------------------------------------------------------
+
+function DeltaCell({ counts, tone }: { counts: BuildDeltaCounts | undefined; tone: "ok" | "danger" | "muted" }) {
+  if (!counts) return <span className="text-text-faint">-</span>;
+  const color = counts.total === 0 ? "text-text-faint" : tone === "ok" ? "text-ok" : tone === "danger" ? "text-danger" : "text-text-base";
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-1">
+      <span className={`nums font-medium ${color}`}>{counts.total}</span>
+      {counts.critical > 0 || counts.high > 0 ? (
+        <span className="text-[11px] text-text-faint">
+          {counts.critical > 0 ? `${counts.critical}C` : ""}
+          {counts.critical > 0 && counts.high > 0 ? " " : ""}
+          {counts.high > 0 ? `${counts.high}H` : ""}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+const sideCells = (side: BuildDeltaSide | undefined) => [
+  <DeltaCell key="f" counts={side?.fixed} tone="ok" />,
+  <DeltaCell key="i" counts={side?.introduced} tone="danger" />,
+  <DeltaCell key="u" counts={side?.unchanged} tone="muted" />,
+];
+
+function BuildDeltaCard({ report }: { report: AnalyticsReport }) {
+  const section = report.buildDeltas!;
+  const [half, setHalf] = useState<"app" | "os">("app");
+  const rows = section.projects.filter((p) => p.average !== null || p.last !== null);
+  const sort = useClientSort(
+    rows,
+    { name: "text", pairs: "number", avgFixed: "number", avgIntroduced: "number", lastIntroduced: "number" } as const,
+    { sortBy: "avgIntroduced" },
+    (p, f) =>
+      f === "name"
+        ? p.name
+        : f === "pairs"
+          ? p.comparedBuilds
+          : f === "avgFixed"
+            ? (p.average?.[half].fixed.total ?? null)
+            : f === "avgIntroduced"
+              ? (p.average?.[half].introduced.total ?? null)
+              : (p.last?.[half].introduced.total ?? null),
+    (p) => p.name.toLowerCase(),
+  );
+  const exportSide = (prefix: string, pick: (p: ProjectBuildDeltas) => BuildDeltaSide | undefined) =>
+    (["fixed", "introduced", "unchanged"] as const).flatMap((m) =>
+      (["total", "critical", "high"] as const).map((l) => ({
+        header: `${prefix} ${m} ${l === "total" ? "(all)" : l}`,
+        value: (p: ProjectBuildDeltas) => pick(p)?.[m][l] ?? null,
+        width: 12,
+      })),
+    );
+
+  return (
+    <Card>
+      <CardHeader
+        title="Build to build"
+        subtitle={`What each build did to the findings of the build before it: fixed, introduced and unchanged, on average per build in the last ${report.meta.periodDays} days and for the latest build. Byte-identical rebuilds are skipped (${formatNumber(section.identicalRebuildsSkipped)} in this window). A finding is a package name with an advisory, so an upgrade that leaves a package affected counts as unchanged.`}
+        actions={
+          <>
+            <div role="group" aria-label="Packages" className="flex overflow-hidden rounded-md border border-border-strong">
+              {(
+                [
+                  ["app", "App dependencies"],
+                  ["os", "Base image"],
+                ] as const
+              ).map(([v, l]) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={half === v}
+                  onClick={() => setHalf(v)}
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                    half === v ? "bg-accent text-white" : "bg-bg-raised text-text-muted hover:bg-bg-subtle hover:text-text-base"
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <ExportTableButton
+              title="Build to build"
+              filename="build-to-build"
+              rows={sort.rows}
+              columns={[
+                { header: "Project", value: (p) => p.name, width: 30 },
+                { header: "Build pairs averaged", value: (p) => p.comparedBuilds, width: 12 },
+                ...exportSide("App avg", (p) => p.average?.app),
+                ...exportSide("App last", (p) => p.last?.app),
+                ...exportSide("Base image avg", (p) => p.average?.os),
+                ...exportSide("Base image last", (p) => p.last?.os),
+                { header: "Last build", value: (p) => p.last?.buildNumber ?? null, width: 12 },
+                { header: "Last build date", value: (p) => exportDate(p.last?.at ?? null), width: 18 },
+              ]}
+            />
+          </>
+        }
+      />
+      {rows.length === 0 ? (
+        <EmptyState title="Nothing to compare yet" hint="A project needs two matched builds before one can be compared with the other." />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <th colSpan={2} className="border-b border-border-base bg-bg-subtle" />
+                <th colSpan={3} className="border-b border-l border-border-base bg-bg-subtle px-3 py-1 text-center text-[11px] font-semibold text-text-muted">
+                  Average per build, this window
+                </th>
+                <th colSpan={3} className="border-b border-l border-border-base bg-bg-subtle px-3 py-1 text-center text-[11px] font-semibold text-text-muted">
+                  Latest build
+                </th>
+              </tr>
+              <tr>
+                <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => sort.toggle("name")} sorted={sort.stateOf("name")}>
+                  Project
+                </Th>
+                <Th align="right" width="70px" onSort={() => sort.toggle("pairs")} sorted={sort.stateOf("pairs")}>
+                  Pairs
+                </Th>
+                <Th align="right" width="100px" onSort={() => sort.toggle("avgFixed")} sorted={sort.stateOf("avgFixed")}>
+                  Fixed
+                </Th>
+                <Th align="right" width="110px" onSort={() => sort.toggle("avgIntroduced")} sorted={sort.stateOf("avgIntroduced")}>
+                  Introduced
+                </Th>
+                <Th align="right" width="110px">
+                  Unchanged
+                </Th>
+                <Th align="right" width="100px">
+                  Fixed
+                </Th>
+                <Th align="right" width="110px" onSort={() => sort.toggle("lastIntroduced")} sorted={sort.stateOf("lastIntroduced")}>
+                  Introduced
+                </Th>
+                <Th align="right" width="110px">
+                  Unchanged
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {section.estateAverage ? (
+                <tr className="bg-accent-subtle/40">
+                  <Td className="text-xs font-semibold text-text-base" title="The mean of the projects' own averages - every project weighs the same.">
+                    Estate average
+                  </Td>
+                  <Td align="right" className="nums text-text-muted">
+                    {formatNumber(section.comparedBuilds)}
+                  </Td>
+                  {sideCells(section.estateAverage[half]).map((cell, i) => (
+                    <Td key={i} align="right">
+                      {cell}
+                    </Td>
+                  ))}
+                  <Td align="right">{""}</Td>
+                  <Td align="right">{""}</Td>
+                  <Td align="right">{""}</Td>
+                </tr>
+              ) : null}
+              {sort.rows.map((p) => (
+                <Tr key={p.applicationId}>
+                  <Td>
+                    <Link to={`/applications/${p.applicationId}`} className="font-medium text-accent hover:underline">
+                      {p.name}
+                    </Link>
+                  </Td>
+                  <Td align="right" className="nums text-text-muted">
+                    {formatNumber(p.comparedBuilds)}
+                  </Td>
+                  {sideCells(p.average?.[half]).map((cell, i) => (
+                    <Td key={`a${i}`} align="right">
+                      {cell}
+                    </Td>
+                  ))}
+                  {sideCells(p.last?.[half]).map((cell, i) => (
+                    <Td key={`l${i}`} align="right">
+                      {i === 0 && p.last ? (
+                        <span title={`Build ${p.last.buildNumber ?? ""} on ${formatDate(p.last.at)}`}>{cell}</span>
+                      ) : (
+                        cell
+                      )}
+                    </Td>
+                  ))}
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// packages
+// ---------------------------------------------------------------------------
+
+function AttentionPackagesCard({ rows }: { rows: AttentionPackage[] }) {
+  return (
+    <Card>
+      <CardHeader
+        title="Packages to upgrade first"
+        subtitle="Application dependencies with critical or known-exploited advisories that have a fixed version, by how many applications one upgrade would clear."
+        actions={
+          <ExportTableButton
+            title="Packages to upgrade first"
+            filename="packages-to-upgrade"
+            rows={rows}
+            columns={[
+              { header: "Package", value: (r) => r.name, width: 30 },
+              { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
+              { header: "Applications", value: (r) => r.applications, width: 12 },
+              { header: "Application names", value: (r) => exportList(r.applicationList), width: 40 },
+              { header: "Critical advisories", value: (r) => r.critical, width: 12 },
+              { header: "Known exploited", value: (r) => r.knownExploited, width: 12 },
+              { header: "Affected versions in use", value: (r) => r.versionsInUse, width: 12 },
+              { header: "Fixed in", value: (r) => exportList(r.fixVersions), width: 30 },
+            ]}
+          />
+        }
+      />
+      {rows.length === 0 ? (
+        <EmptyState title="Nothing urgent" hint="No application dependency carries a critical or known-exploited advisory with a fix." />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Package</Th>
+                <Th align="right" width="70px">
+                  Apps
+                </Th>
+                <Th width="130px">Advisories</Th>
+                <Th>Fixed in</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <Tr key={`${r.name}|${r.ecosystem}`}>
+                  <Td>
+                    <Link
+                      to={`/search?name=${encodeURIComponent(r.name)}&match=exact&ecosystem=${encodeURIComponent(r.ecosystem)}`}
+                      className="font-medium text-accent hover:underline"
+                    >
+                      {r.name}
+                    </Link>{" "}
+                    <EcosystemBadge ecosystem={r.ecosystem} />
+                  </Td>
+                  <ApplicationsCell count={r.applications} names={r.applicationList} what="ship an affected version" />
+                  <Td>
+                    <span className="inline-flex flex-wrap gap-1">
+                      <CriticalHighBadges critical={r.critical} high={0} />
+                      {r.knownExploited > 0 ? <Badge tone="danger">{r.knownExploited} KEV</Badge> : null}
+                    </span>
+                  </Td>
+                  <Td>
+                    <Mono>{r.fixVersions.length > 0 ? r.fixVersions.join(", ") : "-"}</Mono>
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
+  );
+}
+
+function FragmentationRisingCard({ rows, periodDays }: { rows: FragmentationTrend[]; periodDays: number }) {
+  return (
+    <Card>
+      <CardHeader
+        title="Fragmentation getting worse"
+        subtitle={`Application dependencies now run in more versions than ${periodDays} days ago, across projects that built on both sides of the window.`}
+        actions={
+          <ExportTableButton
+            title="Fragmentation getting worse"
+            filename="fragmentation-rising"
+            rows={rows}
+            columns={[
+              { header: "Package", value: (r) => r.name, width: 30 },
+              { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
+              { header: "Versions at start", value: (r) => r.versionsAtStart, width: 12 },
+              { header: "Versions now", value: (r) => r.versionsNow, width: 12 },
+              { header: "Applications", value: (r) => r.applications, width: 12 },
+            ]}
+          />
+        }
+      />
+      {rows.length === 0 ? (
+        <EmptyState title="No spread" hint="No package moved into more versions during the window." />
+      ) : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Package</Th>
+                <Th align="right" width="120px">
+                  Versions
+                </Th>
+                <Th align="right" width="70px">
+                  Apps
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <Tr key={`${r.name}|${r.ecosystem}`}>
+                  <Td>
+                    <Link
+                      to={`/search?name=${encodeURIComponent(r.name)}&match=exact&ecosystem=${encodeURIComponent(r.ecosystem)}`}
+                      className="font-medium text-accent hover:underline"
+                    >
+                      {r.name}
+                    </Link>{" "}
+                    <EcosystemBadge ecosystem={r.ecosystem} />
+                  </Td>
+                  <Td align="right" className="nums">
+                    {r.versionsAtStart} → <span className="font-medium text-warn">{r.versionsNow}</span>
+                  </Td>
+                  <Td align="right" className="nums">
+                    {formatNumber(r.applications)}
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// how to read
+// ---------------------------------------------------------------------------
+
+function Methodology({ report }: { report: AnalyticsReport }) {
+  const s = report.meta.attentionSettings;
+  const overdue =
+    s.buildOverdueMode === "fixed"
+      ? `After ${s.fixedDays} days without a build.`
+      : `Once a project has gone ${s.useMultiplier ? `${s.multiplier} times` : "longer than"} its own average gap between builds over the last ${s.cadenceWindowDays} days - never sooner than ${s.minimumDays} days. With fewer than ${s.minimumBuilds} builds in that time there is no usable average, and the fixed ${s.fixedDays}-day limit applies.`;
+  const items: Array<[string, ReactNode]> = [
+    [
+      "Today's knowledge",
+      "Builds are compared using today's vulnerability database. Fixed means a later build no longer carries a finding the earlier one did; introduced means it carries one the earlier did not. A newly published advisory appears in both builds and counts as unchanged.",
+    ],
+    [
+      "Finding identity",
+      "A package name within its ecosystem, plus an advisory. An upgrade from one affected version to another leaves the finding unchanged.",
+    ],
+    [
+      "Identical rebuilds",
+      "Skipped in build-to-build comparisons, because they cannot have changed anything. Still counted as builds for the build pace.",
+    ],
+    ["Build overdue", overdue],
+    [
+      "Critical fix overdue",
+      `A critical finding with a fixed version, open in the current build for more than ${s.criticalFixDays} days - counted from the later of when the project first shipped the package and when the finding was first recorded.`,
+    ],
+    [
+      "Days to fix",
+      "For critical and high findings removed inside the window: days from the first build of the project that carried the finding to the build that removed it.",
+    ],
+    [
+      "Scope",
+      "Applications you can see in this environment, never inactive ones, narrowed by the squad, tribe and group filter when one is set. Accepted risks are excluded everywhere.",
+    ],
+  ];
+  return (
+    <Card className="mt-4">
+      <CardHeader title="How to read this page" />
+      <dl className="divide-y divide-border-base">
+        {items.map(([term, body]) => (
+          <div key={term} className="grid gap-1 px-4 py-2.5 sm:grid-cols-[180px_1fr] sm:gap-4">
+            <dt className="text-xs font-semibold text-text-base">{term}</dt>
+            <dd className="text-xs text-text-muted">{body}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
 
 /**
  * The qualifier on every other number on this page, placed above them.
@@ -269,146 +1151,6 @@ function CoverageBanner({ report }: { report: AnalyticsReport }) {
   );
 }
 
-function Totals({ report }: { report: AnalyticsReport }) {
-  const { totals, coverage, meta } = report;
-  return (
-    <>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile
-          label="Applications"
-          value={totals.applications}
-          hint={`${formatNumber(totals.activeApplications)} active, ${formatNumber(totals.inactiveApplications)} inactive`}
-          to="/applications"
-        />
-        <StatTile
-          label="Packages in use"
-          value={totals.packagesInUse}
-          hint={`${formatNumber(totals.distinctPackages)} known across all history`}
-          to="/search"
-        />
-        <StatTile
-          label="Scans in window"
-          value={totals.scansInPeriod}
-          hint={`${formatNumber(totals.scans)} received in total`}
-        />
-        <StatTile
-          label="Last scan"
-          value={totals.latestScanAt ? formatRelative(totals.latestScanAt) : "never"}
-          hint={totals.latestScanAt ? formatDate(totals.latestScanAt) : "no builds received"}
-        />
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile
-          label="Stale"
-          value={coverage.stale}
-          hint={`Active, no build in ${meta.staleThresholdDays} days`}
-          tone={coverage.stale > 0 ? "warn" : "ok"}
-          to="/applications?staleOnly=true"
-        />
-        <StatTile
-          label="Never scanned"
-          value={coverage.neverScanned}
-          hint="Registered, no SBOM received"
-          tone={coverage.neverScanned > 0 ? "warn" : "ok"}
-        />
-        <StatTile
-          label="Unconfirmed"
-          value={coverage.pendingConfirmation}
-          hint="Auto-created, awaiting triage"
-          tone={coverage.pendingConfirmation > 0 ? "warn" : "ok"}
-          to="/applications?status=pending_confirmation"
-        />
-        <StatTile
-          label="Scan coverage"
-          value={`${coverage.coveragePct}%`}
-          hint="Confidence interval on everything else"
-          tone={coverage.coveragePct >= 90 ? "ok" : "warn"}
-        />
-      </div>
-    </>
-  );
-}
-
-function TopProjectsCard({ report }: { report: AnalyticsReport }) {
-  const rows = report.topProjects;
-  // Order-independent: see TopPackagesCard.
-  const max = rows.reduce((m, r) => Math.max(m, r.packages), 0);
-  const sort = useClientSort(
-    rows,
-    { application: "text", platform: "text", packages: "number" } as const,
-    { sortBy: "packages" },
-    (r, f) => (f === "application" ? r.name : f === "platform" ? r.platform : r.packages),
-    (r) => r.applicationId,
-  );
-
-  return (
-    <Card>
-      <CardHeader
-        title={`Top ${rows.length} applications by package count`}
-        subtitle="Largest current builds. A size ranking, not a risk ranking - a big image costs more to review and patch, but is not automatically in worse shape."
-        actions={
-          <ExportTableButton
-            title="Applications by package count"
-            filename="applications-by-package-count"
-            rows={sort.rows}
-            columns={[
-              { header: "Application", value: (p) => p.name, width: 36 },
-              { header: "Runs on", value: (p) => p.platform, width: 32 },
-              { header: "Packages", value: (p) => p.packages, width: 10 },
-              { header: "Build received", value: (p) => exportDate(p.scanAt), width: 18 },
-            ]}
-          />
-        }
-      />
-      {rows.length === 0 ? (
-        <EmptyState title="No builds yet" hint="Applications appear here once they report an SBOM." />
-      ) : (
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr>
-                <Th minWidth={NAME_COLUMN_MIN_WIDTH} onSort={() => sort.toggle("application")} sorted={sort.stateOf("application")}>
-                  Application
-                </Th>
-                <Th onSort={() => sort.toggle("platform")} sorted={sort.stateOf("platform")}>
-                  Runs on
-                </Th>
-                <Th onSort={() => sort.toggle("packages")} sorted={sort.stateOf("packages")} align="right">
-                  Packages
-                </Th>
-                <Th width="130px">Share</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {sort.rows.map((p) => (
-                <Tr key={p.applicationId}>
-                  <Td>
-                    <Link
-                      to={`/applications/${p.applicationId}`}
-                      className="font-medium text-accent hover:underline"
-                    >
-                      {p.name}
-                    </Link>
-                  </Td>
-                  <Td title={p.scanAt ? `Build received ${formatDate(p.scanAt)}` : undefined}>
-                    <Mono>{p.platform ?? "not detected"}</Mono>
-                  </Td>
-                  <Td align="right" className="nums">
-                    {formatNumber(p.packages)}
-                  </Td>
-                  <Td>
-                    <ShareBar value={p.packages} max={max} />
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
-    </Card>
-  );
-}
 
 /**
  * Churn plus the activity trend.
@@ -537,6 +1279,7 @@ function ChurnCard({ report }: { report: AnalyticsReport }) {
   );
 }
 
+
 function NewPackagesCard({ report }: { report: AnalyticsReport }) {
   const rows = report.newPackages;
   const sort = useClientSort(
@@ -616,78 +1359,6 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
           </Table>
         </TableWrap>
       )}
-    </Card>
-  );
-}
-
-/**
- * Definitions, at the bottom.
- *
- * Present because these figures get compared against other tools' differently
- * defined ones, and the first item is here because it is the single most likely
- * thing for a reader to assume wrongly.
- */
-function Methodology({ report }: { report: AnalyticsReport }) {
-  const items: Array<[string, ReactNode]> = [
-    /*
-     * Conditional, because the flat claim below is correct with scanning off and false
-     * with it on - and a methodology note contradicting the tables above it discredits
-     * both.
-     */
-    report.vulnerabilities === null
-      ? ([
-          "No vulnerability data",
-          "Vulnerability scanning is disabled, so nothing here has been matched against a vulnerability database. Nothing on this page ranks anything by vulnerability - a package near the top of a list is widely deployed, not known-bad.",
-        ] as [string, ReactNode])
-      : ([
-          "Vulnerability data",
-          "Findings come from Grype matching this estate's packages against its database. Severity, CVSS, EPSS and known-exploited status are reported as the upstream feeds state them - the platform computes no risk score of its own. Accepted risks are excluded from every figure.",
-        ] as [string, ReactNode]),
-    ...(report.vulnerabilities === null
-      ? []
-      : ([
-          [
-            "App dependencies vs base image",
-            "Totalled separately as well as together, but every ranking is computed on one of them rather than the sum - application dependencies, unless the filter excludes them. On a typical image, distribution packages and runtimes are around 99% of all findings, so a ranking on the combined figure would order applications by base-image age and hide everything a team chose.",
-          ],
-          [
-            "Severity buckets",
-            "Grype reports six severities. The four named ones are shown individually and “Other” folds negligible together with advisories no upstream feed has rated, so the buckets always sum to the total. Unrated is a real answer rather than a gap - promoting those to low would invent an assessment nobody made.",
-          ],
-          [
-            "What the filter reaches",
-            "The scope and severity filter narrows this section only. Coverage, churn, fragmentation, platform and package figures have no severity to filter on and always describe the whole estate. When a filter is active, the unfiltered totals are shown beneath the split so the filtered figures can be read against the whole.",
-          ],
-        ] as Array<[string, ReactNode]>)),
-    [
-      "Current build",
-      "Every “in use” figure counts each application’s most recent scan. Earlier scans are retained in full and searchable, but excluded from these counts.",
-    ],
-    [
-      "Inactive applications",
-      "Excluded everywhere. A decommissioned service inflating a number being used to size an upgrade is worse than omitting it.",
-    ],
-    [
-      "Packages vs platform",
-      "Package rankings cover libraries and OS packages. The base distribution and the language runtimes are excluded from them and reported under the platform tables instead.",
-    ],
-    [
-      "Staleness",
-      `An active application is stale when its newest build is older than ${report.meta.staleThresholdDays} days. That is a signal about the pipeline, not about the application.`,
-    ],
-  ];
-
-  return (
-    <Card className="mt-4">
-      <CardHeader title="How to read this page" />
-      <dl className="divide-y divide-border-base">
-        {items.map(([term, body]) => (
-          <div key={term} className="grid gap-1 px-4 py-2.5 sm:grid-cols-[180px_1fr] sm:gap-4">
-            <dt className="text-xs font-semibold text-text-base">{term}</dt>
-            <dd className="text-xs text-text-muted">{body}</dd>
-          </div>
-        ))}
-      </dl>
     </Card>
   );
 }

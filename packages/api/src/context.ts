@@ -19,6 +19,7 @@ import { BulkSearchService } from "./modules/components/bulk-search.service.js";
 import { ComponentsService } from "./modules/components/components.service.js";
 import { PackageSearchService } from "./modules/components/package-search.service.js";
 import { InventoryService } from "./modules/inventory/inventory.service.js";
+import { ProgressService } from "./modules/analytics/progress.service.js";
 import { DashboardService } from "./modules/dashboard/dashboard.service.js";
 import { DiffService } from "./modules/diff/diff.service.js";
 import { GroupsAdminService } from "./modules/groups/groups.admin.service.js";
@@ -102,6 +103,7 @@ export interface AppContext {
   dashboard: DashboardService;
   analytics: AnalyticsService;
   inventory: InventoryService;
+  vulnReport: VulnReportService;
   /*
    * Vulnerability scanning.
    *
@@ -279,7 +281,8 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   };
   const vulnReport = new VulnReportService({ db, uncoveredEcosystems });
   const inventory = new InventoryService({ db, settings, uncoveredEcosystems });
-  const analytics = new AnalyticsService({ db, config, dashboard, settings, vulnReport });
+  const progress = new ProgressService({ db });
+  const analytics = new AnalyticsService({ db, config, settings, progress });
 
   const snapshots = new SnapshotService({ db });
   const mailer = new Mailer({ logger });
@@ -502,6 +505,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     dashboard,
     analytics,
     inventory,
+    vulnReport,
     settings,
     snapshots,
     reports,

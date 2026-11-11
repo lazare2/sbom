@@ -44,6 +44,7 @@ import {
   updateAttributeDefinitionSchema,
   updateUserRequestSchema,
   updatePlatformSettingsSchema,
+  attentionSettingsSchema,
 } from "@sbom/shared";
 import { ConflictError, NotFoundError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
@@ -804,6 +805,30 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       metadata: { before, after },
     });
 
+    return reply.send({ settings: after });
+  });
+
+  /*
+    When Analytics flags a project as needing attention. Replaced whole rather than patched:
+    the fields only make sense together (a multiplier is meaningless in fixed mode), so the
+    form always sends the complete set and the audit entry shows both complete sets.
+  */
+  fastify.get("/settings/attention", async (_request, reply) => {
+    return reply.send({ settings: await settings.getAttentionSettings() });
+  });
+
+  fastify.put("/settings/attention", async (request, reply) => {
+    const body = parseOrThrow(attentionSettingsSchema, request.body);
+    const actor = actorOf(request);
+    const { before, after } = await settings.updateAttentionSettings(body, actor);
+    // Recorded because it changes which teams Analytics names, with no build having changed.
+    await audit.record({
+      actor,
+      action: "settings.update",
+      targetType: "setting",
+      targetId: "attention",
+      metadata: { before, after },
+    });
     return reply.send({ settings: after });
   });
 

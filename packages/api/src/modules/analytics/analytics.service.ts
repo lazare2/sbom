@@ -1,184 +1,122 @@
 import { sql } from "drizzle-orm";
-import type {
-  ActivityBucket,
-  AnalyticsReport,
-  CoverageReport,
-  EstateTotals,
-  FragmentationEntry,
-  NewPackageEntry,
-  ReportMeta,
-  TopProjectEntry,
-  VelocitySummary,
-  VulnerabilityReport,
-  VulnFilterState,
+import {
+  EMPTY_TEAM_FILTER,
+  teamFilterLabel,
+  type ActivityBucket,
+  type AnalyticsReport,
+  type CoverageReport,
+  type EstateTotals,
+  type NewPackageEntry,
+  type TeamFilter,
+  type VelocitySummary,
 } from "@sbom/shared";
-import { INERT_VULN_FILTER } from "@sbom/shared";
 import type { Config } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import { rowsOf, toIso, type Row } from "../applications/applications.service.js";
-import type { DashboardService } from "../dashboard/dashboard.service.js";
-import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 import type { SettingsService } from "../settings/settings.service.js";
-import { applicationScopePredicate } from "../vulnerabilities/scope.js";
 import type { ReadScope } from "../environments/environment.service.js";
-import type { VulnReportService } from "../vulnerabilities/vuln-report.service.js";
+import { filteredApplications } from "../inventory/team-filter.js";
+import type { ProgressService } from "./progress.service.js";
 
 /**
- * Estate analytics: the sections shared by the `/analytics` page and the PDF
- * report.
+ * Estate analytics: progress over a window, for the `/analytics` page, the PDF and the monthly
+ * report - one payload, three renderings, so a printed figure is always one the screen shows.
  *
- * Most sections are counts and set comparisons over SBOM contents the platform
- * received, and rank nothing by risk - topProjects measures size and fragmentation
- * measures version spread, and both say so where a reader might assume otherwise.
+ * The questions are about movement: which projects are fixing more than they introduce, how
+ * often each one builds, which need attention and why, what each build did to the findings of
+ * the build before it, and which packages to upgrade first. What the estate is made of is the
+ * Inventory page.
  *
- * The vulnerability sections are the exception: they report what Grype found when
- * matching those contents against its database. They are omitted entirely (null, not
- * zero) when an administrator has not enabled scanning.
- *
- * Scope conventions, applied uniformly so sections can be read against each
- * other:
+ * Scope conventions, applied uniformly so sections can be read against each other:
+ *   - Everything describes applications the reader can see in one estate, optionally
+ *     narrowed to squads, tribes or groups. The narrowing applies to every section.
  *   - "current" means rows belonging to some application's `latest_scan_id`.
- *   - Inactive applications are excluded everywhere. A decommissioned service
- *     inflating a count is worse than omitting it, because the count is being
- *     used to judge how much work something is.
- *   - Package figures count `kind = 'library'` only, matching the dashboard. The
- *     base OS and the runtime are reported as the platform instead.
+ *   - Inactive applications are excluded everywhere. A decommissioned service inflating a
+ *     count is worse than omitting it, because the count is being used to judge how much work
+ *     something is.
+ *   - Findings are judged by today's vulnerability database and exclude accepted risks.
  */
 export class AnalyticsService {
   constructor(
     private readonly deps: {
       db: Database;
       config: Config;
-      dashboard: DashboardService;
       settings: SettingsService;
-      vulnReport: VulnReportService;
+      progress: ProgressService;
     },
   ) {}
 
   /**
    * Assemble the whole report.
    *
-   * One entry point, so the PDF and the web page are two renderings of one
-   * payload. If they each assembled their own, the first divergence would be a
-   * printed number nobody can reproduce on screen.
-   *
-   * The sections are independent queries issued concurrently: they touch three
-   * different tables and serialising them would make the report's latency the sum
-   * of its parts for no benefit. The one shared input is `periodStart`, computed
-   * once here so every section reports the same window even if the request
-   * straddles midnight.
+   * The one shared input is `periodStart`, computed once here so every section reports the
+   * same window even if the request straddles midnight.
    */
   async report(args: {
     periodDays: number;
     generatedBy: string | null;
     limit?: number;
-    /**
-     * Narrows the vulnerability sections only. Severity has no meaning for churn,
-     * coverage or platform mix, so the inventory sections describe the whole estate under
-     * every filter - and the page states that rather than leaving it to be inferred.
-     */
-    vulnFilter?: VulnFilterState;
+    filter?: TeamFilter;
     /** Every section below describes one estate. There is no all-environments report. */
     scope: ReadScope;
+    /** Injected so the scheduled report and the tests decide what "now" is. */
+    now?: Date;
   }): Promise<AnalyticsReport> {
     const limit = args.limit ?? 10;
-    const vulnFilter = args.vulnFilter ?? INERT_VULN_FILTER;
-    /*
-      The group is the one part of the filter that reaches the inventory sections.
-
-      Severity and scope describe findings, which is why they narrow only the vulnerability
-      half - the note on `vulnFilter` above says so. A group describes *applications*, and
-      every section here is an aggregate over applications, so leaving churn, coverage and
-      the platform mix estate-wide while the vulnerability cards showed one product would
-      put two different populations on one page under one heading.
-    */
-    const groupId = vulnFilter.group;
-    const generatedAt = new Date();
+    const filter = args.filter ?? EMPTY_TEAM_FILTER;
+    const generatedAt = args.now ?? new Date();
     const periodStart = new Date(generatedAt.getTime() - args.periodDays * 86_400_000);
-
-    const [
-      totals,
-      coverage,
-      topPackages,
-      topProjects,
-      fragmentation,
-      newPackages,
-      velocity,
-      activity,
-      ecosystems,
-      platforms,
-    ] = await Promise.all([
-      this.totals(periodStart, args.scope, groupId),
-      this.coverage(limit, args.scope, groupId),
-      this.deps.dashboard.topComponents({ limit, groupByName: false, groupId }, args.scope),
-      this.topProjects(limit, args.scope, groupId),
-      this.fragmentation(limit, args.scope, groupId),
-      this.newPackages(periodStart, limit, args.scope, groupId),
-      this.velocity(periodStart, args.scope, groupId),
-      this.activity(periodStart, args.periodDays, args.scope, groupId),
-      this.deps.dashboard.ecosystems(args.scope, groupId),
-      this.deps.dashboard.platforms(args.scope, groupId),
+    const [vulnEnabled, attentionSettings, platform] = await Promise.all([
+      this.deps.settings.vulnScanningEnabled(),
+      this.deps.settings.getAttentionSettings(),
+      this.deps.settings.getPlatformSettings(),
     ]);
 
-    /*
-     * Vulnerability sections, or null when scanning is disabled.
-     *
-     * Issued after the concurrent block rather than inside it because it is
-     * conditional: when the feature is off there is nothing to query, and adding a
-     * settings read plus five aggregates to every report for a deployment that does not
-     * use the feature would be pure cost.
-     */
-    const vulnerabilities = (await this.deps.settings.vulnScanningEnabled())
-      ? await this.vulnerabilities(vulnFilter, limit, args.scope)
-      : null;
-
-    const meta: ReportMeta = {
-      generatedAt: generatedAt.toISOString(),
-      generatedBy: args.generatedBy,
-      periodDays: args.periodDays,
-      periodStart: periodStart.toISOString(),
-      staleThresholdDays: (await this.deps.settings.getPlatformSettings()).staleThresholdDays,
-    };
+    const [totals, coverage, newPackages, velocity, activity, sections] = await Promise.all([
+      this.totals(periodStart, args.scope, filter),
+      this.coverage(limit, args.scope, filter),
+      this.newPackages(periodStart, limit, args.scope, filter),
+      this.velocity(periodStart, args.scope, filter),
+      this.activity(periodStart, args.periodDays, args.scope, filter),
+      this.deps.progress.sections({
+        scope: args.scope,
+        filter,
+        periodStart,
+        now: generatedAt,
+        settings: attentionSettings,
+        vulnEnabled,
+      }),
+    ]);
 
     return {
-      meta,
+      meta: {
+        generatedAt: generatedAt.toISOString(),
+        generatedBy: args.generatedBy,
+        periodDays: args.periodDays,
+        periodStart: periodStart.toISOString(),
+        staleThresholdDays: platform.staleThresholdDays,
+        environmentName: args.scope.name,
+        filter,
+        filterLabel: teamFilterLabel(filter),
+        vulnScanningEnabled: vulnEnabled,
+        attentionSettings,
+      },
       totals,
       coverage,
-      topPackages,
-      topProjects,
-      fragmentation,
+      ...sections,
       newPackages,
       velocity,
       activity,
-      ecosystems,
-      platforms,
-      vulnerabilities,
     };
   }
-
-  /**
-   * The vulnerability sections of the report.
-   *
-   * Delegated rather than assembled here: they count what Grype matched, not what the
-   * SBOMs contain, and they are the only part of this report a filter can narrow. The
-   * queries live beside the app/base-image split they depend on.
-   */
-  async vulnerabilities(
-    filter: VulnFilterState,
-    limit: number,
-    scope: ReadScope,
-  ): Promise<VulnerabilityReport> {
-    return this.deps.vulnReport.report(filter, limit, scope);
-  }
-
 
   /** Whole-estate counters. Deliberately identical to the dashboard's, plus the window. */
   async totals(
     periodStart: Date,
     scope: ReadScope,
-    groupId: string | null = null,
+    filter: TeamFilter = EMPTY_TEAM_FILTER,
   ): Promise<EstateTotals> {
-    const inGroup = applicationScopePredicate(groupId, scope);
+    const inGroup = filteredApplications(scope, filter);
     const rows = await this.deps.db.execute<Row<TotalsRow>>(sql`
       SELECT
         (SELECT count(*) FROM application a WHERE ${inGroup})::int AS app_total,
@@ -234,9 +172,9 @@ export class AnalyticsService {
   async coverage(
     limit: number,
     scope: ReadScope,
-    groupId: string | null = null,
+    filter: TeamFilter = EMPTY_TEAM_FILTER,
   ): Promise<CoverageReport> {
-    const inGroup = applicationScopePredicate(groupId, scope);
+    const inGroup = filteredApplications(scope, filter);
     const { db, config } = this.deps;
     const staleInterval = await this.deps.settings.staleInterval();
 
@@ -308,92 +246,6 @@ export class AnalyticsService {
   }
 
   /**
-   * Applications carrying the most packages in their current build.
-   *
-   * Reads `scan.component_count`, the figure recorded at ingest, rather than
-   * counting `scan_component` rows: it is the same number the scan detail page
-   * and the recent-scans list already show, and a report that disagrees with the
-   * screen about an application's package count is a bug report waiting to happen.
-   */
-  async topProjects(
-    limit: number,
-    scope: ReadScope,
-    groupId: string | null = null,
-  ): Promise<TopProjectEntry[]> {
-    const inGroup = applicationScopePredicate(groupId, scope);
-    const rows = await this.deps.db.execute<Row<TopProjectRow>>(sql`
-      SELECT
-        a.id,
-        a.name,
-        s.component_count::int AS packages,
-        s.created_at AS scan_at,
-        s.os_name, s.os_version, s.os_pretty, s.runtimes
-      FROM application a
-      JOIN scan s ON s.id = a.latest_scan_id
-      WHERE a.status <> 'inactive' AND ${inGroup}
-      ORDER BY s.component_count DESC, a.name ASC
-      LIMIT ${limit}
-    `);
-
-    return rowsOf(rows).map((r) => ({
-      applicationId: r.id,
-      name: r.name,
-      packages: Number(r.packages),
-      scanAt: toIso(r.scan_at),
-      platform: toScanPlatform(r).summary,
-    }));
-  }
-
-  /**
-   * Packages the estate currently runs more than one version of.
-   *
-   * Grouped by `lower(name)` within an ecosystem, matching the dashboard's
-   * group-by-name mode, so `React` and `react` are one package rather than two
-   * single-version rows that never surface here.
-   */
-  async fragmentation(
-    limit: number,
-    scope: ReadScope,
-    groupId: string | null = null,
-  ): Promise<FragmentationEntry[]> {
-    const inGroup = applicationScopePredicate(groupId, scope);
-    const rows = await this.deps.db.execute<Row<FragmentationRow>>(sql`
-      WITH current_components AS (
-        SELECT DISTINCT sc.component_id, sc.application_id
-        FROM scan_component sc
-        JOIN application a ON a.latest_scan_id = sc.scan_id AND a.status <> 'inactive'
-        WHERE ${inGroup}
-      )
-      SELECT
-        min(c.name) AS name,
-        c.ecosystem,
-        count(DISTINCT c.version)::int AS versions,
-        count(DISTINCT cc.application_id)::int AS applications,
-        /*
-         * A sample of the versions, so the row names the actual spread without a
-         * drill-down. Sorted as text, which is not semver order - these are
-         * illustrative, and the count above is the figure that ranks the row.
-         */
-        (array_agg(DISTINCT c.version ORDER BY c.version) FILTER (WHERE c.version IS NOT NULL))[1:6]
-          AS examples
-      FROM current_components cc
-      JOIN component c ON c.id = cc.component_id AND c.kind = 'library'
-      GROUP BY lower(c.name), c.ecosystem
-      HAVING count(DISTINCT c.version) > 1
-      ORDER BY versions DESC, applications DESC, lower(min(c.name)) ASC
-      LIMIT ${limit}
-    `);
-
-    return rowsOf(rows).map((r) => ({
-      name: r.name,
-      ecosystem: r.ecosystem,
-      versions: Number(r.versions),
-      applications: Number(r.applications),
-      examples: Array.isArray(r.examples) ? r.examples.filter((v): v is string => typeof v === "string") : [],
-    }));
-  }
-
-  /**
    * Packages whose first appearance anywhere in the estate falls inside the
    * window.
    *
@@ -410,12 +262,12 @@ export class AnalyticsService {
     periodStart: Date,
     limit: number,
     scope: ReadScope,
-    groupId: string | null = null,
+    filter: TeamFilter = EMPTY_TEAM_FILTER,
   ): Promise<NewPackageEntry[]> {
-    const inGroup = applicationScopePredicate(groupId, scope);
+    const inGroup = filteredApplications(scope, filter);
     // The self-join below compares against a second application row, so it needs its own
     // predicate bound to that alias rather than a reused one silently pointing at `a`.
-    const inGroup2 = applicationScopePredicate(groupId, scope, "a2");
+    const inGroup2 = filteredApplications(scope, filter, "a2");
     const rows = await this.deps.db.execute<Row<NewPackageRow>>(sql`
       WITH current_components AS (
         SELECT DISTINCT sc.component_id
@@ -474,9 +326,9 @@ export class AnalyticsService {
   async velocity(
     periodStart: Date,
     scope: ReadScope,
-    groupId: string | null = null,
+    filter: TeamFilter = EMPTY_TEAM_FILTER,
   ): Promise<VelocitySummary> {
-    const inGroup = applicationScopePredicate(groupId, scope);
+    const inGroup = filteredApplications(scope, filter);
     const rows = await this.deps.db.execute<Row<VelocityRow>>(sql`
       WITH baseline AS (
         -- Each application's last build strictly before the window.
@@ -582,9 +434,9 @@ export class AnalyticsService {
     periodStart: Date,
     periodDays: number,
     scope: ReadScope,
-    groupId: string | null = null,
+    filter: TeamFilter = EMPTY_TEAM_FILTER,
   ): Promise<ActivityBucket[]> {
-    const inGroup = applicationScopePredicate(groupId, scope);
+    const inGroup = filteredApplications(scope, filter);
     // Daily for windows a reader can still take in as bars, weekly beyond that.
     // Interpolated into the SQL rather than bound, because `date_trunc` and
     // `generate_series` need literals - hence the fixed strings, not the input.
@@ -663,21 +515,6 @@ interface OffenderRow {
   name: string;
   last_scan_at: Date | string | null;
   days_since_scan: number | string | null;
-}
-
-interface TopProjectRow extends PlatformRow {
-  id: string;
-  name: string;
-  packages: number | string;
-  scan_at: Date | string | null;
-}
-
-interface FragmentationRow {
-  name: string;
-  ecosystem: string;
-  versions: number | string;
-  applications: number | string;
-  examples: unknown;
 }
 
 interface NewPackageRow {

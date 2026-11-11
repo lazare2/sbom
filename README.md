@@ -440,28 +440,43 @@ that destroys trust in a reporting tool, and the only reliable prevention is for
 them to be two renderings of one payload rather than two query paths that happen
 to be written similarly.
 
+Analytics is about movement - what the inventory looks like is the Inventory page. Every section describes the applications the reader can see in
+the selected environment, never inactive ones, and can be narrowed to squads, tribes or
+groups (`?squad=…&tribe=…&group=…`); the narrowing reaches every section.
+
 | Section | What it measures |
 |---|---|
-| **Scan coverage** | Share of active applications with a build inside the staleness threshold. Printed above the totals, not in an appendix - it is the confidence interval on everything else |
-| **Top 10 most widely deployed packages** | Blast radius: the number that decides whether a problem package is one team's afternoon or an estate-wide exercise |
-| **Top 10 applications by package count** | Size, *not* risk. A big image costs more to review and patch; it is not automatically in worse shape |
-| **Dependency churn** | Each application's current build against its last build from before the window |
-| **Version fragmentation** | Packages the estate runs several versions of at once - standardisation targets, and the one section that names work which can be finished |
-| **New to the estate** | First seen inside the window and still deployed: the supply-chain review queue |
-| **Coverage gaps** | Longest-silent applications, never-scanned ones first |
-| **Platform inventory** | OS and runtime counts, per [Runtime platform](#runtime-platform) |
-| **Ecosystem mix** | Distinct packages by package manager |
+| **Projects that need attention** | Projects with at least one flag, each with the sentence that explains it: an open known-exploited advisory; a critical finding with a fix open longer than the configured days; a build overdue against the project's own pace (or a fixed limit); builds in the window that introduced more findings than they fixed |
+| **Progress** | Per project, squad or tribe (a toggle): findings fixed and introduced by builds in the window, the net, open critical / high now and the change since the start of the window, builds in the window, the average days between builds, and the mean days a critical or high finding stayed before a build removed it |
+| **Build to build** | What each build did to the findings of the build before it - fixed, introduced and unchanged, with critical and high apart - averaged per build over the window and for the latest build, application dependencies and base image separately |
+| **Packages to upgrade first** | Application dependencies with critical or known-exploited advisories that have a fix, by how many applications one upgrade clears |
+| **Fragmentation getting worse** | Dependencies now run in more versions than at the start of the window |
+| **Dependency churn**, **New to the estate**, **Coverage gaps** | As before: package churn against each application's last build before the window, the supply-chain review queue, and the longest-silent applications |
 
-The window (7 / 30 / 90 / 365 days) is URL state, and the PDF link carries it, so
-what you print is what you were looking at. Every count that can be filtered for
-links into the filtered list - a metric you cannot drill into is trivia.
+Three rules decide what the vulnerability figures mean:
 
-**Vulnerability sections appear only when scanning is enabled.** When it is off they
-are replaced by an explicit "not assessed" notice rather than by zeros, on the page and
-in the PDF alike - an unscanned estate rendered as a clean one is the worst thing a
-report like this could do. When it is on, the report gains estate totals, Top 10
-vulnerable applications, Top 10 vulnerable packages and base-image exposure, all from the
-same payload the page renders.
+- **Today's knowledge.** Every build is compared using today's database, so "introduced"
+  means a change to a project's dependencies or base image brought a finding in. An
+  advisory published between two builds appears in both and counts as unchanged.
+- **Finding identity** is a package name within its ecosystem plus an advisory, so an
+  upgrade from one affected version to another is unchanged rather than one fixed and one
+  introduced.
+- **Identical rebuilds** - an SBOM byte-identical to the build before - are skipped in the
+  comparisons, since they changed nothing. They still count as builds for the build pace.
+
+Accepted risks are excluded everywhere. With scanning switched off the page shows build
+activity only, never zeros.
+
+The flag thresholds live under **Administration → Configuration → Needs attention**. Build
+overdue has two modes: a **fixed** number of days for every project, or each project's
+**average** days between builds over a recent window (90 days by default), with an optional
+multiplier for slack (1.5× by default) and a floor (7 days) so a project that builds several
+times a day is not flagged after a quiet afternoon. A project with too few builds in that
+window (fewer than 3 by default) falls back to the fixed limit, and its flag says so. The
+critical-fix age (30 days by default) is set in the same place.
+
+The window (7 / 30 / 90 / 365 days) and the filter are URL state, and the PDF link carries
+both, so what you print is what you were looking at.
 
 ### The monthly management report
 
@@ -767,13 +782,11 @@ dependencies they would take every row. Everything describes current builds of t
 applications the reader can see in the selected environment, and can be narrowed to
 some squads, tribes or groups (`?squad=…&tribe=…&group=…`, by name).
 
-**Analytics** answers the other question: *what shape is the estate in, and how is
-it changing?* Coverage, the vulnerable-package and advisory rankings, base-image
-exposure, the most widely deployed packages - the blast-radius list that decides
-whether a bad package is one team's afternoon or an organisation-wide exercise -
-dependency churn over a selectable window with a scan-volume trend, version
-fragmentation, packages new to the estate, and the platform and ecosystem
-breakdowns. Downloadable as a PDF. See
+**Analytics** answers *how is it moving?* Which projects are fixing more than they
+introduce, how often each one builds, which need attention and why, what each build did
+to the findings of the build before it, and which packages to upgrade first - per
+project, squad or tribe, over a selectable window. Downloadable as a PDF, which is also
+what the monthly email carries. See
 [Analytics and the PDF report](#analytics-and-the-pdf-report).
 
 The split between the two pages runs along *who acts on it*. The overview ranks

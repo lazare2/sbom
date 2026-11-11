@@ -1,5 +1,8 @@
 import { sql, type SQL } from "drizzle-orm";
 import {
+  attentionSettingsSchema,
+  DEFAULT_ATTENTION_SETTINGS,
+  type AttentionSettings,
   type OidcSettings,
   type OidcDiagnosis,
   type OidcConnectionInput,
@@ -60,6 +63,8 @@ export const SETTING_KEYS = {
   staleThresholdDays: "app.stale_threshold_days",
   /** Monthly report delivery, stored as one JSON object. */
   reportDelivery: "report.delivery",
+  /** When Analytics flags a project as needing attention, stored as one JSON object. */
+  attention: "analytics.attention",
   /**
    * Malicious-package detection, stored as one JSON object.
    *
@@ -255,6 +260,7 @@ export class SettingsService {
    * report once a month.
    */
   private reportCache: { value: ReportSettings; expiresAt: number } | null = null;
+  private attentionCache: { value: AttentionSettings; expiresAt: number } | null = null;
 
   /**
    * Malicious-detection settings, cached like the rest.
@@ -354,6 +360,53 @@ export class SettingsService {
 
     this.platformCache = null;
     return { before, after: await this.getPlatformSettings() };
+  }
+
+  /**
+   * When Analytics flags a project as needing attention.
+   *
+   * Re-validated on read, field by field, against the schema that guards the write: a row
+   * can predate a change to the bounds or be edited by hand, and one bad field should fall
+   * back to its default rather than discard the administrator's other choices.
+   */
+  async getAttentionSettings(): Promise<AttentionSettings> {
+    if (this.attentionCache && this.attentionCache.expiresAt > Date.now()) return this.attentionCache.value;
+
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${SETTING_KEYS.attention}
+    `);
+    const stored = rowsOf(rows)[0]?.value;
+    const value: AttentionSettings = { ...DEFAULT_ATTENTION_SETTINGS };
+    if (stored && typeof stored === "object") {
+      const shape = attentionSettingsSchema.shape;
+      for (const key of Object.keys(shape) as Array<keyof AttentionSettings>) {
+        const parsed = shape[key].safeParse((stored as Record<string, unknown>)[key]);
+        if (parsed.success) (value as Record<string, unknown>)[key] = parsed.data;
+      }
+    }
+    this.attentionCache = { value, expiresAt: Date.now() + SettingsService.CACHE_TTL_MS };
+    return value;
+  }
+
+  async updateAttentionSettings(
+    next: AttentionSettings,
+    actor: Actor | null,
+  ): Promise<{ before: AttentionSettings; after: AttentionSettings }> {
+    const before = await this.getAttentionSettings();
+    await this.deps.db
+      .insert(setting)
+      .values({
+        key: SETTING_KEYS.attention,
+        value: next,
+        updatedByUserId: actor?.id ?? null,
+        updatedByEmail: actor?.email ?? null,
+      })
+      .onConflictDoUpdate({
+        target: setting.key,
+        set: { value: next, updatedAt: new Date(), updatedByUserId: actor?.id ?? null, updatedByEmail: actor?.email ?? null },
+      });
+    this.attentionCache = null;
+    return { before, after: await this.getAttentionSettings() };
   }
 
   /**

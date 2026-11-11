@@ -1,5 +1,6 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
+  AttentionSettings,
   InventoryReport,
   PackageDetail,
   PackageSearchResult,
@@ -112,8 +113,8 @@ export const queryKeys = {
   dashboardPlatforms: ["dashboard", "platforms"] as const,
   dashboardTopComponents: (params: Record<string, unknown>) =>
     ["dashboard", "top-components", params] as const,
-  analyticsReport: (periodDays: number, vulnFilter: Record<string, string>) =>
-    ["analytics", "report", periodDays, vulnFilter] as const,
+  analyticsReport: (periodDays: number, filter: Record<string, unknown>) =>
+    ["analytics", "report", periodDays, filter] as const,
   bulkSearch: (id: string, params: Record<string, unknown>) =>
     ["components", "bulk-search", id, params] as const,
   bulkSearchLists: ["components", "bulk-search", "recent"] as const,
@@ -143,6 +144,7 @@ export const queryKeys = {
   // --- vulnerabilities ---
   vulnStatus: ["vuln", "status"] as const,
   platformSettings: ["admin", "settings"] as const,
+  attentionSettings: ["admin", "settings", "attention"] as const,
   coverageGaps: (limit: number) => ["analytics", "coverage", limit] as const,
   reportSettings: ["admin", "reports", "settings"] as const,
   reportRuns: ["admin", "reports", "list"] as const,
@@ -564,11 +566,11 @@ export function useInventoryReport(params: Record<string, unknown>) {
   });
 }
 
-export function useAnalyticsReport(periodDays: number, vulnFilter: Record<string, string> = {}) {
+export function useAnalyticsReport(periodDays: number, filter: Record<string, unknown> = {}) {
   return useQuery({
-    queryKey: queryKeys.analyticsReport(periodDays, vulnFilter),
+    queryKey: queryKeys.analyticsReport(periodDays, filter),
     queryFn: () =>
-      api.get<AnalyticsReport>(`/analytics/report${toQueryString({ periodDays, ...vulnFilter })}`),
+      api.get<AnalyticsReport>(`/analytics/report${toQueryString({ periodDays, ...filter })}`),
     // Heavier than the dashboard's aggregates - the churn section compares two
     // builds per application - so it is cached longer. Changing the period is a
     // different key and refetches immediately.
@@ -586,9 +588,9 @@ export function useAnalyticsReport(periodDays: number, vulnFilter: Record<string
  */
 export function analyticsReportPdfUrl(
   periodDays: number,
-  vulnFilter: Record<string, string> = {},
+  filter: Record<string, unknown> = {},
 ): string {
-  return `/api/v1/analytics/report.pdf${toQueryString({ periodDays, ...vulnFilter })}`;
+  return `/api/v1/analytics/report.pdf${toQueryString({ periodDays, ...filter })}`;
 }
 
 // --- admin -----------------------------------------------------------------
@@ -893,6 +895,14 @@ export interface VulnStatusResponse {
     path: string | null;
   } | null;
   coverage: { scanned: number; pending: number; sweeping: boolean; lastSweepFinishedAt: string | null } | null;
+}
+
+/** When Analytics flags a project as needing attention. */
+export function useAttentionSettings() {
+  return useQuery({
+    queryKey: queryKeys.attentionSettings,
+    queryFn: () => api.get<{ settings: AttentionSettings }>("/admin/settings/attention"),
+  });
 }
 
 export function usePlatformSettings() {

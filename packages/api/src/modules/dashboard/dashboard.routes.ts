@@ -9,7 +9,7 @@ import { parseOrThrow } from "../../lib/validate.js";
  * matching the access model for the rest of the read API.
  */
 export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
-  const { dashboard, analytics, settings , groups } = fastify.ctx;
+  const { dashboard, vulnReport, settings, groups } = fastify.ctx;
 
   fastify.addHook("preHandler", fastify.requireAuth);
 
@@ -37,8 +37,8 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
    * render a zero - that is the client's obligation and the reason this is null-or-object
    * rather than a zero-filled struct.
    *
-   * Delegates to the analytics service so the overview cards and the report's
-   * vulnerability section are the same numbers from the same query.
+   * The estate's vulnerability posture, from the same service the rest of the platform
+   * reads its vulnerability aggregates from.
    *
    * Accepts the same `scope` and `severity` filter the analytics page uses, so a filter
    * set on one dashboard produces identical figures on the other. The filter is echoed
@@ -51,7 +51,7 @@ export async function dashboardRoutes(fastify: FastifyInstance): Promise<void> {
     }
     const filter = await resolveFilter(request.query, await readAccess(request));
     return reply.send({
-      vulnerabilities: await analytics.vulnerabilities(filter, 10, await requireScope(request)),
+      vulnerabilities: await vulnReport.report(filter, 10, await requireScope(request)),
     });
   });
 
