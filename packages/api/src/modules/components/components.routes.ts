@@ -47,12 +47,14 @@ export async function componentRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const query = parseOrThrow(componentSuggestQuerySchema, request.query, "Query");
-      return reply.send({ suggestions: await components.suggest(query) });
+      const scopes = await selectedScopes(request, undefined);
+      return reply.send({ suggestions: await components.suggest(query, scopes) });
     },
   );
 
-  fastify.get("/ecosystems", async (_request, reply) => {
-    return reply.send({ ecosystems: await components.listEcosystems() });
+  fastify.get("/ecosystems", async (request, reply) => {
+    const scopes = await selectedScopes(request, undefined);
+    return reply.send({ ecosystems: await components.listEcosystems(scopes) });
   });
 
   /** Every known version of a package, with how many applications ship each. */

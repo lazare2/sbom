@@ -163,7 +163,7 @@ export class ComponentsService {
    * suggestion list does not need usage counts, and keeping the query inside the
    * `component` table is what makes it fast enough to fire on every keystroke.
    */
-  async suggest(query: ComponentSuggestQuery): Promise<ComponentSuggestion[]> {
+  async suggest(query: ComponentSuggestQuery, scopes: ReadScope[]): Promise<ComponentSuggestion[]> {
     const rows = await this.deps.db.execute<Row<{
       name: string;
       ecosystem: string;
@@ -172,6 +172,17 @@ export class ComponentsService {
       SELECT c.name, c.ecosystem, count(DISTINCT c.version)::int AS version_count
       FROM component c
       WHERE c.name ILIKE ${"%" + query.q + "%"}
+        /*
+          Only packages some application the caller can see has shipped. The catalogue is
+          shared by every estate, so an unfiltered typeahead was a way to list the package
+          names of applications the account was never granted. The EXISTS probe reads
+          scan_component_search_idx (component_id first), so it stays index-only per name.
+        */
+        AND EXISTS (
+          SELECT 1 FROM scan_component sc
+          JOIN application a ON a.id = sc.application_id
+          WHERE sc.component_id = c.id AND ${applicationInAnyScope("a", scopes)}
+        )
       GROUP BY c.name, c.ecosystem
       -- Prefix matches first: typing "expr" should surface "express" above
       -- "my-express-wrapper".
@@ -188,13 +199,24 @@ export class ComponentsService {
     }));
   }
 
-  /** All ecosystems present in the component table, for the filter dropdown. */
-  async listEcosystems(): Promise<Array<{ ecosystem: string; count: number }>> {
+  /**
+   * Ecosystems present in what the caller can see, for the filter dropdown.
+   *
+   * Counted through the scans of visible applications rather than over the bare catalogue:
+   * the catalogue is shared by every estate, so its totals described packages the reader may
+   * have no access to.
+   */
+  async listEcosystems(scopes: ReadScope[]): Promise<Array<{ ecosystem: string; count: number }>> {
     const rows = await this.deps.db.execute<Row<{ ecosystem: string; count: number | string }>>(sql`
-      SELECT ecosystem, count(*)::int AS count
-      FROM component
-      GROUP BY ecosystem
-      ORDER BY count DESC, ecosystem ASC
+      SELECT c.ecosystem, count(*)::int AS count
+      FROM component c
+      WHERE EXISTS (
+        SELECT 1 FROM scan_component sc
+        JOIN application a ON a.id = sc.application_id
+        WHERE sc.component_id = c.id AND ${applicationInAnyScope("a", scopes)}
+      )
+      GROUP BY c.ecosystem
+      ORDER BY count DESC, c.ecosystem ASC
     `);
     return rowsOf(rows).map((r) => ({
       ecosystem: r.ecosystem,
@@ -233,18 +255,27 @@ export class ComponentsService {
         m.id AS component_id,
         m.version,
         m.ecosystem,
-        count(*) FILTER (WHERE u.last_seen_scan_id = a.latest_scan_id)::int AS current_applications,
-        count(*)::int AS total_applications
+        count(a.id) FILTER (WHERE u.last_seen_scan_id = a.latest_scan_id)::int AS current_applications,
+        /*
+          count(a.id), not count(*). The scope filter sits on the LEFT JOIN, so a usage row
+          for an application the caller cannot see survives with a NULL application -- and
+          count(*) counted it, reporting applications outside the caller's access.
+        */
+        count(a.id)::int AS total_applications
       FROM matched m
       LEFT JOIN usage u ON u.component_id = m.id
       /*
-        Counted per estate selection, matching the search this panel sits beside. Left as a
-        LEFT JOIN so a version that exists in the catalogue but is deployed nowhere the
-        caller can see still appears, with a count of zero rather than vanishing.
+        Counted per estate selection, matching the search this panel sits beside. A LEFT JOIN
+        so that the counts are computed over visible applications only, then the HAVING drops
+        any version no visible application has ever shipped: the catalogue is shared by every
+        estate, and listing its versions with a zero beside them told a reader which versions
+        exist in applications they were never granted. A version some visible application
+        once shipped and has since dropped keeps its row, as "fully removed".
       */
       LEFT JOIN application a ON a.id = u.application_id
         AND ${applicationInAnyScope("a", scopes)}
       GROUP BY m.id, m.version, m.ecosystem
+      HAVING count(a.id) > 0
       ORDER BY m.version DESC NULLS LAST
     `);
 

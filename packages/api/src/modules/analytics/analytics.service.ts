@@ -247,12 +247,19 @@ export class AnalyticsService {
           WHERE status = 'active' AND ${inGroup}
             AND last_scan_at IS NOT NULL
             AND last_scan_at >= now() - ${staleInterval})::int AS covered,
-        (SELECT count(*) FROM application
-          WHERE status = 'active'
+        /*
+          Every line carries the same scope predicate. These three once read the bare table,
+          which counted stale, unscanned and pending applications in every estate -- including
+          ones the reader was never granted -- beside an eligible figure that did not.
+        */
+        (SELECT count(*) FROM application a
+          WHERE status = 'active' AND ${inGroup}
             AND last_scan_at IS NOT NULL
             AND last_scan_at < now() - ${staleInterval})::int AS stale,
-        (SELECT count(*) FROM application WHERE latest_scan_id IS NULL)::int AS never_scanned,
-        (SELECT count(*) FROM application WHERE status = 'pending_confirmation')::int AS pending
+        (SELECT count(*) FROM application a
+          WHERE latest_scan_id IS NULL AND ${inGroup})::int AS never_scanned,
+        (SELECT count(*) FROM application a
+          WHERE status = 'pending_confirmation' AND ${inGroup})::int AS pending
     `);
 
     /**
@@ -524,9 +531,11 @@ export class AnalyticsService {
         FULL OUTER JOIN pkgs_after n USING (application_id, name_key, ecosystem)
       )
       SELECT
-        (SELECT count(*) FROM scan WHERE created_at >= ${periodStart})::int AS scans,
-        (SELECT count(DISTINCT application_id) FROM scan
-          WHERE created_at >= ${periodStart})::int AS apps_scanned,
+        -- Scoped like every other line: a bare scan count reported the whole deployment.
+        (SELECT count(*) FROM scan s JOIN application a ON a.id = s.application_id
+          WHERE s.created_at >= ${periodStart} AND ${inGroup})::int AS scans,
+        (SELECT count(DISTINCT s.application_id) FROM scan s JOIN application a ON a.id = s.application_id
+          WHERE s.created_at >= ${periodStart} AND ${inGroup})::int AS apps_scanned,
         (SELECT count(*) FROM pairs)::int AS apps_compared,
         (SELECT count(*) FROM current_builds c
           WHERE NOT EXISTS (
