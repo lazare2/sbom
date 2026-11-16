@@ -94,6 +94,19 @@ export class InternalError extends AppError {
 export const PG_UNIQUE_VIOLATION = "23505";
 export const PG_FOREIGN_KEY_VIOLATION = "23503";
 
+/**
+ * Whether `err` is, or wraps, a Postgres error with this SQLSTATE.
+ *
+ * Follows the `cause` chain. Since drizzle-orm 0.44 every failed query is rethrown as a
+ * DrizzleQueryError with the driver's error as its `cause`, so a check on the top-level
+ * `code` alone stops matching -- and every "duplicate -> 409" turns into a 500 without any
+ * test that mocks the driver noticing. Bounded, because a cause chain is untrusted shape.
+ */
 export function isPgError(err: unknown, code: string): boolean {
-  return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === code;
+  let current: unknown = err;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
+    if ((current as { code?: unknown }).code === code) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
