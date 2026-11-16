@@ -38,6 +38,20 @@ function Write-Step { param([string]$Text) Write-Host "==> $Text" -ForegroundCol
 function Write-Note { param([string]$Text) Write-Host "    $Text" -ForegroundColor DarkGray }
 
 <#
+    Writes text with Unix line endings and no byte-order mark.
+
+    images.env and images.txt are read by start.sh on Linux as well as by start.ps1. Written
+    the PowerShell way they end every line in CRLF, and `read` in sh keeps the CR: each image
+    name then carries a stray character, `docker image inspect` fails for all of them, and the
+    exported tags name images that do not exist. start.ps1 trims and never noticed.
+#>
+function Write-LfFile {
+    param([Parameter(Mandatory, ValueFromPipeline)][string]$Text, [Parameter(Mandatory)][string]$Path)
+    $lf = ($Text -replace "`r`n", "`n").TrimEnd("`n") + "`n"
+    [IO.File]::WriteAllText($Path, $lf, (New-Object Text.UTF8Encoding $false))
+}
+
+<#
     Runs docker and decides success from the exit code.
 
     Two Windows PowerShell 5.1 hazards are handled here, and both are silent
@@ -158,6 +172,57 @@ foreach ($file in @("docker-compose.yml", "start.ps1", "start.sh", "README.md"))
 }
 
 <#
+  The Linux installer: scripts, systemd units, and a Docker Engine for servers that have none.
+
+  Docker ships as its static binaries plus the Compose plugin, downloaded here on the build
+  machine and checked against the SHA-256 pinned in deploy/linux/docker/VERSIONS, so a server
+  never fetches Docker from a package repository. Cached under var/docker-static between builds.
+#>
+$linuxSource = Join-Path $deployDir "linux"
+$linuxTarget = Join-Path $bundleDir "linux"
+New-Item -ItemType Directory -Path (Join-Path $linuxTarget "docker") -Force | Out-Null
+# Rewritten with LF rather than copied: a Windows checkout may hold CRLF, and a CR at the
+# end of every line breaks both sh and systemd on the server.
+Get-ChildItem $linuxSource -File | ForEach-Object {
+    [IO.File]::ReadAllText($_.FullName) | Write-LfFile -Path (Join-Path $linuxTarget $_.Name)
+}
+Get-ChildItem (Join-Path $linuxSource "docker") -File | Where-Object { $_.Name -ne "VERSIONS" } |
+    ForEach-Object { [IO.File]::ReadAllText($_.FullName) | Write-LfFile -Path (Join-Path $linuxTarget "docker\$($_.Name)") }
+
+$pins = @{}
+foreach ($line in Get-Content (Join-Path $linuxSource "docker\VERSIONS")) {
+    if ($line -match '^\s*([A-Z0-9_]+)=(\S+)') { $pins[$Matches[1]] = $Matches[2] }
+}
+$cache = Join-Path $repoRoot "var\docker-static"
+New-Item -ItemType Directory -Path $cache -Force | Out-Null
+$downloads = @(
+    @{ Name = "docker-$($pins.DOCKER_VERSION).tgz"; Sha = $pins.DOCKER_SHA256
+       Url = "https://download.docker.com/linux/static/stable/x86_64/docker-$($pins.DOCKER_VERSION).tgz" },
+    @{ Name = "docker-compose-linux-x86_64"; Sha = $pins.COMPOSE_SHA256
+       Url = "https://github.com/docker/compose/releases/download/v$($pins.COMPOSE_VERSION)/docker-compose-linux-x86_64" }
+)
+$sums = @()
+foreach ($d in $downloads) {
+    $file = Join-Path $cache $d.Name
+    $have = (Test-Path $file) -and ((Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -eq $d.Sha)
+    if (-not $have) {
+        Write-Note "downloading $($d.Name)"
+        & curl.exe -sfL --max-time 600 -o $file $d.Url
+        if ($LASTEXITCODE -ne 0) { throw "Could not download $($d.Url)." }
+        $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+        if ($hash -ne $d.Sha) {
+            Remove-Item $file -Force
+            throw "$($d.Name) has SHA-256 $hash, but deploy/linux/docker/VERSIONS pins $($d.Sha). Not using it."
+        }
+    }
+    Copy-Item $file (Join-Path $linuxTarget "docker\$($d.Name)")
+    $sums += "$($d.Sha)  $($d.Name)"
+}
+# Read by `sha256sum -c` on the server, so LF and no byte-order mark.
+($sums -join "`n") | Write-LfFile -Path (Join-Path $linuxTarget "docker\SHA256SUMS")
+Write-Note "linux/ (installer, Docker $($pins.DOCKER_VERSION), Compose $($pins.COMPOSE_VERSION))"
+
+<#
   The certificate directory, which compose bind-mounts.
 
   Omitted from the bundle originally, on the assumption that Docker creates a missing
@@ -202,19 +267,6 @@ if errorlevel 1 (
 $launcher | Out-File -FilePath (Join-Path $bundleDir "start.cmd") -Encoding ascii
 Write-Note "start.cmd (for machines where script files are blocked)"
 
-<#
-    Writes text with Unix line endings and no byte-order mark.
-
-    images.env and images.txt are read by start.sh on Linux as well as by start.ps1. Written
-    the PowerShell way they end every line in CRLF, and `read` in sh keeps the CR: each image
-    name then carries a stray character, `docker image inspect` fails for all of them, and the
-    exported tags name images that do not exist. start.ps1 trims and never noticed.
-#>
-function Write-LfFile {
-    param([Parameter(Mandatory, ValueFromPipeline)][string]$Text, [Parameter(Mandatory)][string]$Path)
-    $lf = ($Text -replace "`r`n", "`n").TrimEnd("`n") + "`n"
-    [IO.File]::WriteAllText($Path, $lf, (New-Object Text.UTF8Encoding $false))
-}
 
 # The compose file resolves image tags from these, so a bundle built at one
 # version cannot accidentally start a differently-tagged image left on the host.

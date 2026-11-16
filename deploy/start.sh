@@ -44,11 +44,9 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 # --- 1. load the bundled images -------------------------------------------
-if [ ! -f images.tar ]; then
-  fail "images.tar is missing from this folder."
-  fail "Copy the whole bundle directory across, not just the scripts."
-  exit 1
-fi
+# The archive is needed only when an image is missing. SBOM_IMAGES_TAR lets the Linux
+# installer run this script in /opt/sbom-platform while the archive stays in the bundle.
+ARCHIVE="${SBOM_IMAGES_TAR:-images.tar}"
 
 needs_load=0
 if [ -f images.txt ]; then
@@ -66,8 +64,22 @@ else
 fi
 
 if [ "$needs_load" -eq 1 ]; then
+  if [ ! -f "$ARCHIVE" ]; then
+    fail "$ARCHIVE is missing, and the images it carries are not loaded yet."
+    fail "Copy the whole bundle directory across, not just the scripts."
+    exit 1
+  fi
   step "Loading container images (this takes a minute on first run)"
-  docker load --input images.tar
+  docker load --input "$ARCHIVE"
+  # Checked, not assumed: `docker load` can print an unpacking error for one image and still
+  # exit 0, and starting without it would only fail later with a far less obvious message.
+  if [ -f images.txt ]; then
+    while IFS= read -r image; do
+      image="$(printf '%s' "$image" | tr -d '\r')"
+      [ -z "$image" ] && continue
+      docker image inspect "$image" >/dev/null 2>&1 || { fail "Loading $ARCHIVE did not produce $image."; exit 1; }
+    done < images.txt
+  fi
 else
   step "Images already loaded"
 fi

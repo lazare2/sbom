@@ -1,0 +1,12 @@
+# One backup of the SBOM Platform. Run nightly by sbom-platform-backup.timer.
+#
+#   systemctl start sbom-platform-backup     # a backup now
+#   journalctl -u sbom-platform-backup       # what the last ones did
+[Unit]
+Description=SBOM Platform backup
+Requires=docker.service
+After=docker.service sbom-platform.service
+
+[Service]
+Type=oneshot
+ExecStart=@SBOM_HOME@/backup.sh --keep 7

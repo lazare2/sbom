@@ -1,0 +1,14 @@
+# Nightly backup of the SBOM Platform, kept for 7 days. Installed by linux/install.sh.
+#
+#   systemctl list-timers sbom-platform-backup
+[Unit]
+Description=Nightly SBOM Platform backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=30min
+# A server that was off at 02:30 backs up when it comes back.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

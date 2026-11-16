@@ -1,0 +1,27 @@
+# The SBOM Platform as a system service. Installed by linux/install.sh.
+#
+#   systemctl status sbom-platform
+#   systemctl restart sbom-platform
+#
+# Starts at boot with nobody signed in. The containers themselves are Docker's; this unit
+# brings them up (and recreates any that were removed) and stops them in order.
+[Unit]
+Description=SBOM Platform
+Documentation=file://@SBOM_HOME@/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=@SBOM_HOME@
+# .env names the images and every secret; nothing has to be exported first.
+ExecStart=/bin/sh -c 'exec docker compose up -d --remove-orphans'
+ExecStop=/bin/sh -c 'exec docker compose stop'
+# Migrations run when the API starts; a large database can take a while on an upgrade.
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
