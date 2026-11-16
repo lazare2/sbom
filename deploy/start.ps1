@@ -246,6 +246,19 @@ else {
       would otherwise have to be done by hand, on a machine where editing files is awkward.
     #>
     $existing = Get-Content $envPath -Raw
+    <#
+      The compose file no longer falls back to the password "sbom" when POSTGRES_PASSWORD is
+      missing. An installation that never had the key has been running on that fallback, so its
+      database was created with it: write it down rather than invent one the database never had.
+    #>
+    if ($existing -notmatch '(?m)^POSTGRES_PASSWORD=') {
+        Add-Content -Path $envPath -Encoding ascii -Value @"
+
+# Added by an upgrade: the password this database was created with.
+POSTGRES_PASSWORD=sbom
+"@
+        Write-Note "Recorded the existing database password in .env"
+    }
     if ($existing -notmatch '(?m)^SECRETS_KEY=') {
         Add-Content -Path $envPath -Encoding ascii -Value @"
 
@@ -277,6 +290,22 @@ if (Test-Path $imagesEnv) {
             Set-Item -Path "env:$($Matches[1])" -Value $Matches[2].Trim()
         }
     }
+    <#
+      Also recorded in .env, so `docker compose logs`, `ps` and `down` typed in this folder name
+      the same images without anyone setting variables first. Replaces existing lines, which an
+      earlier upgrade script may have written.
+    #>
+    $lines = @(Get-Content $envPath)
+    foreach ($key in "SBOM_IMAGE_API", "SBOM_IMAGE_WEB", "APP_VERSION") {
+        $value = [Environment]::GetEnvironmentVariable($key)
+        if (-not $value) { continue }
+        $found = $false
+        $lines = @($lines | ForEach-Object {
+                if ($_ -match "^$key=") { $found = $true; "$key=$value" } else { $_ }
+            })
+        if (-not $found) { $lines += "$key=$value" }
+    }
+    $lines | Out-File -FilePath $envPath -Encoding ascii
 }
 
 Write-Step "Starting the stack"

@@ -202,6 +202,20 @@ if errorlevel 1 (
 $launcher | Out-File -FilePath (Join-Path $bundleDir "start.cmd") -Encoding ascii
 Write-Note "start.cmd (for machines where script files are blocked)"
 
+<#
+    Writes text with Unix line endings and no byte-order mark.
+
+    images.env and images.txt are read by start.sh on Linux as well as by start.ps1. Written
+    the PowerShell way they end every line in CRLF, and `read` in sh keeps the CR: each image
+    name then carries a stray character, `docker image inspect` fails for all of them, and the
+    exported tags name images that do not exist. start.ps1 trims and never noticed.
+#>
+function Write-LfFile {
+    param([Parameter(Mandatory, ValueFromPipeline)][string]$Text, [Parameter(Mandatory)][string]$Path)
+    $lf = ($Text -replace "`r`n", "`n").TrimEnd("`n") + "`n"
+    [IO.File]::WriteAllText($Path, $lf, (New-Object Text.UTF8Encoding $false))
+}
+
 # The compose file resolves image tags from these, so a bundle built at one
 # version cannot accidentally start a differently-tagged image left on the host.
 @"
@@ -211,7 +225,7 @@ SBOM_IMAGE_WEB=$webImage
 # because .env is written once and then left alone, so an upgraded deployment would go
 # on reporting whichever version it was first installed at.
 APP_VERSION=$Version
-"@ | Out-File -FilePath (Join-Path $bundleDir "images.env") -Encoding ascii
+"@ | Write-LfFile -Path (Join-Path $bundleDir "images.env")
 
 # Read by the start scripts to decide whether `docker load` is needed at all,
 # which turns a one-minute wait into an instant start on every run after the
@@ -220,7 +234,7 @@ APP_VERSION=$Version
 $postgresImage
 $apiImage
 $webImage
-"@ | Out-File -FilePath (Join-Path $bundleDir "images.txt") -Encoding ascii
+"@ | Write-LfFile -Path (Join-Path $bundleDir "images.txt")
 
 # --- 3. save the images -----------------------------------------------------
 Write-Step "Saving images to a single archive (this is the slow part)"

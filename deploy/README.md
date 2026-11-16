@@ -23,17 +23,19 @@ docker compose up -d
 That pulls PostgreSQL, the API and the web image, creates the database, applies
 migrations, and creates the admin account. Nothing else is needed on the machine.
 
-Build `.env` from `.env.example`. Only three values are required:
+Build `.env` from `.env.example`. These values are required:
 
 ```
+SBOM_IMAGE_API=<registry>/sbom-api:<version>
+SBOM_IMAGE_WEB=<registry>/sbom-web:<version>
+POSTGRES_PASSWORD=<a generated password>
 SESSION_SECRET=<32+ random chars>
 BOOTSTRAP_ADMIN_EMAIL=admin@sbom.local
 BOOTSTRAP_ADMIN_PASSWORD=<a real password>
 ```
 
-The compose file already points at the published images (`defaullltt/sbom-api:0.1.0` and
-`defaullltt/sbom-web:0.1.0`), so no image variables are needed. Set `SBOM_IMAGE_API` and
-`SBOM_IMAGE_WEB` only to run your own build or pin an older version.
+The compose file has no default images and no default database password: name the images
+you published and pin their version, and generate the password like the secret below.
 
 Generate the secret rather than inventing one:
 
