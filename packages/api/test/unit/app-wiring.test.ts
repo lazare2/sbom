@@ -68,7 +68,11 @@ class FakeScanner implements VulnerabilityScanner {
 const config = loadConfig({
   NODE_ENV: "test",
   LOG_LEVEL: "silent",
-  DATABASE_URL: "postgres://sbom:sbom@127.0.0.1:5432/sbom_test",
+  // Port 1, not 5432: these tests assert what happens with no database, and on a machine
+  // where a local Postgres (or Docker's port forwarder in a bad state) holds 5432 the
+  // connection would succeed or hang instead of being refused, so the result depended on
+  // what else happened to be running. Nothing listens on port 1.
+  DATABASE_URL: "postgres://sbom:sbom@127.0.0.1:1/sbom_test",
   SESSION_SECRET: "t".repeat(48),
   INGEST_TOKENS: "test-ci:super-secret-ci-token",
   PUBLIC_URL: "http://localhost:5173",

@@ -28,7 +28,8 @@ import type { VulnerabilityScanner } from "../../src/services/scanner/index.js";
 const config = loadConfig({
   NODE_ENV: "test",
   LOG_LEVEL: "silent",
-  DATABASE_URL: "postgres://sbom:sbom@127.0.0.1:5432/sbom_test",
+  // Port 1: never a real database, whatever is running locally (see app-wiring.test.ts).
+  DATABASE_URL: "postgres://sbom:sbom@127.0.0.1:1/sbom_test",
   SESSION_SECRET: "t".repeat(48),
   PUBLIC_URL: "http://localhost:5173",
 });

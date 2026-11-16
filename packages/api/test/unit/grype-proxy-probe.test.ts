@@ -54,7 +54,17 @@ describe("reachability probe and proxies", () => {
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
         .mockResolvedValue(new Response("{}", { status: 200 }));
-      const runSpy = vi.spyOn(scanner as never, "run" as never);
+      /*
+        Mocked, not merely spied on. A bare spy calls through, and on a machine where grype is
+        installed (npm run grype:install) resolving the listing URL then starts the real
+        binary for `grype version` -- slow enough under a full parallel test run to time the
+        test out, and fast enough alone to pass, which is what made it flaky. A failing
+        result is enough here: the listing URL falls back to schema 6 and the probe is
+        still the thing under test.
+      */
+      const runSpy = vi
+        .spyOn(scanner as never, "run" as never)
+        .mockResolvedValue({ code: 1, stdout: "", stderr: "not run in this test", error: null } as never);
 
       const result = await scanner.checkReachable();
 
