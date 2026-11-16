@@ -20,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # The runtime image is node:22-alpine; test on the same major.
           node-version: 22
@@ -32,6 +32,11 @@ jobs:
       # is exactly the drift a release must not carry.
       - name: Install
         run: npm ci
+
+      # api and web import @sbom/shared through its built output, which a fresh checkout
+      # does not have yet.
+      - name: Build shared package
+        run: npm run build --workspace=@sbom/shared
 
       - name: Type check
         run: npm run typecheck
