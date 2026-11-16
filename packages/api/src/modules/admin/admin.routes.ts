@@ -661,7 +661,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.delete("/applications/:id/aliases/:aliasName", async (request, reply) => {
     const params = parseOrThrow(
-      z.object({ id: z.string().uuid(), aliasName: z.string().min(1).max(255) }),
+      z.object({ id: z.guid(), aliasName: z.string().min(1).max(255) }),
       request.params,
       "Params",
     );

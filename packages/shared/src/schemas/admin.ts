@@ -288,6 +288,6 @@ export const topComponentsQuerySchema = z.object({
   groupByName: z
     .enum(["true", "false"])
     .transform((v) => v === "true")
-    .default("false"),
+    .prefault("false"),
 });
 export type TopComponentsQuery = z.infer<typeof topComponentsQuerySchema>;

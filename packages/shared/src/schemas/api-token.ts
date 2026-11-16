@@ -142,5 +142,5 @@ export const API_TOKEN_SECRET_PREFIX = "sbp_";
  * row as a record; deleting is the deliberate choice, made to free a name for reuse.
  */
 export const tokenDeleteQuerySchema = z.object({
-  permanent: z.enum(["true", "false"]).transform((v) => v === "true").default("false"),
+  permanent: z.enum(["true", "false"]).transform((v) => v === "true").prefault("false"),
 });

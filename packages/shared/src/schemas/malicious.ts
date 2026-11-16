@@ -237,7 +237,7 @@ export const listMaliciousQuerySchema = paginationQuerySchema
     unacknowledged: z
       .enum(["true", "false"])
       .transform((v) => v === "true")
-      .default("false"),
+      .prefault("false"),
   })
   .merge(maliciousFindingSort.querySchema);
 export type ListMaliciousQuery = z.infer<typeof listMaliciousQuerySchema>;

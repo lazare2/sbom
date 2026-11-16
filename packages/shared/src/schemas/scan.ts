@@ -229,7 +229,7 @@ export const listRemovedComponentsQuerySchema = paginationQuerySchema
     ignoreVersion: z
       .enum(["true", "false"])
       .transform((v) => v === "true")
-      .default("false"),
+      .prefault("false"),
   })
   .merge(removedComponentSort.querySchema);
 export type ListRemovedComponentsQuery = z.infer<typeof listRemovedComponentsQuerySchema>;

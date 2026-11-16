@@ -1045,7 +1045,8 @@ export class SettingsService {
     const value = { ...DEFAULT_MALICIOUS_SETTINGS };
 
     if (stored && typeof stored === "object") {
-      for (const [key, fieldSchema] of Object.entries(updateMaliciousSettingsSchema.innerType().shape)) {
+      // Zod 4 keeps a refined object a ZodObject, so the shape is read directly.
+      for (const [key, fieldSchema] of Object.entries(updateMaliciousSettingsSchema.shape)) {
         const candidate = (stored as Record<string, unknown>)[key];
         if (candidate === undefined) continue;
         const field = fieldSchema.safeParse(candidate);

@@ -47,8 +47,9 @@ export interface SortTable<F extends string> {
    * value is always meaningful and no caller has to decide what `undefined` means.
    */
   readonly querySchema: z.ZodObject<{
-    sortBy: z.ZodDefault<z.ZodEnum<[F, ...F[]]>>;
-    sortDir: z.ZodDefault<z.ZodEnum<["asc", "desc"]>>;
+    // Zod 4 types an enum by a value map rather than a tuple.
+    sortBy: z.ZodDefault<z.ZodEnum<{ [k in F]: k }>>;
+    sortDir: z.ZodDefault<z.ZodEnum<{ asc: "asc"; desc: "desc" }>>;
   }>;
 }
 

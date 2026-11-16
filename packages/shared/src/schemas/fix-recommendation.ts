@@ -40,7 +40,7 @@ export const fixRecommendationQuerySchema = z.object({
   verify: z
     .enum(["true", "false"])
     .transform((v) => v === "true")
-    .default("true"),
+    .prefault("true"),
 });
 export type FixRecommendationQuery = z.infer<typeof fixRecommendationQuerySchema>;
 

@@ -1,4 +1,4 @@
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import { API_TOKEN_SECRET_PREFIX } from "@sbom/shared";
 import { isReadOnlyRequest } from "../auth/token-scope.js";
 import { ROUTE_CATALOG, type RouteAuth, type RouteMeta } from "./route-catalog.js";
@@ -161,11 +161,17 @@ export function buildOpenApiDocument(
           "application/json": {
             /*
               Generated from the same Zod the route validates with, so the document cannot
-              promise a field the server rejects. `$refStrategy: none` inlines definitions:
+              promise a field the server rejects. Definitions are inlined (Zod's default):
               a reader looking at one operation should not have to resolve a pointer to learn
-              what a field is.
+              what a field is. `io: "input"` describes what a client sends, before defaults and
+              transforms; `unrepresentable: "any"` lets a transform appear as an open schema
+              instead of failing the whole document.
             */
-            schema: zodToJsonSchema(meta.body, { target: "openApi3", $refStrategy: "none" }),
+            schema: z.toJSONSchema(meta.body, {
+              target: "openapi-3.0",
+              io: "input",
+              unrepresentable: "any",
+            }),
           },
         },
       };

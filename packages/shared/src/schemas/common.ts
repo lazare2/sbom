@@ -18,7 +18,12 @@ export interface Paginated<T> {
 // Sorting lives in ./sort.js, which owns the direction type along with the per-table
 // column declarations that both ends validate and render against.
 
-export const uuidSchema = z.string().uuid();
+/*
+  `z.guid()`, not `z.uuid()`: Zod 4's uuid() checks the RFC version and variant digits, while
+  Zod 3's accepted any 8-4-4-4-12 hex string. guid() is the Zod 3 behaviour, so an id that
+  validated before an upgrade still validates after it, whatever wrote it into the database.
+*/
+export const uuidSchema = z.guid();
 
 /** Component ids are bigints in Postgres; they cross the wire as strings to survive JSON. */
 export const componentIdSchema = z.string().regex(/^\d+$/, "must be a numeric id");

@@ -50,7 +50,7 @@ export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
 
 /** The authenticated principal, as returned by `GET /api/v1/auth/me`. */
 export const sessionUserSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(), // Zod 3's lenient uuid check; see uuidSchema in common.ts.
   email: z.string(),
   role: userRoleSchema,
   authProvider: authProviderNameSchema,

@@ -210,7 +210,8 @@ export const reportSettingsFieldsSchema = z.object({
   */
   smtpPort: z
     .union([z.number(), z.string().trim().regex(/^\d+$/, "must be a number")])
-    .pipe(z.coerce.number().int().min(1, "must be between 1 and 65535").max(65535, "must be between 1 and 65535")),
+    // Zod 4 types a coerced input as `unknown` unless told; the union above narrows it.
+    .pipe(z.coerce.number<string | number>().int().min(1, "must be between 1 and 65535").max(65535, "must be between 1 and 65535")),
   smtpEncryption: smtpEncryptionSchema,
   smtpFrom: z.union([z.literal(""), emailAddressSchema]),
   /*
