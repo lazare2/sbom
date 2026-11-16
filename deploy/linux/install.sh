@@ -2,8 +2,8 @@
 #
 # Installs the SBOM Platform on a Linux server as a system service.
 #
-#   sudo ./linux/install.sh              # from the unpacked offline bundle
-#   sudo ./linux/install.sh --port 9000
+#   sudo sh ./linux/install.sh           # from the unpacked offline bundle
+#   sudo sh ./linux/install.sh --port 9000
 #
 # What it does, with no internet connection at any point:
 #   1. Uses the server's Docker if it has one; otherwise installs the Docker Engine shipped
@@ -37,7 +37,7 @@ done
 . "$HERE/common.sh"
 
 # --- preflight -------------------------------------------------------------
-[ "$(id -u)" -eq 0 ] || die "Run as root: sudo $0"
+[ "$(id -u)" -eq 0 ] || die "Run as root: sudo sh $0"
 command -v systemctl >/dev/null 2>&1 || die "systemd is required (systemctl not found)."
 [ "$(uname -m)" = "x86_64" ] || die "Only x86_64 is supported; this machine is $(uname -m)."
 [ -f "$BUNDLE/images.tar" ] || die "images.tar is missing. Run this from the unpacked bundle folder."
@@ -72,6 +72,6 @@ echo "  Open          http://<this-server>:$(env_value "$TARGET/.env" SBOM_PORT)
 echo "  Status        systemctl status sbom-platform"
 echo "  Logs          cd $TARGET && docker compose logs -f"
 echo "  Backups       $(backup_dir) (nightly; now: sudo $TARGET/backup.sh)"
-echo "  Upgrade       sudo ./linux/upgrade.sh from the new bundle"
+echo "  Upgrade       sudo sh ./linux/upgrade.sh from the new bundle"
 echo ""
 note "Outbound connections it needs, and nothing else: see 'Network access' in $TARGET/README.md"

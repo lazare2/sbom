@@ -2,7 +2,7 @@
 #
 # Upgrades an installed SBOM Platform to the version in this bundle.
 #
-#   sudo ./linux/upgrade.sh          # from the unpacked NEW bundle
+#   sudo sh ./linux/upgrade.sh          # from the unpacked NEW bundle
 #
 #   1. Checks the installation and that this bundle is a different version.
 #   2. Stops the web and API containers (the database keeps running) and makes a backup,
@@ -22,7 +22,7 @@ BUNDLE="$(cd "$HERE/.." && pwd)"
 TARGET="${SBOM_HOME:-/opt/sbom-platform}"
 . "$HERE/common.sh"
 
-[ "$(id -u)" -eq 0 ] || die "Run as root: sudo $0"
+[ "$(id -u)" -eq 0 ] || die "Run as root: sudo sh $0"
 [ -f "$TARGET/.env" ] || die "No installation in $TARGET. Use linux/install.sh for a first install."
 [ -f "$BUNDLE/images.tar" ] || die "images.tar is missing. Run this from the unpacked NEW bundle."
 
@@ -37,7 +37,7 @@ cd "$TARGET"
 # --- 2. backup -------------------------------------------------------------
 step "Stopping the web and API containers"
 docker compose stop web api
-"$BUNDLE/linux/backup.sh" --dir "$TARGET" --keep 30
+sh "$BUNDLE/linux/backup.sh" --dir "$TARGET" --keep 30
 backup="$(ls -1d "$(backup_dir)"/[0-9]*-[0-9]* | sort | tail -n 1)"
 
 # --- 3. files --------------------------------------------------------------

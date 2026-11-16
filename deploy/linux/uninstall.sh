@@ -2,7 +2,7 @@
 #
 # Removes the SBOM Platform service. Keeps every piece of data.
 #
-#   sudo ./linux/uninstall.sh          # from the bundle the platform was installed from
+#   sudo sh ./linux/uninstall.sh          # from the bundle the platform was installed from
 #
 # Stops and removes the containers and the systemd units. Leaves in place: the Docker
 # volumes (database and stored SBOMs), /opt/sbom-platform with its .env, the backups, and
@@ -13,7 +13,7 @@ set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TARGET="${SBOM_HOME:-/opt/sbom-platform}"
 . "$HERE/common.sh"
-[ "$(id -u)" -eq 0 ] || die "Run as root: sudo $0"
+[ "$(id -u)" -eq 0 ] || die "Run as root: sudo sh $0"
 
 step "Stopping the service and its nightly backup"
 systemctl disable --now sbom-platform-backup.timer sbom-platform.service 2>/dev/null || true
