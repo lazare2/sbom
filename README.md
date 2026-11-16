@@ -76,7 +76,7 @@ packages/
       services/
         blob-store/       Raw SBOM storage (fs | s3)
         scanner/          Grype adapter: binary resolution, matching, DB updates
-    test/unit/            343 tests, no database required
+    test/unit/            Unit tests, no database required (npm test)
   web/
     src/
       lib/                API client, query hooks, URL-state, sorting, formatting
@@ -1980,15 +1980,19 @@ At roughly 1000 applications building a few times a day:
   known-exploited status are reported as the upstream feeds state them. Nothing here
   combines them into a single number, because a weighting invented by this platform would
   be carried into a meeting and acted on as though it meant something.
-- **Alerting.** No email, no webhooks. The platform is a place to look, not a thing that
-  interrupts you - consistent with there being no outbound mail anywhere in it.
+- **General alerting.** No webhooks, and no messages about ordinary vulnerabilities. The
+  platform is a place to look, not a thing that interrupts you. The one exception is a
+  malicious package: an email goes to the recipient list set under **Admin → Scanners →
+  Malicious packages**, because that is the one finding that cannot wait for somebody to
+  look.
 - **Elasticsearch or a search service.** Postgres with a trigram index is the
   right size for this.
 - **Email to user accounts.** No invites, notifications, or password-reset links,
   so an account identifier never has to be a deliverable address. Recovery is
   admin-driven; see [Accounts and passwords](#accounts-and-passwords). The only
-  outbound mail is the monthly report, to a recipient list configured on purpose,
-  and a deployment that leaves it unconfigured never connects to a relay.
+  outbound mail is the monthly report and the malicious-package alert, each to a
+  recipient list configured on purpose, and a deployment that leaves mail
+  unconfigured never connects to a relay.
 - **Self-service signup with access.** Password accounts are created by an admin
   only. Single sign-on can create an account on first sign-in, but that account
   reaches nothing until an admin grants it something or adds it to a squad.

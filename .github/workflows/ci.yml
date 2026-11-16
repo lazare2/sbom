@@ -1,0 +1,46 @@
+# Checks every push and pull request: install from the lock file, type check, test, build.
+#
+# Runs on Linux on purpose. The platform's containers are Linux, so a Linux runner catches
+# what a Windows-only check would not (case-sensitive paths, line endings, native modules).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The runtime image is node:22-alpine; test on the same major.
+          node-version: 22
+          cache: npm
+
+      # npm ci, not npm install: fails if package-lock.json and package.json disagree, which
+      # is exactly the drift a release must not carry.
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

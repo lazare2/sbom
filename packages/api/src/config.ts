@@ -77,13 +77,14 @@ const envSchema = z
     BLOB_STORE_S3_FORCE_PATH_STYLE: booleanish,
 
     /*
-     * There is no mail configuration.
+     * There is no mail configuration in the environment.
      *
      * User "emails" are login identifiers, not mailboxes, so the platform never
-     * sends anything: no invites, no password-reset links, no notifications.
+     * mails a user: no invites, no password-reset links, no notifications.
      * Password recovery is an admin issuing a credential through the admin
-     * panel. Anything that needs an SMTP server has been removed rather than
-     * left configurable-but-broken.
+     * panel. The two things that do send mail - the monthly report and the
+     * malicious-package alert - go to recipient lists an admin sets, over the
+     * SMTP relay configured under Admin -> Configuration, not through this file.
      */
 
     AUTH_PROVIDERS: z
