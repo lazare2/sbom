@@ -75,8 +75,10 @@ export async function planInputFor(
   db: Database,
   applicationId: string,
 ): Promise<{ findings: PlanFinding[]; context: PlanContext }> {
-  const scans = await db.execute<Row<{ latest_scan_id: string | null; os_pretty: string | null; image_ref: string | null }>>(sql`
-    SELECT a.latest_scan_id, s.os_pretty, s.image_ref
+  const scans = await db.execute<
+    Row<{ latest_scan_id: string | null; os_pretty: string | null; os_name: string | null; os_version: string | null; image_ref: string | null }>
+  >(sql`
+    SELECT a.latest_scan_id, s.os_pretty, s.os_name, s.os_version, s.image_ref
       FROM application a LEFT JOIN scan s ON s.id = a.latest_scan_id
      WHERE a.id = ${applicationId}::uuid
   `);
@@ -130,6 +132,16 @@ export async function planInputFor(
       paths: r.paths ?? [],
       pulledInBy: r.pulled_in_by ?? [],
     })),
-    context: { osPretty: scan.os_pretty, imageRef: scan.image_ref },
+    // The pretty name when the SBOM carried one, else "debian 12" from name and version.
+    context: {
+      osPretty: scan.os_pretty ?? (scan.os_name ? `${osLabel(scan.os_name)}${scan.os_version ? ` ${scan.os_version}` : ""}` : null),
+      imageRef: scan.image_ref,
+    },
   };
+}
+
+/** "debian" -> "Debian", "rhel" -> "RHEL": the distribution id as people write it. */
+function osLabel(id: string): string {
+  if (id.length <= 4 && !/[aeiou]/i.test(id.slice(1))) return id.toUpperCase();
+  return id.charAt(0).toUpperCase() + id.slice(1);
 }

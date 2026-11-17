@@ -43,7 +43,7 @@ import {
 } from "../components/Findings.tsx";
 import { ScanningDisabledNotice } from "../components/Severity.tsx";
 import { FixRecommendationsCard } from "../components/FixRecommendations.tsx";
-import { useApplicationVulnerabilities, useVulnStatus } from "../lib/queries.ts";
+import { useApplicationVulnerabilities, useModules, useVulnStatus } from "../lib/queries.ts";
 import {
   Badge,
   Button,
@@ -122,8 +122,15 @@ export function ApplicationDetailPage() {
 
   const { data: app, isLoading, error, refetch } = useApplication(id);
   const { data: definitions } = useAttributeDefinitions();
+  /*
+    On or off from the module list, which answers at once. The vulnerability status endpoint
+    asks the scanner program and can take seconds on its first call; reading the switch from it
+    hid this tab and showed "switched off" until it answered.
+  */
+  const modules = useModules();
   const { data: vulnStatus } = useVulnStatus();
-  const vulnEnabled = vulnStatus?.enabled === true;
+  const vulnModule = modules.data?.modules.find((m) => m.id === "vulnerabilities");
+  const vulnEnabled = vulnModule ? vulnModule.enabled : vulnStatus?.enabled === true;
 
   if (isLoading) return <LoadingBlock label="Loading application" />;
   if (error) return <ErrorBanner error={error} onRetry={() => void refetch()} />;
