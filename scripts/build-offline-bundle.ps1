@@ -299,7 +299,8 @@ if (-not $NoWindows) {
         $qcow = Join-Path $vmCache "$imageTag.qcow2"
         if (-not (Test-Path $qcow) -or (Get-FileHash $qcow -Algorithm SHA512).Hash -ne $vmPins.DEBIAN_IMAGE_SHA512.ToUpper()) {
             Write-Step "Downloading the Debian cloud image"
-            Invoke-WebRequest -UseBasicParsing -Uri $vmPins.DEBIAN_IMAGE_URL -OutFile $qcow
+            & curl.exe -fL --retry 5 --retry-all-errors -sS -o $qcow $vmPins.DEBIAN_IMAGE_URL
+            if ($LASTEXITCODE -ne 0) { throw "Downloading $($vmPins.DEBIAN_IMAGE_URL) failed." }
             $hash = (Get-FileHash $qcow -Algorithm SHA512).Hash
             if ($hash -ne $vmPins.DEBIAN_IMAGE_SHA512.ToUpper()) {
                 Remove-Item $qcow -Force
@@ -307,8 +308,8 @@ if (-not $NoWindows) {
             }
         }
         Write-Step "Preparing the virtual machine disk (a few minutes)"
-        $mountCache = ($vmCache -replace '\', '/')
-        $mountScripts = ((Split-Path $bakeScript -Parent) -replace '\', '/')
+        $mountCache = ($vmCache -replace '\\', '/')
+        $mountScripts = ((Split-Path $bakeScript -Parent) -replace '\\', '/')
         Invoke-Docker @("run", "--rm", "--privileged", "-v", "$($mountCache):/w", "-v", "$($mountScripts):/s:ro", "debian:trixie",
             "bash", "/s/bake.sh", "/w/$imageTag.qcow2", "/w/sbom-vm-$imageTag-$bakeHash.vhdx") "Preparing the virtual machine disk failed."
     }

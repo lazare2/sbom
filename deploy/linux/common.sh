@@ -46,9 +46,18 @@ Install the 'nftables' or 'iptables' package from this server's operating-system
   fi
 
   step "Installing the bundled Docker Engine ($(basename "$tgz" .tgz), firewall: $firewall)"
-  if [ "$firewall" = "nftables" ] && [ ! -f /etc/docker/daemon.json ]; then
+  if [ "$firewall" = "nftables" ]; then
     install -d -m 0755 /etc/docker
-    printf '{\n  "firewall-backend": "nftables"\n}\n' > /etc/docker/daemon.json
+    if [ ! -f /etc/docker/daemon.json ]; then
+      printf '{\n  "firewall-backend": "nftables"\n}\n' > /etc/docker/daemon.json
+    elif ! grep -q '"firewall-backend"' /etc/docker/daemon.json; then
+      # The rest of an existing file is kept; only this key is added.
+      sed -i '0,/{/s//{\n  "firewall-backend": "nftables",/' /etc/docker/daemon.json
+    fi
+    # With the nftables backend Docker does not switch on IP forwarding itself (with iptables
+    # it does), and without it the daemon refuses to start: "IPv4 forwarding is disabled".
+    printf 'net.ipv4.ip_forward = 1\n' > /etc/sysctl.d/90-sbom-platform-docker.conf
+    sysctl -q -w net.ipv4.ip_forward=1
   fi
   ( cd "$local_dir" && sha256sum -c SHA256SUMS >/dev/null ) || die "The bundled Docker files do not match SHA256SUMS: the bundle is damaged."
   tmp="$(mktemp -d)"

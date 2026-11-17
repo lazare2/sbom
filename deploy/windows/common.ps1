@@ -58,8 +58,24 @@ public static class SbomIsoWriter {
     $image.Root.AddTree((Resolve-Path $Folder).Path, $false)
     $result = $image.CreateResultImage()
     if (Test-Path $IsoPath) { Remove-Item -Force $IsoPath }
-    [SbomIsoWriter]::Save($result.ImageStream, $IsoPath)
-    [Runtime.InteropServices.Marshal]::ReleaseComObject($image) | Out-Null
+    $stream = $result.ImageStream
+    try { [SbomIsoWriter]::Save($stream, $IsoPath) }
+    finally {
+        # IMAPI keeps every source file open until its objects are released; the staging folder
+        # (which can hold a moved installation's secrets) could not be deleted otherwise.
+        foreach ($o in @($stream, $result, $image)) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($o) }
+        $stream = $null; $result = $null; $image = $null
+        [GC]::Collect(); [GC]::WaitForPendingFinalizers(); [GC]::Collect()
+    }
+}
+
+# Deletes a folder, retrying while Windows still holds a file in it.
+function Remove-FolderSafely {
+    param([Parameter(Mandatory)][string]$Path)
+    for ($i = 0; $i -lt 10 -and (Test-Path $Path); $i++) {
+        try { Remove-Item -Recurse -Force $Path -ErrorAction Stop } catch { Start-Sleep -Seconds 2 }
+    }
+    if (Test-Path $Path) { Write-Host "Could not delete $Path; delete it by hand." -ForegroundColor Yellow }
 }
 
 # Runs a command in the virtual machine over SSH with the installation's own key.

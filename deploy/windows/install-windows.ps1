@@ -222,7 +222,7 @@ SBOM_NO_PROXY='$NoProxy'
 
 $iso = Join-Path $vmDir "sbom-install.iso"
 New-IsoFromFolder -Folder $stage -IsoPath $iso
-Remove-Item -Recurse -Force $stage
+Remove-FolderSafely $stage
 Write-Note ("disc {0:N0} MB" -f ((Get-Item $iso).Length / 1MB))
 
 # --- network ----------------------------------------------------------------------------

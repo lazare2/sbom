@@ -80,7 +80,7 @@ foreach ($dir in @("linux", "ca")) {
 }
 $iso = Join-Path $InstallRoot "vm\sbom-upgrade.iso"
 New-IsoFromFolder -Folder $stage -IsoPath $iso -Label "sbomupgrade"
-Remove-Item -Recurse -Force $stage
+Remove-FolderSafely $stage
 
 $dvd = Get-VMDvdDrive -VMName $SbomVmName | Select-Object -First 1
 if (-not $dvd) { Stop-WithError "The machine has no DVD drive. Shut it down, add one in Hyper-V Manager, and run this again." }

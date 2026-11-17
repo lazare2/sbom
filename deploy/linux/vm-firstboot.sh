@@ -46,10 +46,10 @@ chmod 0700 /srv/sbom/backups
 mkdir -p /var/backups
 [ -e /var/backups/sbom-platform ] || ln -s /srv/sbom/backups /var/backups/sbom-platform
 
-# Docker keeps its data on the data disk. The image has nftables and no iptables.
+# Docker keeps its data on the data disk. The firewall backend is the installer's choice.
 mkdir -p /etc/docker
 if [ ! -f /etc/docker/daemon.json ]; then
-  printf '{\n  "data-root": "/srv/sbom/docker",\n  "firewall-backend": "nftables"\n}\n' > /etc/docker/daemon.json
+  printf '{\n  "data-root": "/srv/sbom/docker"\n}\n' > /etc/docker/daemon.json
 fi
 
 # --- 2. settings from the installer ------------------------------------------------------
