@@ -283,7 +283,10 @@ uploading them in **Administration** (see [Vulnerability scanning](#vulnerabilit
 Inbound, people need only the web port (`SBOM_PORT`, 8080 by default) and CI servers the
 same port for `POST /api/v1/scans`.
 
-Behind a proxy, set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in `.env` and restart.
+Behind a proxy, set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in `.env` and restart. Every
+outbound call then goes through the proxy, except the hosts in `NO_PROXY`: keep
+`localhost,127.0.0.1,db,api,web` there and add internal systems reached directly, such as an
+internal JFrog Xray or mail relay.
 
 ---
 
