@@ -310,7 +310,7 @@ const APP_EXPORT_COLUMNS: ExportColumn<PackageApplicationEntry>[] = [
  * Fetched when the row opens, not with the search: a search for a common substring can list
  * hundreds of packages, and nobody opens more than a few.
  */
-function PackageDetailPanel({
+export function PackageDetailPanel({
   name,
   ecosystem,
   environmentId,

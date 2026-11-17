@@ -263,3 +263,46 @@ export interface ComponentSuggestion {
   ecosystem: string;
   versionCount: number;
 }
+
+// --- Package page (step 7) ---------------------------------------------------------------
+
+export const packageRefQuerySchema = z.object({
+  ecosystem: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1).max(255),
+});
+
+/** "Is this version safe to add?" - one version, put to the scanner. */
+export const versionCheckQuerySchema = packageRefQuerySchema.extend({
+  version: z.string().trim().min(1).max(128),
+});
+
+export interface PackageRecommendation {
+  name: string;
+  ecosystem: string;
+  /**
+   * The version every action plan recommends too: the lowest that clears every advisory with a
+   * fix reported against the package in this environment, never below the newest in use. Null
+   * when no advisory has a fix, or nothing is known against it.
+   */
+  recommendedVersion: string | null;
+  clears: number;
+  withoutFix: number;
+}
+
+export interface VersionCheck {
+  name: string;
+  ecosystem: string;
+  version: string;
+  /**
+   * `no_known`: the scanner knows nothing against it in the database it has - not a promise.
+   * `not_assessed`: the scanner cannot judge this kind of package. `unavailable`: no database.
+   */
+  status: "no_known" | "vulnerable" | "not_assessed" | "unavailable";
+  advisories: Array<{ vulnerabilityId: string; severity: VulnSeverityLike; fixedIn: string | null }>;
+  message: string | null;
+  databaseBuiltAt: string | null;
+  /** The package page's recommended version, when the package is in use here. */
+  recommendedVersion: string | null;
+}
+
+type VulnSeverityLike = "critical" | "high" | "medium" | "low" | "negligible" | "unknown";

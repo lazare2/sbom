@@ -84,6 +84,23 @@ export function Layout() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
+            {/* One box for a project, a package or a CVE. */}
+            <form
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const q = String(new FormData(e.currentTarget).get("q") ?? "").trim();
+                if (q) navigate(`/find?q=${encodeURIComponent(q)}`);
+              }}
+            >
+              <input
+                name="q"
+                type="search"
+                placeholder="Project, package or CVE…"
+                aria-label="Search projects, packages and vulnerabilities"
+                className="h-[30px] w-56 rounded-md border border-border-strong bg-bg-raised px-2 text-sm text-text-base"
+              />
+            </form>
             {/*
               Beside the account rather than in the navigation, because it is not a place to
               go -- it changes what every other item in the navigation means.

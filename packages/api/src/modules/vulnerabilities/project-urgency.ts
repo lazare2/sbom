@@ -106,16 +106,16 @@ export async function urgencyCountsFor(
 export async function planInputFor(
   db: Database,
   applicationId: string,
-): Promise<{ findings: PlanFinding[]; context: PlanContext }> {
+): Promise<{ findings: PlanFinding[]; context: PlanContext; environmentId: string | null }> {
   const scans = await db.execute<
-    Row<{ latest_scan_id: string | null; os_pretty: string | null; os_name: string | null; os_version: string | null; image_ref: string | null }>
+    Row<{ latest_scan_id: string | null; environment_id: string; os_pretty: string | null; os_name: string | null; os_version: string | null; image_ref: string | null }>
   >(sql`
-    SELECT a.latest_scan_id, s.os_pretty, s.os_name, s.os_version, s.image_ref
+    SELECT a.latest_scan_id, a.environment_id, s.os_pretty, s.os_name, s.os_version, s.image_ref
       FROM application a LEFT JOIN scan s ON s.id = a.latest_scan_id
      WHERE a.id = ${applicationId}::uuid
   `);
   const scan = rowsOf(scans)[0];
-  if (!scan?.latest_scan_id) return { findings: [], context: { osPretty: null, imageRef: null } };
+  if (!scan?.latest_scan_id) return { findings: [], context: { osPretty: null, imageRef: null }, environmentId: scan?.environment_id ?? null };
 
   const rows = await db.execute<
     Row<{
@@ -172,6 +172,7 @@ export async function planInputFor(
       osPretty: scan.os_pretty ?? (scan.os_name ? `${osLabel(scan.os_name)}${scan.os_version ? ` ${scan.os_version}` : ""}` : null),
       imageRef: scan.image_ref,
     },
+    environmentId: scan.environment_id,
   };
 }
 

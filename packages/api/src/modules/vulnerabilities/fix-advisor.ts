@@ -626,6 +626,35 @@ export class FixAdvisorService {
   }
 
   /**
+   * "Is this version safe to add?" - one package version put to the scanner, exactly as a
+   * recommended version is checked, and cached the same way.
+   *
+   * `not_assessed` when the scanner declines the package (no coordinate it understands), which
+   * is reported as such and never as clean.
+   */
+  async checkVersion(input: { name: string; ecosystem: string; version: string; purl: string }): Promise<
+    | { status: "checked"; findings: CandidateFinding[]; databaseBuiltAt: string }
+    | { status: "not_assessed" | "unavailable"; message: string; databaseBuiltAt: string | null }
+  > {
+    const watermark = await this.currentWatermark();
+    if (watermark === null) {
+      return { status: "unavailable", message: "The scanner has no usable vulnerability database right now.", databaseBuiltAt: null };
+    }
+    const plan = { key: "", name: input.name, ecosystem: input.ecosystem } as PackagePlan;
+    const result = await this.lookup([{ plan, version: input.version, purl: input.purl }], watermark);
+    const found = result.answers.get(input.purl);
+    if (result.failure) return { status: "unavailable", message: result.failure, databaseBuiltAt: watermark.toISOString() };
+    if (found === undefined) {
+      return {
+        status: "not_assessed",
+        message: "The scanner could not assess this package: it has no data for this kind of package.",
+        databaseBuiltAt: watermark.toISOString(),
+      };
+    }
+    return { status: "checked", findings: found, databaseBuiltAt: watermark.toISOString() };
+  }
+
+  /**
    * Answers for a set of candidate purls: from the cache where it is current, from the scanner
    * otherwise. Never throws - a scanner failure becomes a message, and the recommendations it
    * could not check are reported as unverified.

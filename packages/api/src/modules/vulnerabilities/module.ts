@@ -1,8 +1,10 @@
 import { acceptRiskSchema } from "@sbom/shared";
 import type { PlatformModule } from "../platform/module.js";
 import { acceptRiskRoutes } from "./accept-risk.routes.js";
+import { packageRoutes } from "./package.routes.js";
 import { buildActionPlan } from "./action-plan.js";
 import { planInputFor, urgencyCountsFor } from "./project-urgency.js";
+import { recommendedVersions } from "./recommend.js";
 import { updateVulnSettings, vulnAdminRoutes } from "./vuln-admin.routes.js";
 import { vulnerabilityRoutes, vulnStatusRoutes } from "./vulnerability.routes.js";
 
@@ -37,9 +39,27 @@ export const vulnerabilitiesModule: PlatformModule = {
     { prefix: "/admin/vuln", access: "admin", plugin: vulnAdminRoutes },
     // Team leads (and administrators) accepting a risk on one project. Checks the lead itself.
     { prefix: "", access: "user", plugin: acceptRiskRoutes },
+    // The package page: its recommended version, and "is this version safe to add?".
+    { prefix: "", access: "user", plugin: packageRoutes },
   ],
 
   routeDocs: {
+    "GET /api/v1/packages/recommendation": {
+      summary: "The recommended version of a package in the selected environment - the same one every action plan names.",
+      tag: "Vulnerabilities",
+      auth: "user",
+      notes:
+        "The lowest version that clears every advisory with a fix reported against the package in a " +
+        "current build in this environment, never below the newest version in use.",
+    },
+    "GET /api/v1/packages/check": {
+      summary: "Is this version safe to add? Puts one package version to the scanner.",
+      tag: "Vulnerabilities",
+      auth: "user",
+      notes:
+        "no_known means the scanner knows nothing against it in its current database - not a " +
+        "guarantee. not_assessed when the scanner cannot judge that kind of package. Rate limited.",
+    },
     "POST /api/v1/applications/:id/accepted-risks": {
       summary: "Accept a risk on one project: for its squad's team leads and for administrators.",
       tag: "Vulnerabilities",
@@ -75,9 +95,12 @@ export const vulnerabilitiesModule: PlatformModule = {
   /** One line per package to upgrade, one for the base image, one for what has no fix yet. */
   actionPlan: {
     async actions(ctx, request) {
-      const { findings, context } = await planInputFor(ctx.db, request.applicationId);
+      const { findings, context, environmentId } = await planInputFor(ctx.db, request.applicationId);
       const targets = await ctx.settings.getTargetDates();
-      return buildActionPlan(findings, context, { targets, since: request.since, now: new Date() });
+      const recommended = environmentId
+        ? await recommendedVersions(ctx.db, environmentId, findings.filter((f) => f.origin === "app"))
+        : new Map();
+      return buildActionPlan(findings, { ...context, recommended }, { targets, since: request.since, now: new Date() });
     },
   },
 

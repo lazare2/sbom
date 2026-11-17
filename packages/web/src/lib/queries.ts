@@ -1,6 +1,9 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
   ActionPlanResponse,
+  FindResults,
+  PackageRecommendation,
+  VersionCheck,
   MyTeamsResponse,
   TargetDates,
   MyProjectsResponse,
@@ -981,6 +984,33 @@ export function useModules() {
     queryKey: queryKeys.modules,
     queryFn: () => api.get<ModuleListResponse>("/modules"),
     staleTime: 60_000,
+  });
+}
+
+/** A package's recommended version - the one every action plan names too. */
+export function usePackageRecommendation(ecosystem: string, name: string) {
+  return useQuery({
+    queryKey: ["packages", "recommendation", ecosystem, name],
+    queryFn: () => api.get<PackageRecommendation>(`/packages/recommendation${toQueryString({ ecosystem, name })}`),
+  });
+}
+
+/** "Is this version safe to add?" Asked only when a version is submitted. */
+export function useVersionCheck(ecosystem: string, name: string, version: string | null) {
+  return useQuery({
+    queryKey: ["packages", "check", ecosystem, name, version],
+    queryFn: () => api.get<VersionCheck>(`/packages/check${toQueryString({ ecosystem, name, version })}`),
+    enabled: version !== null && version !== "",
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** One search box: projects, packages and vulnerabilities. */
+export function useFind(q: string) {
+  return useQuery({
+    queryKey: ["find", q],
+    queryFn: () => api.get<FindResults>(`/find${toQueryString({ q })}`),
+    enabled: q.trim().length > 0,
   });
 }
 

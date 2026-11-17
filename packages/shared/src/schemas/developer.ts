@@ -195,7 +195,7 @@ export interface MyProjectsResponse {
 export interface ActionPlanItem {
   /** Stable within the module, so a later build can be matched to the same action. */
   key: string;
-  kind: "upgrade" | "base-image" | "no-fix";
+  kind: "upgrade" | "base-image" | "no-fix" | "end-of-life";
   /** What to do, in plain words. */
   title: string;
   /** Why, in plain words. */
@@ -215,6 +215,8 @@ export interface ActionPlanItem {
   /** A line the developer can copy. */
   copyLine?: string;
   packageName?: string;
+  /** For the link to the package's page. */
+  packageEcosystem?: string;
   fromVersion?: string;
   toVersion?: string;
   /** The advisories behind it, for the link to the full list. */
@@ -307,4 +309,14 @@ export interface MyTeamsResponse {
   /** `lead`: the squads the person leads. `admin`: every squad, for an administrator who leads none. */
   viewAs: "lead" | "admin";
   generatedAt: string;
+}
+
+// --- One search box ----------------------------------------------------------------------
+
+export interface FindResults {
+  query: string;
+  projects: Array<{ applicationId: string; name: string }>;
+  packages: Array<{ name: string; ecosystem: string; versionCount: number }>;
+  /** Null when vulnerability scanning is switched off. */
+  advisories: Array<{ vulnerabilityId: string; aliases: string[]; severity: string; currentApplications: number }> | null;
 }

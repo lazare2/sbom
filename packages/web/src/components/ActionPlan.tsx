@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import {
   PROJECT_STATUS_LABELS,
   type ActionPlanResponse,
@@ -126,6 +127,14 @@ export function ActionPlanPanel({ applicationId, onShowAll }: { applicationId: s
                 <span className="nums w-5 text-sm text-text-faint">{item.kind === "no-fix" ? "" : `${index + 1}.`}</span>
                 <Badge tone={URGENCY_TONE[item.urgency]}>{URGENCY_LABEL[item.urgency]}</Badge>
                 <span className="text-sm font-medium text-text-base">{item.title}</span>
+                {item.kind === "upgrade" && item.packageName && item.packageEcosystem ? (
+                  <Link
+                    to={`/packages/${encodeURIComponent(item.packageEcosystem)}/${encodeURIComponent(item.packageName)}`}
+                    className="text-xs text-accent hover:underline"
+                  >
+                    package page
+                  </Link>
+                ) : null}
                 {item.isNew ? (
                   <Badge tone="info" title="Appeared after your previous visit to this project.">
                     New

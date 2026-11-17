@@ -87,6 +87,11 @@ export interface PlanContext {
   /** The base image's distribution, e.g. "Debian GNU/Linux 12 (bookworm)". */
   osPretty: string | null;
   imageRef: string | null;
+  /**
+   * The environment-wide recommended version per package (recommend.ts), so the action plan and
+   * the package page name the same version. Keyed `ecosystem:name`, lower case.
+   */
+  recommended?: ReadonlyMap<string, { version: string | null }>;
 }
 
 const URGENCY_RANK: Record<Urgency, number> = { now: 0, soon: 1, later: 2, none: 3 };
@@ -225,7 +230,8 @@ export function buildActionPlan(
     const plan = planPackages(rows.map(toFindingInput))[0];
     const first = rows[0]!;
     const from = plan?.installedVersions[plan.installedVersions.length - 1] ?? first.version;
-    const to = plan?.minimumVersion ?? null;
+    // The package page's version where there is one; this project's own minimum otherwise.
+    const to = context.recommended?.get(key)?.version ?? plan?.minimumVersion ?? null;
     const urgency = mostUrgent(rows);
     const size = changeSize(from, to);
     const pulledInBy = [...new Set(rows.flatMap((r) => r.pulledInBy))];
@@ -255,6 +261,7 @@ export function buildActionPlan(
       ...(where ? { where } : {}),
       ...(copyLine ? { copyLine } : {}),
       packageName: first.name,
+      packageEcosystem: first.ecosystem,
       ...(from ? { fromVersion: from } : {}),
       ...(to ? { toVersion: to } : {}),
       vulnerabilityIds: [...new Set(rows.map((r) => r.vulnerabilityId))],

@@ -1,3 +1,4 @@
+import { SupportMarks } from "../components/SupportMarks.tsx";
 import { ActionPlanPanel } from "../components/ActionPlan.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
@@ -240,6 +241,7 @@ export function ApplicationDetailPage() {
               */}
               <Field label="Runs on">
                 <PlatformChips platform={app.platform} linkFilters />
+                <SupportMarks platform={app.platform} />
               </Field>
             </div>
             <Field label="First seen">{formatDateTime(app.createdAt)}</Field>

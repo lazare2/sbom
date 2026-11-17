@@ -3,6 +3,8 @@ import { AdminVulnerabilitiesPage } from "../pages/admin/AdminVulnerabilitiesPag
 import { MaliciousPage } from "../pages/MaliciousPage.tsx";
 import { MyProjectsPage } from "../pages/MyProjectsPage.tsx";
 import { MyTeamsPage } from "../pages/MyTeamsPage.tsx";
+import { FindPage } from "../pages/FindPage.tsx";
+import { PackagePage } from "../pages/PackagePage.tsx";
 import { AdvisoryDetailPage, VulnerabilitiesPage } from "../pages/VulnerabilitiesPage.tsx";
 import type { WebModule } from "./types.ts";
 
@@ -23,6 +25,8 @@ export const WEB_MODULES: readonly WebModule[] = [
     routes: [
       { path: "/my-projects", element: <MyProjectsPage /> },
       { path: "/my-teams", element: <MyTeamsPage /> },
+      { path: "/find", element: <FindPage /> },
+      { path: "/packages/:ecosystem/:name", element: <PackagePage /> },
     ],
   },
   {
