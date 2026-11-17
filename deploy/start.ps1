@@ -341,7 +341,6 @@ if ($ready) {
     Write-Host ""
     Write-Host "  Logs        docker compose logs -f" -ForegroundColor DarkGray
     Write-Host "  Stop        docker compose down          (data is kept)" -ForegroundColor DarkGray
-    Write-Host "  Erase all   docker compose down -v       (deletes every scan)" -ForegroundColor DarkGray
 }
 else {
     Write-Host "The stack started but did not answer on port $effectivePort within two minutes." -ForegroundColor Yellow

@@ -263,7 +263,6 @@ if [ "$ready" -eq 1 ]; then
   echo ""
   note "Logs        docker compose logs -f"
   note "Stop        docker compose down          (data is kept)"
-  note "Erase all   docker compose down -v       (deletes every scan)"
 else
   printf '\033[33mThe stack started but did not answer on port %s within two minutes.\033[0m\n' "$EFFECTIVE_PORT"
   echo "Check the logs:  docker compose logs --tail=80"

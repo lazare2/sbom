@@ -128,10 +128,10 @@ machines sharing a session-signing key.
 | Follow the logs | `docker compose logs -f` |
 | Just the API's logs | `docker compose logs -f api` |
 | Status | `docker compose ps` |
-| **Erase everything** | `docker compose down -v` |
+| Back up | see [Backups](#backups) |
 
-`docker compose down -v` deletes the volumes: every scan, every application, and
-every stored SBOM. There is no undo.
+Never add `-v` to `docker compose down`: it deletes the volumes, that is every scan,
+every application and every stored SBOM, with no undo. Upgrades never need it.
 
 ---
 
