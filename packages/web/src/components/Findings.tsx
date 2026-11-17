@@ -21,6 +21,8 @@ import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx"
 import { advisoryHeadline } from "../lib/advisory.ts";
 import { FixCell, FoundBy } from "./ScannerSources.tsx";
 import { ExportTableButton, exportList, fetchAllPages, locationColumns, type ExportColumn } from "./ExportTable.tsx";
+import { ATTACK_VECTOR_OPTIONS, AttackVectorBadge, attackVectorOptionLabel, exportAttackVector } from "./AttackVector.tsx";
+import type { AttackVectorFilter } from "@sbom/shared";
 import { SEVERITY_ORDER, SeverityBadge, SeverityBar } from "./Severity.tsx";
 import {
   Badge,
@@ -58,6 +60,10 @@ export interface FindingsFilters {
   severity: VulnSeverity | "";
   fixable: boolean;
   knownExploited: boolean;
+  /** Where an attacker has to be, from the CVSS vector; empty for any. */
+  attackVector: AttackVectorFilter | "";
+  /** Only findings needing neither a sign-in nor anybody's action. */
+  noPrerequisites: boolean;
   includeSuppressed: boolean;
   sortBy: (typeof findingSort)["fields"][number];
   sortDir: SortDirection;
@@ -78,6 +84,8 @@ export const DEFAULT_FINDINGS_FILTERS: FindingsFilters = {
   severity: "",
   fixable: false,
   knownExploited: false,
+  attackVector: "",
+  noPrerequisites: false,
   includeSuppressed: false,
   page: 1,
 };
@@ -179,6 +187,20 @@ export function FindingsFilterBar({
         onChange={(knownExploited) => onChange({ knownExploited, page: 1 })}
         label="Known exploited"
       />
+      <Select
+        value={filters.attackVector}
+        onChange={(attackVector) => onChange({ attackVector: attackVector as AttackVectorFilter | "", page: 1 })}
+        ariaLabel="Attack from"
+        options={[
+          { value: "", label: "Attack from anywhere" },
+          ...ATTACK_VECTOR_OPTIONS.map((v) => ({ value: v, label: `Attack from: ${attackVectorOptionLabel(v)}` })),
+        ]}
+      />
+      <Checkbox
+        checked={filters.noPrerequisites}
+        onChange={(noPrerequisites) => onChange({ noPrerequisites, page: 1 })}
+        label="No sign-in or user action needed"
+      />
       <Checkbox
         checked={filters.includeSuppressed}
         onChange={(includeSuppressed) => onChange({ includeSuppressed, page: 1 })}
@@ -195,6 +217,8 @@ export function findingsParams(filters: FindingsFilters, pageSize = 50): Record<
     severity: filters.severity || undefined,
     fixable: filters.fixable ? "true" : undefined,
     knownExploited: filters.knownExploited ? "true" : undefined,
+    attackVector: filters.attackVector || undefined,
+    noPrerequisites: filters.noPrerequisites ? "true" : undefined,
     includeSuppressed: filters.includeSuppressed ? "true" : undefined,
     sortBy: filters.sortBy,
     sortDir: filters.sortDir,
@@ -257,6 +281,7 @@ export function FindingsTable({
               <Th onSort={on("cvss")} sorted={at("cvss")} width="90px">
                 CVSS
               </Th>
+              <Th width="120px">Attack from</Th>
               {isAdmin ? <Th width="110px" /> : null}
             </tr>
           </thead>
@@ -340,6 +365,9 @@ export function FindingsTable({
                   />
                 </Td>
                 <Td className="nums text-text-muted">{finding.cvssBaseScore?.toFixed(1) ?? " - "}</Td>
+                <Td>
+                  <AttackVectorBadge exploitability={finding.exploitability} />
+                </Td>
                 {isAdmin ? (
                   <Td>
                     {finding.suppressed ? null : (
@@ -580,6 +608,7 @@ export const FINDING_EXPORT_COLUMNS: ExportColumn<VulnerabilityFinding>[] = [
   { header: "CVSS", value: (f) => f.cvssBaseScore, width: 7 },
   { header: "EPSS", value: (f) => f.epssScore, width: 8 },
   { header: "Known exploited", value: (f) => (f.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Attack from", value: (f) => exportAttackVector(f.exploitability), width: 34 },
   { header: "Accepted risk", value: (f) => (f.suppressed ? "yes" : "no"), width: 13 },
   { header: "Accepted risk reason", value: (f) => f.suppressionReason, width: 30 },
   ...locationColumns<VulnerabilityFinding>((f) => f.location),

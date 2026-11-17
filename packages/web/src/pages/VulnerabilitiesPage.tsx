@@ -20,7 +20,8 @@ import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readBool, readEnum, readEnumList, readNumber, readString, readStringList, useUrlState } from "../lib/useUrlState.ts";
 import { SEVERITY_ORDER, SeverityBadge, ScanningDisabledNotice } from "../components/Severity.tsx";
-import { advisorySort, sortDirections, VULN_SCANNER_LABELS } from "@sbom/shared";
+import { advisorySort, attackVectorFilterValues, describeExploitability, isOpenRemoteAttack, sortDirections, VULN_SCANNER_LABELS, type AttackVectorFilter } from "@sbom/shared";
+import { ATTACK_VECTOR_OPTIONS, AttackVectorBadge, attackVectorOptionLabel, exportAttackVector } from "../components/AttackVector.tsx";
 import { useServerSort } from "../lib/useSort.ts";
 import { FixCell, FoundBy } from "../components/ScannerSources.tsx";
 import { advisoryHeadline, cweName, cweUrl, decodeCvss, groupReferences, REFERENCE_KIND_LABELS } from "../lib/advisory.ts";
@@ -68,6 +69,8 @@ const DEFAULTS = {
   owner: "",
   ecosystem: [] as string[],
   cvssMin: "",
+  attackVector: [] as AttackVectorFilter[],
+  noPrerequisites: false,
   epssMin: "",
   foundBy: [] as string[],
   singleSource: false,
@@ -100,6 +103,8 @@ const urlSpec = {
     owner: readString(params, "owner"),
     ecosystem: readStringList(params, "ecosystem"),
     cvssMin: readString(params, "cvssMin"),
+    attackVector: readEnumList(params, "attackVector", attackVectorFilterValues, []),
+    noPrerequisites: readBool(params, "noPrerequisites"),
     epssMin: readString(params, "epssMin"),
     foundBy: readStringList(params, "foundBy"),
     singleSource: readBool(params, "singleSource"),
@@ -220,6 +225,7 @@ export function VulnerabilitiesPage() {
                     <Th onSort={() => sort.toggle("cvss")} sorted={sort.stateOf("cvss")} align="right" width="80px">
                       CVSS
                     </Th>
+                    <Th width="120px">Attack from</Th>
                     <Th onSort={() => sort.toggle("epss")} sorted={sort.stateOf("epss")} align="right" width="80px">
                       EPSS
                     </Th>
@@ -280,6 +286,9 @@ export function VulnerabilitiesPage() {
                       </Td>
                       <Td align="right" className="nums text-text-muted">
                         {advisory.cvssBaseScore?.toFixed(1) ?? " - "}
+                      </Td>
+                      <Td>
+                        <AttackVectorBadge exploitability={advisory.exploitability} />
                       </Td>
                       <Td align="right" className="nums text-text-muted" title="Chance of exploitation in the next 30 days">
                         {advisory.epssScore === null ? " - " : `${(advisory.epssScore * 100).toFixed(1)}%`}
@@ -364,6 +373,10 @@ export function AdvisoryDetailPage() {
             </span>
             <span>{formatNumber(advisory.affectedPackages)} package versions</span>
             {advisory.fixAvailable ? <span className="text-ok">A fix is available</span> : null}
+            {/* Where an attacker has to be, in plain words, from the CVSS vector. */}
+            <span className={isOpenRemoteAttack(advisory.exploitability) ? "font-medium text-danger" : undefined}>
+              {describeExploitability(advisory.exploitability)}
+            </span>
           </span>
         }
         actions={
@@ -540,6 +553,7 @@ const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
   { header: "CVSS", value: (a) => a.cvssBaseScore, width: 7 },
   { header: "EPSS", value: (a) => a.epssScore, width: 8 },
   { header: "Known exploited", value: (a) => (a.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Attack from", value: (a) => exportAttackVector(a.exploitability), width: 34 },
   { header: "Summary", value: (a) => a.summary, width: 40 },
   { header: "Description", value: (a) => a.description, width: 60 },
   { header: "Weaknesses (CWE)", value: (a) => exportList(a.cwes), width: 18 },
@@ -731,6 +745,8 @@ function activeFilterCount(s: FilterState): number {
     s.owner !== "",
     s.ecosystem.length > 0,
     s.cvssMin !== "",
+    s.attackVector.length > 0,
+    s.noPrerequisites,
     s.epssMin !== "",
     s.foundBy.length > 0,
     s.singleSource,
@@ -757,6 +773,8 @@ function advisoryParams(s: FilterState): Record<string, unknown> {
     owner: s.owner || undefined,
     ecosystem: s.ecosystem,
     cvssMin: s.cvssMin || undefined,
+    attackVector: s.attackVector,
+    noPrerequisites: s.noPrerequisites ? "true" : undefined,
     epssMin: s.epssMin ? Number(s.epssMin) / 100 : undefined,
     foundBy: s.foundBy,
     singleSource: s.singleSource ? "true" : undefined,
@@ -959,6 +977,15 @@ function AdvisoryFilters({ state, setState }: { state: FilterState; setState: (p
                 ]}
               />
             </FilterField>
+            <FilterField label="Attack from">
+              <MultiSelect
+                label="Where an attacker has to be"
+                options={[...ATTACK_VECTOR_OPTIONS]}
+                selected={state.attackVector}
+                onChange={(attackVector) => set({ attackVector: attackVector as AttackVectorFilter[] })}
+                renderOption={attackVectorOptionLabel}
+              />
+            </FilterField>
             <FilterField label="Weakness (CWE)">
               <DebouncedText value={state.cwe} onCommit={(cwe) => set({ cwe })} placeholder="CWE-79" ariaLabel="CWE" />
             </FilterField>
@@ -1030,6 +1057,11 @@ function AdvisoryFilters({ state, setState }: { state: FilterState; setState: (p
         </div>
 
         <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border-base pt-3">
+          <Checkbox
+            checked={state.noPrerequisites}
+            onChange={(noPrerequisites) => set({ noPrerequisites })}
+            label="No sign-in or user action needed"
+          />
           <Checkbox
             checked={state.singleSource}
             onChange={(singleSource) => set({ singleSource })}
