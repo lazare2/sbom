@@ -319,7 +319,7 @@ function PackagesCard({
                     { header: "Advisories", value: (r: InventoryPackageEntry) => v(r)?.advisories ?? null, width: 10 },
                     { header: "Critical", value: (r: InventoryPackageEntry) => v(r)?.critical ?? null, width: 10 },
                     { header: "High", value: (r: InventoryPackageEntry) => v(r)?.high ?? null, width: 10 },
-                    { header: "Known exploited", value: (r: InventoryPackageEntry) => v(r)?.knownExploited ?? null, width: 10 },
+                    { header: "Used in real attacks", value: (r: InventoryPackageEntry) => v(r)?.knownExploited ?? null, width: 10 },
                     { header: "With a fix", value: (r: InventoryPackageEntry) => v(r)?.fixable ?? null, width: 10 },
                     {
                       header: "Vulnerable applications",
@@ -504,12 +504,12 @@ function OperatingSystemsCard({ rows, showVulns }: { rows: InventoryOsEntry[]; s
               ...(withVulns
                 ? [
                     { header: "Assessed applications", value: (r: InventoryOsEntry) => r.vulnerabilities?.assessedApplications ?? null, width: 12 },
-                    { header: "Findings", value: (r: InventoryOsEntry) => r.vulnerabilities?.findings ?? null, width: 10 },
+                    { header: "Vulnerabilities", value: (r: InventoryOsEntry) => r.vulnerabilities?.findings ?? null, width: 10 },
                     { header: "Average per application", value: (r: InventoryOsEntry) => r.vulnerabilities?.averageFindings ?? null, width: 12 },
                     { header: "Critical", value: (r: InventoryOsEntry) => r.vulnerabilities?.critical ?? null, width: 10 },
                     { header: "High", value: (r: InventoryOsEntry) => r.vulnerabilities?.high ?? null, width: 10 },
                     { header: "With a fix", value: (r: InventoryOsEntry) => r.vulnerabilities?.fixable ?? null, width: 10 },
-                    { header: "Known exploited", value: (r: InventoryOsEntry) => r.vulnerabilities?.knownExploited ?? null, width: 10 },
+                    { header: "Used in real attacks", value: (r: InventoryOsEntry) => r.vulnerabilities?.knownExploited ?? null, width: 10 },
                   ]
                 : []),
             ]}

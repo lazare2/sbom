@@ -31,3 +31,4 @@ export * from "./xlsx.js";
 export * from "./schemas/inventory.js";
 export * from "./schemas/module.js";
 export * from "./cvss.js";
+export * from "./schemas/developer.js";

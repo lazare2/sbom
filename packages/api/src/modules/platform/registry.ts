@@ -1,4 +1,8 @@
-import type { ModuleState } from "@sbom/shared";
+import type { ModuleState, ProjectUrgencyCounts } from "@sbom/shared";
+
+export const EMPTY_URGENCY_COUNTS: ProjectUrgencyCounts = {
+  total: 0, now: 0, nowUsedInAttacks: 0, soon: 0, later: 0, none: 0, noneSerious: 0,
+};
 import type { AppContext } from "../../context.js";
 import type { Actor } from "../admin/audit.service.js";
 import type { ReadAccess } from "../environments/environment.service.js";
@@ -74,6 +78,32 @@ export class ModuleRegistry {
     const state = (await this.states(ctx)).find((s) => s.id === id);
     if (!state) throw new NotFoundError(`No module "${id}".`);
     return state;
+  }
+
+  /**
+   * Urgency counts per project, summed over every switched-on module that reports them. `null`
+   * when none does - vulnerability scanning is off - so the caller can say so rather than report
+   * every project as having nothing to fix.
+   */
+  async urgencyCounts(
+    ctx: AppContext,
+    applicationIds: readonly string[],
+  ): Promise<Map<string, ProjectUrgencyCounts> | null> {
+    let any = false;
+    const total = new Map<string, ProjectUrgencyCounts>();
+    for (const id of applicationIds) total.set(id, { ...EMPTY_URGENCY_COUNTS });
+    for (const module of this.list) {
+      if (!module.projectUrgency) continue;
+      if (module.toggle && !(await module.toggle.enabled(ctx))) continue;
+      any = true;
+      const counts = await module.projectUrgency.counts(ctx, applicationIds);
+      for (const [appId, c] of counts) {
+        const t = total.get(appId);
+        if (!t) continue;
+        for (const k of Object.keys(t) as (keyof ProjectUrgencyCounts)[]) t[k] += c[k];
+      }
+    }
+    return any ? total : null;
   }
 
   /**

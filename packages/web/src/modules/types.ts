@@ -29,6 +29,8 @@ export interface ModuleNavItem {
   readonly label: string;
   /** Exact match for the active state. */
   readonly end?: boolean;
+  /** Before the core entries rather than after them. */
+  readonly first?: boolean;
 }
 
 export interface ModuleRoute {

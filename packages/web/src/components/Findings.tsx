@@ -106,7 +106,7 @@ export function BreakdownTiles({ breakdown }: { breakdown: VulnBreakdown }) {
     <div className="grid gap-4 border-b border-border-base p-4 sm:grid-cols-2">
       <div>
         <div className="flex items-baseline justify-between gap-2">
-          <p className="text-xs font-medium text-text-muted">Application dependencies</p>
+          <p className="text-xs font-medium text-text-muted">Your libraries</p>
           <p className="nums text-lg font-semibold text-text-base">{formatNumber(appTotal)}</p>
         </div>
         <SeverityBar counts={breakdown.app} total={scale} className="mt-2" />
@@ -117,7 +117,7 @@ export function BreakdownTiles({ breakdown }: { breakdown: VulnBreakdown }) {
             <>
               {" · "}
               <span className="font-medium text-danger">
-                {formatNumber(breakdown.appKnownExploited)} known exploited
+                {formatNumber(breakdown.appKnownExploited)} used in real attacks
               </span>
             </>
           ) : null}
@@ -149,7 +149,7 @@ export function BreakdownTiles({ breakdown }: { breakdown: VulnBreakdown }) {
 /** The scope choices, shared with the recommendations view so the two read alike. */
 export const FINDINGS_SCOPE_OPTIONS: Array<{ value: FindingsFilters["scope"]; label: string }> = [
   { value: "all", label: "Show all" },
-  { value: "app", label: "Application dependencies" },
+  { value: "app", label: "Your libraries" },
   { value: "os", label: "Base image and runtimes" },
 ];
 
@@ -185,7 +185,7 @@ export function FindingsFilterBar({
       <Checkbox
         checked={filters.knownExploited}
         onChange={(knownExploited) => onChange({ knownExploited, page: 1 })}
-        label="Known exploited"
+        label="Used in real attacks"
       />
       <Select
         value={filters.attackVector}
@@ -318,7 +318,7 @@ export function FindingsTable({
                     <span className="flex flex-wrap gap-1">
                       {finding.knownExploited ? (
                         <Badge tone="danger" title="On CISA's Known Exploited Vulnerabilities list.">
-                          exploited
+                          used in attacks
                         </Badge>
                       ) : null}
                       {finding.suppressed ? (
@@ -607,7 +607,7 @@ export const FINDING_EXPORT_COLUMNS: ExportColumn<VulnerabilityFinding>[] = [
   },
   { header: "CVSS", value: (f) => f.cvssBaseScore, width: 7 },
   { header: "EPSS", value: (f) => f.epssScore, width: 8 },
-  { header: "Known exploited", value: (f) => (f.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Used in real attacks", value: (f) => (f.knownExploited ? "yes" : "no"), width: 14 },
   { header: "Attack from", value: (f) => exportAttackVector(f.exploitability), width: 34 },
   { header: "Accepted risk", value: (f) => (f.suppressed ? "yes" : "no"), width: 13 },
   { header: "Accepted risk reason", value: (f) => f.suppressionReason, width: 30 },
@@ -648,7 +648,7 @@ export function FindingsCard({
             <FindingsFilterBar filters={filters} onChange={onChange} />
             {exportFrom ? (
               <ExportTableButton
-                title="Findings"
+                title="Vulnerabilities"
                 filename={exportFrom.filename}
                 fetchRows={(progress) =>
                   fetchAllPages<VulnerabilityFinding>(exportFrom.path, findingsParams(filters), progress)

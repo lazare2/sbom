@@ -357,7 +357,7 @@ function ComparisonCard() {
               { header: "Environment", value: (r) => r.name, width: 20 },
               { header: "Applications", value: (r) => r.applications.total, width: 12 },
               { header: "Active", value: (r) => r.applications.active, width: 8 },
-              { header: "Stale", value: (r) => r.applications.stale, width: 8 },
+              { header: "No recent build", value: (r) => r.applications.stale, width: 8 },
               { header: "Never scanned", value: (r) => r.applications.neverScanned, width: 14 },
               { header: "Builds", value: (r) => r.scans.total, width: 8 },
               { header: "Builds, last 7 days", value: (r) => r.scans.last7d, width: 18 },
@@ -395,7 +395,7 @@ function ComparisonCard() {
           <tbody>
             <MeasureRow label="Applications" rows={rows} value={(r) => r.applications.total} />
             <MeasureRow label="Active" rows={rows} value={(r) => r.applications.active} />
-            <MeasureRow label="Stale" rows={rows} value={(r) => r.applications.stale} />
+            <MeasureRow label="No recent build" rows={rows} value={(r) => r.applications.stale} />
             <MeasureRow
               label="Never scanned"
               rows={rows}

@@ -256,7 +256,7 @@ function Headline({ report }: { report: AnalyticsReport }) {
 // ---------------------------------------------------------------------------
 
 const FLAG_LABEL: Record<AttentionFlagKind, string> = {
-  known_exploited: "Known exploited",
+  known_exploited: "Used in real attacks",
   critical_fix_overdue: "Critical fix overdue",
   build_overdue: "Build overdue",
   vulnerabilities_rising: "Vulnerabilities rising",
@@ -940,7 +940,7 @@ function AttentionPackagesCard({ rows }: { rows: AttentionPackage[] }) {
               { header: "Applications", value: (r) => r.applications, width: 12 },
               { header: "Application names", value: (r) => exportList(r.applicationList), width: 40 },
               { header: "Critical advisories", value: (r) => r.critical, width: 12 },
-              { header: "Known exploited", value: (r) => r.knownExploited, width: 12 },
+              { header: "Used in real attacks", value: (r) => r.knownExploited, width: 12 },
               { header: "Affected versions in use", value: (r) => r.versionsInUse, width: 12 },
               { header: "Fixed in", value: (r) => exportList(r.fixVersions), width: 30 },
             ]}

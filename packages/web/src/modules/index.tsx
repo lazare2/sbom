@@ -1,6 +1,7 @@
 import { AdminMaliciousPage } from "../pages/admin/AdminMaliciousPage.tsx";
 import { AdminVulnerabilitiesPage } from "../pages/admin/AdminVulnerabilitiesPage.tsx";
 import { MaliciousPage } from "../pages/MaliciousPage.tsx";
+import { MyProjectsPage } from "../pages/MyProjectsPage.tsx";
 import { AdvisoryDetailPage, VulnerabilitiesPage } from "../pages/VulnerabilitiesPage.tsx";
 import type { WebModule } from "./types.ts";
 
@@ -11,6 +12,12 @@ import type { WebModule } from "./types.ts";
  * and name no module themselves.
  */
 export const WEB_MODULES: readonly WebModule[] = [
+  {
+    // Always on: the server has no switch for it, so it is always in the enabled list.
+    id: "developer",
+    nav: [{ to: "/my-projects", label: "My projects", first: true }],
+    routes: [{ path: "/my-projects", element: <MyProjectsPage /> }],
+  },
   {
     id: "vulnerabilities",
     nav: [{ to: "/vulnerabilities", label: "Vulnerabilities" }],

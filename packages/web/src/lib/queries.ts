@@ -1,5 +1,7 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
+  ActionPlanResponse,
+  MyProjectsResponse,
   AttentionSettings,
   ModuleListResponse,
   InventoryReport,
@@ -144,6 +146,9 @@ export const queryKeys = {
   ingestTokens: ["admin", "ingest-tokens"] as const,
   // --- modules ---
   modules: ["modules"] as const,
+  // --- developer view ---
+  myProjects: ["developer", "my-projects"] as const,
+  actionPlan: (id: string) => ["developer", "action-plan", id] as const,
   // --- vulnerabilities ---
   vulnStatus: ["vuln", "status"] as const,
   platformSettings: ["admin", "settings"] as const,
@@ -217,10 +222,24 @@ export interface ComponentVersionUsage {
 export function useAttributeDefinitions(includeInactive = false) {
   return useQuery({
     queryKey: [...queryKeys.attributeDefinitions, includeInactive],
-    queryFn: () =>
-      api.get<{ definitions: AttributeDefinition[] }>(
+    queryFn: async () => {
+      const result = await api.get<{ definitions: AttributeDefinition[] }>(
         `/attribute-definitions${includeInactive ? "?includeInactive=true" : ""}`,
-      ),
+      );
+      /*
+        The seeded "Severity" attribute reads as a vulnerability severity next to the real ones,
+        so everywhere it is shown it says what it means: how important the project is to the
+        business. A label only - the stored definition is untouched, and Administration ->
+        Attributes (which asks with includeInactive) shows and edits it as stored. An
+        administrator who renamed it keeps their own name.
+      */
+      if (includeInactive) return result;
+      return {
+        definitions: result.definitions.map((d) =>
+          d.key === "severity" && d.label === "Severity" ? { ...d, label: "Business importance" } : d,
+        ),
+      };
+    },
     // Near-static during a session: these change only when an admin edits them,
     // and that edit invalidates this key explicitly.
     staleTime: 10 * 60 * 1000,
@@ -960,6 +979,22 @@ export function useModules() {
     queryKey: queryKeys.modules,
     queryFn: () => api.get<ModuleListResponse>("/modules"),
     staleTime: 60_000,
+  });
+}
+
+/** The signed-in person's own projects, most urgent first. */
+export function useMyProjects() {
+  return useQuery({
+    queryKey: queryKeys.myProjects,
+    queryFn: () => api.get<MyProjectsResponse>("/my-projects"),
+  });
+}
+
+/** One project's status and action plan. */
+export function useActionPlan(applicationId: string) {
+  return useQuery({
+    queryKey: queryKeys.actionPlan(applicationId),
+    queryFn: () => api.get<ActionPlanResponse>(`/applications/${encodeURIComponent(applicationId)}/action-plan`),
   });
 }
 

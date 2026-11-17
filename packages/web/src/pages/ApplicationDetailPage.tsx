@@ -1,3 +1,4 @@
+import { ActionPlanPanel } from "../components/ActionPlan.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { RemovedComponent, ScanComponentEntry, ScanSummary, SeverityCounts, SortDirection } from "@sbom/shared";
@@ -68,14 +69,14 @@ import {
   Tr,
 } from "../components/ui.tsx";
 
-const TABS = ["components", "history", "removed", "changes", "vulnerabilities"] as const;
+const TABS = ["plan", "components", "history", "removed", "changes", "vulnerabilities"] as const;
 /** The two views inside the Vulnerabilities tab. */
 const VULN_VIEWS = ["findings", "recommendations"] as const;
 const COMPONENT_SORTS = componentListSort.fields;
 const DIRECTIONS = ["asc", "desc"] as const;
 
 const DEFAULTS = {
-  tab: "components" as (typeof TABS)[number],
+  tab: "plan" as (typeof TABS)[number],
   q: "",
   ecosystem: "",
   sortBy: componentListSort.defaultField,
@@ -96,7 +97,7 @@ const DEFAULTS = {
 const urlSpec = {
   defaults: DEFAULTS,
   parse: (params: URLSearchParams) => ({
-    tab: readEnum(params, "tab", TABS, "components"),
+    tab: readEnum(params, "tab", TABS, "plan"),
     q: readString(params, "q"),
     ecosystem: readString(params, "ecosystem"),
     sortBy: readEnum(params, "sortBy", COMPONENT_SORTS, componentListSort.defaultField),
@@ -141,7 +142,7 @@ export function ApplicationDetailPage() {
             <StatusBadge status={app.status} />
             {app.isStale ? (
               <Badge tone="warn" title="No scan received recently - the component list may be out of date.">
-                Stale
+                No recent build
               </Badge>
             ) : null}
           </span>
@@ -256,6 +257,8 @@ export function ApplicationDetailPage() {
       </div>
 
       <div role="tablist" aria-label="Application views" className="mb-3 flex gap-1 border-b border-border-base">
+        {/* First and opened by default: what to do, before the lists it is computed from. */}
+        <TabButton active={state.tab === "plan"} onClick={() => setState({ tab: "plan" })} label="Action plan" />
         <TabButton
           active={state.tab === "components"}
           onClick={() => setState({ tab: "components", page: 1 })}
@@ -285,7 +288,9 @@ export function ApplicationDetailPage() {
         />
       </div>
 
-      {state.tab === "components" ? (
+      {state.tab === "plan" ? (
+        <ActionPlanPanel applicationId={app.id} onShowAll={() => setState({ tab: "vulnerabilities", vulnView: "findings" })} />
+      ) : state.tab === "components" ? (
         <ComponentsTab
           applicationId={app.id}
           applicationName={app.name}
@@ -761,7 +766,7 @@ function VulnerabilitiesTab({
     <div role="tablist" aria-label="Vulnerability views" className="mb-3 flex gap-1 rounded-md bg-bg-subtle p-1 sm:w-fit">
       {(
         [
-          ["findings", "Findings"],
+          ["findings", "All vulnerabilities"],
           ["recommendations", "Recommendations"],
         ] as const
       ).map(([id, label]) => (

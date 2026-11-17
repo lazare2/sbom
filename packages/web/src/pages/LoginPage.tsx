@@ -102,7 +102,9 @@ export function LoginPage() {
       </div>
     );
   }
-  if (user) return <Navigate to={redirectTo} replace />;
+  // Developers land on their own projects; administrators on the overview. A link that sent
+  // somebody to sign in still wins.
+  if (user) return <Navigate to={from ? redirectTo : user.role === "admin" ? "/" : "/my-projects"} replace />;
 
   /*
     Tabs exist only where there is a second way in.

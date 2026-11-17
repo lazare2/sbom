@@ -20,7 +20,7 @@ import { useDebounced } from "../lib/useDebounced.ts";
 import { formatDateTime, formatNumber, formatRelative } from "../lib/format.ts";
 import { readBool, readEnum, readEnumList, readNumber, readString, readStringList, useUrlState } from "../lib/useUrlState.ts";
 import { SEVERITY_ORDER, SeverityBadge, ScanningDisabledNotice } from "../components/Severity.tsx";
-import { advisorySort, attackVectorFilterValues, describeExploitability, isOpenRemoteAttack, sortDirections, VULN_SCANNER_LABELS, type AttackVectorFilter } from "@sbom/shared";
+import { advisorySort, attackVectorFilterValues, describeExploitability, findingUrgency, isOpenRemoteAttack, osPackageEcosystems, type Urgency, sortDirections, VULN_SCANNER_LABELS, type AttackVectorFilter } from "@sbom/shared";
 import { ATTACK_VECTOR_OPTIONS, AttackVectorBadge, attackVectorOptionLabel, exportAttackVector } from "../components/AttackVector.tsx";
 import { useServerSort } from "../lib/useSort.ts";
 import { FixCell, FoundBy } from "../components/ScannerSources.tsx";
@@ -274,7 +274,7 @@ export function VulnerabilitiesPage() {
                           ) : null}
                           {advisory.knownExploited ? (
                             <Badge tone="danger" title="On CISA's Known Exploited Vulnerabilities list.">
-                              exploited
+                              used in attacks
                             </Badge>
                           ) : null}
                           <FoundBy scanners={advisory.foundBy} />
@@ -361,7 +361,7 @@ export function AdvisoryDetailPage() {
             <SeverityBadge severity={advisory.severity} />
             {advisory.knownExploited ? (
               <Badge tone="danger" title="On CISA's Known Exploited Vulnerabilities list.">
-                known exploited
+                used in real attacks
               </Badge>
             ) : null}
           </span>
@@ -385,6 +385,8 @@ export function AdvisoryDetailPage() {
           </Link>
         }
       />
+
+      <InPlainWords advisory={advisory} current={current} historical={historical.length} />
 
       <AdvisoryAboutCard advisory={advisory} />
 
@@ -552,7 +554,7 @@ const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
   { header: "Aliases", value: (a) => exportList(a.aliases), width: 22 },
   { header: "CVSS", value: (a) => a.cvssBaseScore, width: 7 },
   { header: "EPSS", value: (a) => a.epssScore, width: 8 },
-  { header: "Known exploited", value: (a) => (a.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Used in real attacks", value: (a) => (a.knownExploited ? "yes" : "no"), width: 14 },
   { header: "Attack from", value: (a) => exportAttackVector(a.exploitability), width: 34 },
   { header: "Summary", value: (a) => a.summary, width: 40 },
   { header: "Description", value: (a) => a.description, width: 60 },
@@ -577,6 +579,110 @@ const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
  * sentence is a translation of the CVSS vector beside it, so a reader can check one against
  * the other.
  */
+const URGENCY_WORDS: Record<Urgency, string> = {
+  now: "Fix now",
+  soon: "Fix soon",
+  later: "When convenient",
+  none: "No fix yet: nothing to do but watch it",
+};
+
+/**
+ * The page starts in plain words: does it affect us, what to do, how urgent. The details
+ * (scores, vectors, references) follow below for whoever wants them.
+ */
+function InPlainWords({
+  advisory,
+  current,
+  historical,
+}: {
+  advisory: AdvisoryDetail;
+  current: AdvisoryImpact["applications"];
+  historical: number;
+}) {
+  const remote = advisory.exploitability.attackVector === "network";
+  const urgency = findingUrgency({
+    fixable: advisory.fixAvailable,
+    usedInAttacks: advisory.knownExploited,
+    severity: advisory.severity,
+    remote,
+  });
+  const why =
+    urgency === "now"
+      ? advisory.knownExploited
+        ? "it is used in real attacks and a fix is available."
+        : "it is critical, can be attacked remotely, and a fix is available."
+      : urgency === "soon"
+        ? `it is ${advisory.severity} and a fix is available.`
+        : urgency === "later"
+          ? `it is ${advisory.severity} severity; plan the upgrade with your next change.`
+          : "no fix has been published. It moves to the action plan as soon as one is.";
+
+  const isOs = (p: { kind: string; ecosystem: string }) =>
+    p.kind === "os" || p.kind === "runtime" || (osPackageEcosystems as readonly string[]).includes(p.ecosystem.toLowerCase());
+  const packages = current.flatMap((a) => a.packages);
+  const steps = new Set<string>();
+  for (const p of packages) {
+    if (p.fixState !== "fixed") continue;
+    if (isOs(p)) steps.add("Rebuild the image on an up-to-date base image (docker build --pull --no-cache).");
+    else steps.add(`Upgrade ${p.name}${p.version ? ` from ${p.version}` : ""} to ${p.fixVersions[0] ?? "a fixed version"}.`);
+  }
+  const names = current.map((a) => a.applicationName);
+
+  return (
+    <Card className="mb-4">
+      <dl className="grid gap-4 p-4 sm:grid-cols-3">
+        <div>
+          <dt className="text-xs font-semibold tracking-wide text-text-faint uppercase">Does it affect us?</dt>
+          <dd className="mt-1 text-sm text-text-base">
+            {current.length > 0 ? (
+              <>
+                <strong>Yes.</strong> {current.length} {current.length === 1 ? "project ships" : "projects ship"} an affected
+                version now: {names.slice(0, 5).join(", ")}
+                {names.length > 5 ? ` and ${names.length - 5} more` : ""}.
+              </>
+            ) : (
+              <>
+                <strong>Not now.</strong> No current build has an affected version
+                {historical > 0 ? `; ${historical} ${historical === 1 ? "project" : "projects"} used to` : ""}.
+              </>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-semibold tracking-wide text-text-faint uppercase">What to do</dt>
+          <dd className="mt-1 text-sm text-text-base">
+            {current.length === 0 ? (
+              "Nothing."
+            ) : steps.size > 0 ? (
+              <ul className="list-disc space-y-0.5 pl-4">
+                {[...steps].slice(0, 4).map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ul>
+            ) : (
+              "No fix has been published yet. Nothing to do but watch it."
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-semibold tracking-wide text-text-faint uppercase">How urgent?</dt>
+          <dd className="mt-1 text-sm text-text-base">
+            {current.length === 0 ? (
+              "Not urgent for us now."
+            ) : (
+              <>
+                <strong className={urgency === "now" ? "text-danger" : undefined}>{URGENCY_WORDS[urgency]}</strong>
+                : {why}
+              </>
+            )}
+            <div className="mt-1 text-xs text-text-muted">{describeExploitability(advisory.exploitability)}</div>
+          </dd>
+        </div>
+      </dl>
+    </Card>
+  );
+}
+
 function AdvisoryAboutCard({ advisory }: { advisory: AdvisoryDetail }) {
   const cvss = decodeCvss(advisory.cvssVector);
   const references = groupReferences(advisory.urls);
@@ -889,7 +995,7 @@ function AdvisoryFilters({ state, setState }: { state: FilterState; setState: (p
               onChange={(scope) => set({ scope: scope as (typeof SCOPES)[number] })}
               ariaLabel="Package scope"
               options={[
-                { value: "app", label: "Application dependencies" },
+                { value: "app", label: "Your libraries" },
                 { value: "os", label: "Base image and runtimes" },
                 { value: "all", label: "Everything" },
               ]}
@@ -989,11 +1095,11 @@ function AdvisoryFilters({ state, setState }: { state: FilterState; setState: (p
             <FilterField label="Weakness (CWE)">
               <DebouncedText value={state.cwe} onCommit={(cwe) => set({ cwe })} placeholder="CWE-79" ariaLabel="CWE" />
             </FilterField>
-            <FilterField label="Known exploited">
+            <FilterField label="Used in real attacks">
               <Select
                 value={state.knownExploited ? "yes" : ""}
                 onChange={(v) => set({ knownExploited: v === "yes" })}
-                ariaLabel="Known exploited"
+                ariaLabel="Used in real attacks"
                 options={[
                   { value: "", label: "Any" },
                   { value: "yes", label: "Only on CISA's KEV list" },

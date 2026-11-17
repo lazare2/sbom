@@ -180,7 +180,7 @@ function StaleThresholdCard() {
   return (
     <Card>
       <CardHeader
-        title="Stale applications"
+        title="No recent build (stale applications)"
         subtitle="How long an application can go without a scan before it is reported as stale."
       />
       {query.isLoading ? (

@@ -3,6 +3,7 @@ import type { AppContext } from "../../context.js";
 import type { Actor } from "../admin/audit.service.js";
 import type { ReadAccess } from "../environments/environment.service.js";
 import type { RouteMeta } from "../openapi/route-catalog.js";
+import type { ActionPlanItem, ProjectUrgencyCounts } from "@sbom/shared";
 
 /**
  * One part of the platform, described in one place.
@@ -53,8 +54,19 @@ export interface PlatformModule {
    */
   readonly services?: (ctx: AppContext) => unknown;
 
-  /** Lines this module adds to a project's action plan. See action-plan.service.ts. */
+  /** Lines this module adds to a project's action plan. See registry.ts. */
   readonly actionPlan?: ActionPlanContributor;
+
+  /**
+   * How urgent each project is, as the counts a status is computed from (see `projectStatus` in
+   * @sbom/shared). The developer view adds up what every switched-on module reports.
+   */
+  readonly projectUrgency?: ProjectUrgencyContributor;
+}
+
+export interface ProjectUrgencyContributor {
+  /** Counts per application id. The ids are already access-checked by the caller. */
+  counts(ctx: AppContext, applicationIds: readonly string[]): Promise<Map<string, ProjectUrgencyCounts>>;
 }
 
 export interface ModuleToggle {
@@ -103,22 +115,4 @@ export interface ActionPlanRequest {
   readonly access: ReadAccess;
 }
 
-export interface ActionPlanItem {
-  /** Stable within the module, so a later build can be matched to the same action. */
-  readonly key: string;
-  /** What to do, in plain words. */
-  readonly title: string;
-  /** Why, in plain words. */
-  readonly reason: string;
-  /** Lower comes first. The developer view defines the scale. */
-  readonly priority: number;
-  /** Where to change it (a file, a Dockerfile line), when known. */
-  readonly where?: string;
-  /** A line the developer can copy. */
-  readonly copyLine?: string;
-}
-
-/** An action plan item, as returned: tagged with the module it came from. */
-export interface ModuleActionPlanItem extends ActionPlanItem {
-  readonly moduleId: string;
-}
+export type { ActionPlanItem, ModuleActionPlanItem } from "@sbom/shared";

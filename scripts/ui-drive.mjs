@@ -224,7 +224,7 @@ await page.waitForURL(/\/applications/, { timeout: 10000 });
 await page.waitForLoadState("networkidle");
 await expectText("payments-api");
 await expectText("Unconfirmed", "unconfirmed status badge");
-await expectText("Stale", "stale badge");
+await expectText("No recent build", "no-recent-build badge");
 await shot("applications-list");
 
 // --- 4. dashboard ----------------------------------------------------------
@@ -250,7 +250,7 @@ log("  OK   the overview no longer duplicates the analytics inventory tables");
 await shot("dashboard");
 
 log("5. a dashboard tile links into a filtered list");
-await page.getByRole("link", { name: /Stale/ }).first().click();
+await page.getByRole("link", { name: /No recent build/ }).first().click();
 await page.waitForURL(/staleOnly=true/, { timeout: 10000 });
 await page.waitForLoadState("networkidle");
 await expectText("notification-relay", "the stale application");

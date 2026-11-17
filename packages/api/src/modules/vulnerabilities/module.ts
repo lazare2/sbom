@@ -1,4 +1,6 @@
 import type { PlatformModule } from "../platform/module.js";
+import { buildActionPlan } from "./action-plan.js";
+import { planInputFor, urgencyCountsFor } from "./project-urgency.js";
 import { updateVulnSettings, vulnAdminRoutes } from "./vuln-admin.routes.js";
 import { vulnerabilityRoutes, vulnStatusRoutes } from "./vulnerability.routes.js";
 
@@ -52,6 +54,18 @@ export const vulnerabilitiesModule: PlatformModule = {
       stop: (ctx) => ctx.vulnWorker.stop(),
     },
   ],
+
+  /** One line per package to upgrade, one for the base image, one for what has no fix yet. */
+  actionPlan: {
+    async actions(ctx, request) {
+      const { findings, context } = await planInputFor(ctx.db, request.applicationId);
+      return buildActionPlan(findings, context);
+    },
+  },
+
+  projectUrgency: {
+    counts: (ctx, applicationIds) => urgencyCountsFor(ctx.db, applicationIds),
+  },
 
   async startupCheck(ctx) {
     if (!(await ctx.settings.vulnScanningEnabled())) {

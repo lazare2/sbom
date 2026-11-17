@@ -308,7 +308,8 @@ describe("the vulnerabilities and malicious-packages switches", () => {
     expect(updateSettings).toHaveBeenCalledWith({ enabled: false }, actor);
   });
 
-  it("are listed in order: vulnerabilities, then malicious packages", () => {
-    expect(PLATFORM_MODULES.map((m) => m.id)).toEqual(["vulnerabilities", "malicious"]);
+  it("are listed in order: the developer view (always on), vulnerabilities, malicious packages", () => {
+    expect(PLATFORM_MODULES.map((m) => m.id)).toEqual(["developer", "vulnerabilities", "malicious"]);
+    expect(PLATFORM_MODULES[0]!.toggle).toBeUndefined();
   });
 });

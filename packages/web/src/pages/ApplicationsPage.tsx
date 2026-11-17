@@ -239,7 +239,7 @@ export function ApplicationsPage() {
                 value: (a) =>
                   a.status === "pending_confirmation" ? "Unconfirmed" : a.status === "active" ? "Active" : "Inactive",
               },
-              { header: "Stale", value: (a) => (a.isStale ? "yes" : "no"), width: 8 },
+              { header: "No recent build", value: (a) => (a.isStale ? "yes" : "no"), width: 8 },
               { header: labelFor("tribe"), value: (a) => attributeText(a.attributes.tribe) },
               { header: labelFor("squad"), value: (a) => attributeText(a.attributes.squad) },
               { header: labelFor("owner"), value: (a) => attributeText(a.attributes.owner) },
@@ -248,7 +248,7 @@ export function ApplicationsPage() {
               { header: "Components", value: (a) => a.latestComponentCount, width: 12 },
               ...(showFindings
                 ? [
-                    { header: "Findings", value: (a: ApplicationSummary) => a.vulnerabilities?.total ?? null, width: 10 },
+                    { header: "Vulnerabilities", value: (a: ApplicationSummary) => a.vulnerabilities?.total ?? null, width: 10 },
                     { header: "App findings", value: (a: ApplicationSummary) => a.vulnerabilities?.app ?? null, width: 12 },
                     { header: "Image findings", value: (a: ApplicationSummary) => a.vulnerabilities?.os ?? null, width: 14 },
                     { header: "Critical", value: (a: ApplicationSummary) => a.vulnerabilities?.critical ?? null, width: 10 },
@@ -397,7 +397,7 @@ export function ApplicationsPage() {
           <Checkbox
             checked={state.staleOnly}
             onChange={(v) => setState({ staleOnly: v })}
-            label="Stale only"
+            label="No recent build only"
           />
         </div>
       </Card>
@@ -516,7 +516,7 @@ export function ApplicationsPage() {
                               tone="warn"
                               title="No scan received recently. The dependency list may not reflect what is deployed."
                             >
-                              Stale
+                              No recent build
                             </Badge>
                           ) : null}
                         </div>

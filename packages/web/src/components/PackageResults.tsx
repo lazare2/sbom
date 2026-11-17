@@ -49,7 +49,7 @@ export const PACKAGE_EXPORT_COLUMNS: ExportColumn<PackageSearchRow>[] = [
   { header: "Advisories (current use)", value: (r) => (r.vulnerabilities?.assessed ? r.vulnerabilities.advisories : null), width: 12 },
   { header: "Critical", value: (r) => (r.vulnerabilities?.assessed ? r.vulnerabilities.critical : null), width: 10 },
   { header: "High", value: (r) => (r.vulnerabilities?.assessed ? r.vulnerabilities.high : null), width: 10 },
-  { header: "Known exploited", value: (r) => (r.vulnerabilities?.assessed ? r.vulnerabilities.knownExploited : null), width: 10 },
+  { header: "Used in real attacks", value: (r) => (r.vulnerabilities?.assessed ? r.vulnerabilities.knownExploited : null), width: 10 },
   {
     header: "Vulnerable applications",
     value: (r) => (r.vulnerabilities?.assessed ? r.vulnerabilities.vulnerableApplications : null),
@@ -299,7 +299,7 @@ const APP_EXPORT_COLUMNS: ExportColumn<PackageApplicationEntry>[] = [
   { header: "Advisories", value: (a) => a.vulnerabilities?.advisories ?? null, width: 12 },
   { header: "Critical", value: (a) => a.vulnerabilities?.critical ?? null, width: 10 },
   { header: "High", value: (a) => a.vulnerabilities?.high ?? null, width: 10 },
-  { header: "Known exploited", value: (a) => a.vulnerabilities?.knownExploited ?? null, width: 10 },
+  { header: "Used in real attacks", value: (a) => a.vulnerabilities?.knownExploited ?? null, width: 10 },
   { header: "Last seen in build", value: (a) => a.lastSeenBuildNumber, width: 14 },
   { header: "Last seen", value: (a) => exportDate(a.lastSeenAt), width: 18 },
 ];
