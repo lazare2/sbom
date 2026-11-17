@@ -25,9 +25,6 @@ async function main(): Promise<void> {
   // --- modules -------------------------------------------------------------
   // Each module's background jobs and start-up checks, from the module list. See lifecycle.ts.
   await startModuleJobs(app.ctx, app.log);
-  // Cheap and idempotent: it does nothing at all until an administrator enables report
-  // delivery, and the database prevents a restart from resending a report already sent.
-  app.ctx.reportScheduler.start();
 
   await runModuleStartupChecks(app.ctx, app.log);
 
@@ -57,7 +54,6 @@ async function main(): Promise<void> {
     // are idempotent upserts, and killing a grype subprocess mid-batch would just mean
     // the next start re-does that batch.
     stopModuleJobs(app.ctx);
-    app.ctx.reportScheduler.stop();
     try {
       // Closes the server first so in-flight ingests finish before the pool goes
       // away - a half-committed scan would be worse than a slow shutdown.

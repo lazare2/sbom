@@ -168,6 +168,7 @@ export function ExportTableButton<T>({
   filename,
   columns,
   rows,
+  pageRows,
   fetchRows,
   size = "sm",
   label = "Export table",
@@ -178,6 +179,11 @@ export function ExportTableButton<T>({
   filename: string;
   columns: ExportColumn<T>[];
   rows?: readonly T[];
+  /**
+   * The rows on the page being shown, for a paged table. When it is fewer than `rows`, the reader
+   * chooses: this page, or every row (the default) - sorted and filtered as on screen either way.
+   */
+  pageRows?: readonly T[];
   fetchRows?: (onProgress: (loaded: number, total: number) => void) => Promise<FetchedRows<T>>;
   size?: "sm" | "md";
   /** Button text, for a card that offers more than one export. */
@@ -185,6 +191,8 @@ export function ExportTableButton<T>({
 }) {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const paged = pageRows !== undefined && rows !== undefined && pageRows.length < rows.length;
+  const [which, setWhich] = useState<"all" | "page">("all");
 
   const run = async () => {
     setError(null);
@@ -194,7 +202,9 @@ export function ExportTableButton<T>({
         ? await fetchRows((loaded, total) =>
             setProgress(`Exporting… ${Math.min(100, Math.round((loaded / Math.max(1, Math.min(total, EXPORT_ROW_CAP))) * 100))}%`),
           )
-        : { rows: [...(rows ?? [])], total: rows?.length ?? 0 };
+        : paged && which === "page"
+          ? { rows: [...pageRows!], total: pageRows!.length }
+          : { rows: [...(rows ?? [])], total: rows?.length ?? 0 };
 
       const now = new Date();
       const capped = fetched.total > fetched.rows.length;
@@ -202,6 +212,7 @@ export function ExportTableButton<T>({
         ["Table", title],
         ["Exported at", now],
         ["Rows", fetched.rows.length],
+        ...(paged ? [["Exported", which === "page" ? "the page on screen" : "every row"] as XlsxCell[]] : []),
         ["Matching rows", fetched.total],
         ["View", window.location.href],
       ];
@@ -241,6 +252,17 @@ export function ExportTableButton<T>({
         <span className="text-[11px] text-danger" role="alert">
           Export failed: {error}
         </span>
+      ) : null}
+      {paged ? (
+        <select
+          aria-label="Rows to export"
+          value={which}
+          onChange={(e) => setWhich(e.target.value as "all" | "page")}
+          className="h-[26px] rounded-md border border-border-strong bg-bg-raised px-1 text-xs text-text-base"
+        >
+          <option value="all">All {rows!.length} rows</option>
+          <option value="page">This page ({pageRows!.length})</option>
+        </select>
       ) : null}
       <Button
         size={size}

@@ -398,6 +398,30 @@ export class SettingsService {
   }
 
   /**
+   * The switch of a module that has no setting of its own (Reports and analytics, Organisation).
+   * Stored as `module.<id>` = { enabled }. A module nobody has switched is on: an upgraded server
+   * keeps showing what it showed before.
+   */
+  async moduleEnabled(id: string): Promise<boolean> {
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${`module.${id}`}
+    `);
+    const value = rowsOf(rows)[0]?.value as { enabled?: unknown } | undefined;
+    return value?.enabled !== false;
+  }
+
+  async setModuleEnabled(id: string, enabled: boolean, actor: Actor | null): Promise<void> {
+    const value = { enabled };
+    await this.deps.db
+      .insert(setting)
+      .values({ key: `module.${id}`, value, updatedByUserId: actor?.id ?? null, updatedByEmail: actor?.email ?? null })
+      .onConflictDoUpdate({
+        target: setting.key,
+        set: { value, updatedAt: new Date(), updatedByUserId: actor?.id ?? null, updatedByEmail: actor?.email ?? null },
+      });
+  }
+
+  /**
    * Target dates. Usable from the first start without anybody saving them: a missing or invalid
    * value falls back to its starting value, and critical comes from the attention setting.
    */

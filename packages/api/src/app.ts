@@ -8,10 +8,7 @@ import { getConfig, type Config } from "./config.js";
 import type { BuildContextOverrides } from "./context.js";
 import { sha256Hex } from "./lib/crypto.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
-import { analyticsRoutes } from "./modules/analytics/analytics.routes.js";
-import { inventoryRoutes } from "./modules/inventory/inventory.routes.js";
 import { applicationRoutes } from "./modules/applications/applications.routes.js";
-import { groupRoutes } from "./modules/groups/groups.routes.js";
 import { attributeRoutes } from "./modules/attributes/attributes.routes.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { componentRoutes } from "./modules/components/components.routes.js";
@@ -29,7 +26,7 @@ import { PLATFORM_MODULES } from "./modules/platform/index.js";
 import { moduleAdminRoutes, moduleRoutes } from "./modules/platform/module.routes.js";
 import { openapiRoutes } from "./modules/openapi/openapi.routes.js";
 import { manualUploadRoutes } from "./modules/ingestion/manual-upload.routes.js";
-import { reportRoutes } from "./modules/reports/reports.routes.js";
+import { ModuleDisabledError } from "./modules/platform/module-disabled.js";
 import { scanRoutes } from "./modules/scans/scans.routes.js";
 import { authPlugin } from "./plugins/auth.plugin.js";
 import { contextPlugin } from "./plugins/context.plugin.js";
@@ -177,7 +174,6 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       // write, so it lives in its own scope under the same prefix rather than in
       // the read-only applications plugin.
       await api.register(manualUploadRoutes, { prefix: "/applications" });
-      await api.register(groupRoutes, { prefix: "/groups" });
       /*
         The estates themselves. Readable by any signed-in user, because the header switcher
         loads it on every page and a read-only account that cannot see its own environments
@@ -195,8 +191,6 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       await api.register(exportRoutes, { prefix: "/exports" });
       await api.register(attributeRoutes, { prefix: "/attribute-definitions" });
       await api.register(dashboardRoutes, { prefix: "/dashboard" });
-      await api.register(analyticsRoutes, { prefix: "/analytics" });
-      await api.register(inventoryRoutes, { prefix: "/inventory" });
 
       /*
         Which modules exist and which are on: read by the menu on every page, and switched on
@@ -219,6 +213,19 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
               },
               { prefix: routes.prefix },
             );
+          } else if (routes.gated && module.toggle) {
+            const toggle = module.toggle;
+            await api.register(
+              async (scoped) => {
+                // Signed in first: a switched-off module is not something to tell a stranger.
+                scoped.addHook("preHandler", scoped.requireAuth);
+                scoped.addHook("preHandler", async () => {
+                  if (!(await toggle.enabled(scoped.ctx))) throw new ModuleDisabledError(module.name);
+                });
+                await scoped.register(routes.plugin);
+              },
+              { prefix: routes.prefix },
+            );
           } else {
             await api.register(routes.plugin, { prefix: routes.prefix });
           }
@@ -228,17 +235,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       // Write APIs. Guarded as a whole scope by `requireAdmin`, so a route
       // added to that file is protected whether or not its author thought about it.
       await api.register(adminRoutes, { prefix: "/admin" });
-      // Inside the admin prefix but its own plugin, because it applies `requireAdmin`
-      // itself: registering it as part of `adminRoutes` would work today and silently stop
-      // working the day someone splits that file.
-      await api.register(
-        async (scoped) => {
-          scoped.addHook("preHandler", scoped.requireAdmin);
-          await scoped.register(reportRoutes);
-        },
-        { prefix: "/admin/reports" },
-      );
-      // Same arrangement, same reason: `environmentAdminRoutes` applies `requireAdmin` in
+      // `environmentAdminRoutes` applies `requireAdmin` in
       // its own scope rather than inheriting it from where it happens to be registered.
       await api.register(environmentAdminRoutes, { prefix: "/admin/environments" });
 

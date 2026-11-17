@@ -45,6 +45,8 @@ export class ReportScheduler {
       reports: ReportService;
       environments: EnvironmentService;
       logger: FastifyBaseLogger;
+      /** The Reports and analytics module's switch: nothing is generated while it is off. */
+      active?: () => Promise<boolean>;
     },
   ) {}
 
@@ -84,6 +86,7 @@ export class ReportScheduler {
 
   private async run(now: Date): Promise<void> {
     const { settings, environments, logger } = this.deps;
+    if (this.deps.active && !(await this.deps.active())) return;
     const config = await settings.getReportSettings();
 
     if (!config.enabled) return;

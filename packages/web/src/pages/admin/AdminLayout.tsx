@@ -15,20 +15,20 @@ const TABS = [
   // Which parts of the platform are on, then the settings of the ones that check packages.
   { to: "/admin/modules", label: "Modules" },
   { to: "/admin/scanners", label: "Scanners" },
-  { to: "/admin/reports", label: "Monthly report" },
   { to: "/admin/configuration", label: "Configuration" },
   { to: "/admin/audit", label: "Audit log" },
   { to: "/admin/errors", label: "Error log" },
 ];
 
-/** Settings pages of modules that are not scanners get a tab of their own, before Monthly report. */
+/** Settings pages of modules that are not scanners get a tab of their own, before Configuration. */
 const MODULE_TABS = WEB_MODULES.flatMap((m) => m.adminPages ?? [])
   .filter((p) => p.section === undefined)
   .map((p) => ({ to: `/admin/${p.path}`, label: p.label }));
+const BEFORE = TABS.findIndex((t) => t.to === "/admin/configuration");
 const ALL_TABS: Array<{ to: string; label: string; badge?: "pending" | "accessRequests" }> = [
-  ...TABS.slice(0, TABS.findIndex((t) => t.to === "/admin/reports")),
+  ...TABS.slice(0, BEFORE),
   ...MODULE_TABS,
-  ...TABS.slice(TABS.findIndex((t) => t.to === "/admin/reports")),
+  ...TABS.slice(BEFORE),
 ];
 
 export function AdminLayout() {

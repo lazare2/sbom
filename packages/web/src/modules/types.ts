@@ -29,8 +29,8 @@ export interface ModuleNavItem {
   readonly label: string;
   /** Exact match for the active state. */
   readonly end?: boolean;
-  /** Before the core entries rather than after them. */
-  readonly first?: boolean;
+  /** Which part of the side menu it belongs to. */
+  readonly section: NavSection;
   /** Shown only to these people; everybody when absent. */
   readonly visibleTo?: (user: { role: string; isTeamLead?: boolean | undefined }) => boolean;
 }
@@ -48,3 +48,6 @@ export interface ModuleAdminPage {
   /** Grouped under Administration -> Scanners; otherwise its own admin tab. */
   readonly section?: "scanners";
 }
+
+/** The side menu's parts, top to bottom: the person's own work, the estate, reports. */
+export type NavSection = "you" | "estate" | "reports";

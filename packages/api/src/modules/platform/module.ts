@@ -89,6 +89,12 @@ export interface ModuleToggle {
 export interface ModuleRoutes {
   readonly prefix: string;
   readonly access: "user" | "admin";
+  /**
+   * Answer 409 `module_disabled` while the module is switched off, so a page can say "not
+   * enabled" instead of showing nothing. Leave off for a module's settings, which must stay
+   * reachable to switch it back on.
+   */
+  readonly gated?: boolean;
   readonly plugin: (fastify: FastifyInstance) => Promise<void>;
 }
 

@@ -290,7 +290,13 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
 
   const mailer = new Mailer({ logger });
   const reports = new ReportService({ db, blobStore, analytics, settings, mailer, logger });
-  const reportScheduler = new ReportScheduler({ settings, reports, environments, logger });
+  const reportScheduler = new ReportScheduler({
+    settings,
+    reports,
+    environments,
+    logger,
+    active: () => settings.moduleEnabled("reports"),
+  });
 
   // Vulnerability scanning. The scanner is a port so the wiring tests can supply a
   // fake and never spawn grype.

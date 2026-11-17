@@ -308,8 +308,64 @@ describe("the vulnerabilities and malicious-packages switches", () => {
     expect(updateSettings).toHaveBeenCalledWith({ enabled: false }, actor);
   });
 
-  it("are listed in order: the developer view (always on), vulnerabilities, malicious packages", () => {
-    expect(PLATFORM_MODULES.map((m) => m.id)).toEqual(["developer", "vulnerabilities", "malicious"]);
+  it("are listed in order: the developer view (always on), vulnerabilities, malicious packages, reports, organisation", () => {
+    expect(PLATFORM_MODULES.map((m) => m.id)).toEqual(["developer", "vulnerabilities", "malicious", "reports", "organisation"]);
     expect(PLATFORM_MODULES[0]!.toggle).toBeUndefined();
+  });
+});
+
+describe("modules with a switch of their own (step 8)", () => {
+  function fakeSettings(stored: Record<string, boolean>) {
+    const audit = { record: vi.fn(async () => {}) };
+    const settings = {
+      moduleEnabled: vi.fn(async (id: string) => stored[id] !== false),
+      setModuleEnabled: vi.fn(async (id: string, enabled: boolean) => {
+        stored[id] = enabled;
+      }),
+    };
+    return { ctx: { settings, audit } as unknown as AppContext, audit, settings };
+  }
+
+  it("are on until somebody switches them off, so an upgrade changes nothing", async () => {
+    const { reportingModule } = await import("../../src/modules/reporting/module.js");
+    const { ctx } = fakeSettings({});
+    expect(await reportingModule.toggle!.enabled(ctx)).toBe(true);
+  });
+
+  it("switch through the setting and leave an audit entry", async () => {
+    const { organisationModule } = await import("../../src/modules/organisation/module.js");
+    const { ctx, audit, settings } = fakeSettings({});
+    await organisationModule.toggle!.setEnabled(ctx, false, actor);
+    expect(settings.setModuleEnabled).toHaveBeenCalledWith("organisation", false, actor);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "module.switch", targetId: "organisation" }));
+    expect(await organisationModule.toggle!.enabled(ctx)).toBe(false);
+  });
+
+  it("gate their pages only after sign-in, and answer module_disabled while off", async () => {
+    const config = loadConfig({
+      NODE_ENV: "test",
+      LOG_LEVEL: "silent",
+      DATABASE_URL: "postgres://sbom:sbom@127.0.0.1:1/sbom_test",
+      SESSION_SECRET: "t".repeat(48),
+      PUBLIC_URL: "http://localhost:5173",
+    });
+    const off: PlatformModule = {
+      id: "off-module",
+      name: "Off module",
+      description: "",
+      toggle: { enabled: async () => false, setEnabled: async () => {} },
+      routes: [{ prefix: "/off-module", access: "user", gated: true, plugin: async (f) => void f.get("/", async () => ({ ok: true })) }],
+      routeDocs: { "GET /api/v1/off-module": { summary: "x", tag: "Test", auth: "user" } },
+    };
+    const app = await buildApp({ config, modules: [...PLATFORM_MODULES, off] });
+    await app.ready();
+    const res = await app.inject({ method: "GET", url: "/api/v1/off-module" });
+    // Signed out: the sign-in check answers first, not the switch.
+    expect(res.statusCode).toBe(401);
+    await app.close();
+    const { ModuleDisabledError } = await import("../../src/modules/platform/module-disabled.js");
+    const err = new ModuleDisabledError("Reports and analytics");
+    expect(err.statusCode).toBe(409);
+    expect(err.code).toBe("module_disabled");
   });
 });
