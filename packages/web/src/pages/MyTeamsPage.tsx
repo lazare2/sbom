@@ -14,7 +14,7 @@ const PROJECT_COLUMNS: ExportColumn<MyProject>[] = [
   { header: "Status", value: (p) => PROJECT_STATUS_LABELS[p.status], width: 16 },
   { header: "Project", value: (p) => p.name, width: 28 },
   { header: "Why", value: (p) => p.reason, width: 70 },
-  { header: "Late", value: (p) => p.counts.late, width: 8 },
+  { header: "Vulnerabilities past target", value: (p) => p.counts.late, width: 14 },
   { header: "Fix now", value: (p) => p.counts.now, width: 8 },
   { header: "Fix soon", value: (p) => p.counts.soon, width: 8 },
   { header: "Vulnerabilities", value: (p) => p.counts.total, width: 12 },
@@ -109,7 +109,7 @@ function TeamSection({ team }: { team: MyTeam }) {
                   <Th width="140px">Status</Th>
                   <Th width="220px">Project</Th>
                   <Th>Why</Th>
-                  <Th width="70px" align="right">Late</Th>
+                  <Th width="150px" align="right">Vulnerabilities past target</Th>
                   <Th width="130px">Last build</Th>
                 </tr>
               </thead>

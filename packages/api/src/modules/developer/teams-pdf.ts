@@ -52,8 +52,8 @@ export async function renderTeamsPdf(report: MyTeamsResponse, title = "My teams"
       [
         { header: "Status", width: 0.14, value: (p) => PROJECT_STATUS_LABELS[p.status] },
         { header: "Project", width: 0.22, value: (p) => p.name },
-        { header: "Why", width: 0.5, value: (p) => p.reason },
-        { header: "Late", width: 0.06, align: "right", value: (p) => String(p.counts.late) },
+        { header: "Why", width: 0.46, value: (p) => p.reason },
+        { header: "Past target", width: 0.1, align: "right", value: (p) => String(p.counts.late) },
         { header: "Last build", width: 0.08, value: (p) => fmtDate(p.lastBuildAt) },
       ],
       team.projects,
