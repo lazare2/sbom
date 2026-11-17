@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type {
+  ModuleState,
   ApiTokenCreated,
   CreateApiToken,
   ApplicationDetail,
@@ -948,6 +949,8 @@ export function useUpdateVulnSettings() {
       // it refreshes everything else.
       qc.setQueryData(queryKeys.vulnAdminStatus, status);
       invalidateVulnerabilities(qc);
+      // The menu entry follows the switch.
+      void qc.invalidateQueries({ queryKey: queryKeys.modules });
     },
   });
 }
@@ -1176,6 +1179,7 @@ export function useUpdateMaliciousSettings() {
       invalidateMalicious(qc);
       // The nav entry and every "is this on" branch key off the status endpoint.
       void qc.invalidateQueries({ queryKey: ["admin", "malicious"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.modules });
     },
   });
 }
@@ -1224,6 +1228,24 @@ export function useUpdateMaliciousFeed() {
     onSuccess: () => {
       invalidateMalicious(qc);
       void qc.invalidateQueries({ queryKey: ["admin", "malicious"] });
+    },
+  });
+}
+
+/**
+ * Switches a module on or off on Administration -> Modules.
+ *
+ * Everything is refetched afterwards: a module going on or off changes the menu, the pages that
+ * show its data and the dashboard panels that summarise it, and it is too rare an action to be
+ * worth tracking which of those it touched.
+ */
+export function useSetModuleEnabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.patch<{ module: ModuleState }>(`/admin/modules/${encodeURIComponent(id)}`, { enabled }),
+    onSuccess: () => {
+      void qc.invalidateQueries();
     },
   });
 }

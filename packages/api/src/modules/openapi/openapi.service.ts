@@ -96,6 +96,8 @@ function responsesFor(meta: RouteMeta, method: string): Record<string, { descrip
 export interface OpenApiOptions {
   baseUrl: string;
   version: string;
+  /** The catalog to describe routes from. Defaults to route-catalog.ts alone. */
+  catalog?: Readonly<Record<string, RouteMeta>>;
 }
 
 export function buildOpenApiDocument(
@@ -109,7 +111,7 @@ export function buildOpenApiDocument(
     if (!isDocumentable(route)) continue;
 
     const key = RouteCollector.keyOf(route);
-    const meta = ROUTE_CATALOG[key];
+    const meta = (options.catalog ?? ROUTE_CATALOG)[key];
     /*
       A route with no catalog entry is skipped here and *fails a test*. Emitting a placeholder
       instead would make the document look complete while describing an endpoint nobody has
@@ -249,18 +251,24 @@ export function buildOpenApiDocument(
  * what lets the server start with an incomplete document while a test still refuses to let one
  * be committed.
  */
-export function undocumentedRoutes(routes: readonly CollectedRoute[]): string[] {
+export function undocumentedRoutes(
+  routes: readonly CollectedRoute[],
+  catalog: Readonly<Record<string, RouteMeta>> = ROUTE_CATALOG,
+): string[] {
   return routes
     .filter(isDocumentable)
     .map((route) => RouteCollector.keyOf(route))
-    .filter((key) => !(key in ROUTE_CATALOG))
+    .filter((key) => !(key in catalog))
     .sort();
 }
 
 /** Catalog entries describing a route that no longer exists. */
-export function staleCatalogEntries(routes: readonly CollectedRoute[]): string[] {
+export function staleCatalogEntries(
+  routes: readonly CollectedRoute[],
+  catalog: Readonly<Record<string, RouteMeta>> = ROUTE_CATALOG,
+): string[] {
   const live = new Set(routes.map((route) => RouteCollector.keyOf(route)));
-  return Object.keys(ROUTE_CATALOG)
+  return Object.keys(catalog)
     .filter((key) => !live.has(key))
     .sort();
 }

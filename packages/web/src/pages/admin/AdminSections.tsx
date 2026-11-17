@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Outlet, useLocation } from "react-router";
 import { useAccessRequests } from "../../lib/queries.ts";
+import { WEB_MODULES } from "../../modules/index.tsx";
 
 /**
  * Admin tabs that hold several pages: Access (who can see what) and Scanners (what checks the
@@ -57,15 +58,14 @@ export function AdminAccessLayout() {
   );
 }
 
-/** Vulnerability scanning and malicious-package detection. */
+/** Every module that checks packages (vulnerabilities, malicious packages), from the module list. */
 export function AdminScannersLayout() {
   return (
     <SubTabs
       label="Scanner sections"
-      tabs={[
-        { to: "/admin/scanners/vulnerabilities", label: "Vulnerabilities" },
-        { to: "/admin/scanners/malicious", label: "Malicious packages" },
-      ]}
+      tabs={WEB_MODULES.flatMap((m) => m.adminPages ?? [])
+        .filter((p) => p.section === "scanners")
+        .map((p) => ({ to: `/admin/scanners/${p.path}`, label: p.label }))}
     />
   );
 }

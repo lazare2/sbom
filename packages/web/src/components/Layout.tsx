@@ -1,7 +1,8 @@
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { EnvironmentSwitcher } from "../environments/EnvironmentSwitcher.tsx";
-import { useMaliciousStatus, useVulnStatus } from "../lib/queries.ts";
+import { WEB_MODULES } from "../modules/index.tsx";
+import { useEnabledModuleIds } from "../modules/ModuleGate.tsx";
 import { Badge, Button } from "./ui.tsx";
 
 const NAV = [
@@ -14,28 +15,24 @@ const NAV = [
 ];
 
 /**
- * Shown only when vulnerability scanning is enabled.
+ * Each module's menu entries, shown only while the module is on.
  *
- * A permanently visible nav item leading to a page that explains it has nothing to show
- * is clutter on every deployment that does not use the feature. The pages themselves stay
- * routable either way, so a pasted link still works and explains itself.
+ * A permanently visible entry leading to a page that explains it has nothing to show is clutter
+ * on every installation that does not use the module. The pages themselves stay routable
+ * either way, so a pasted link still works and explains itself.
  */
-const VULN_NAV = { to: "/vulnerabilities", label: "Vulnerabilities", end: false };
-
-/** Shown only when detection is enabled, on the same reasoning as the vulnerability entry. */
-const MALICIOUS_NAV = { to: "/malicious", label: "Malicious packages", end: false };
+function moduleNav(enabled: Set<string>) {
+  return WEB_MODULES.filter((m) => enabled.has(m.id)).flatMap((m) =>
+    (m.nav ?? []).map((item) => ({ to: item.to, label: item.label, end: item.end ?? false })),
+  );
+}
 
 export function Layout() {
   const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   // Cached for a minute by the query, so this does not add a request per navigation.
-  const { data: vulnStatus } = useVulnStatus();
-  const { data: maliciousStatus } = useMaliciousStatus();
-  const navItems = [
-    ...NAV,
-    ...(vulnStatus?.enabled ? [VULN_NAV] : []),
-    ...(maliciousStatus?.enabled ? [MALICIOUS_NAV] : []),
-  ];
+  const enabledModules = useEnabledModuleIds();
+  const navItems = [...NAV, ...moduleNav(enabledModules)];
 
   async function handleLogout() {
     await logout();

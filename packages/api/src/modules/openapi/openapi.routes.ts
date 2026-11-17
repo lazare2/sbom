@@ -47,6 +47,7 @@ export async function openapiRoutes(fastify: FastifyInstance): Promise<void> {
         can fail at startup. The deploy sets it alongside the image tag.
       */
       version: process.env.APP_VERSION ?? "dev",
+      catalog: fastify.routeCatalog,
     });
     return cached;
   };

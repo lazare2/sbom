@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
 import { getConfig } from "./config.js";
 import { closeDb } from "./db/client.js";
+import { runModuleStartupChecks, startModuleJobs, stopModuleJobs } from "./modules/platform/lifecycle.js";
 
 /** Expired sessions are swept hourly. */
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -21,68 +22,14 @@ async function main(): Promise<void> {
     );
   }
 
-  // --- vulnerability scanning ----------------------------------------------
-  /*
-   * Started unconditionally. The worker's own first action on each heartbeat is to
-   * check whether scanning is enabled, so on a deployment that has never turned it on
-   * this costs one settings read per minute and nothing else. Starting it conditionally
-   * would mean an admin enabling the feature had to restart the service for the
-   * schedule to begin, which is exactly the kind of hidden requirement nobody discovers
-   * until it matters.
-   */
-  /*
-   * Close out any update claim left open by the previous run before the worker starts.
-   * A killed process leaves a row with no finish time, which otherwise blocks the admin
-   * panel's Update button for an hour while reporting an update that is not running.
-   */
-  const reconciled = await app.ctx.vulnDb.reconcileInterruptedUpdates().catch((err: unknown) => {
-    app.log.warn({ err }, "could not reconcile interrupted vulnerability database updates");
-    return 0;
-  });
-  if (reconciled > 0) {
-    app.log.info({ reconciled }, "marked interrupted vulnerability database updates as failed");
-  }
-
-  /*
-   * The same reconciliation for the malicious feed, for the same reason: an attempt row with
-   * no finish time describes a refresh nothing is performing, and left alone it shows the
-   * admin page a spinner that never stops.
-   */
-  const malReconciled = await app.ctx.maliciousFeed.reconcileInterrupted().catch((err: unknown) => {
-    app.log.warn({ err }, "could not reconcile interrupted malicious feed refreshes");
-    return 0;
-  });
-  if (malReconciled > 0) {
-    app.log.info({ reconciled: malReconciled }, "marked interrupted malicious feed refreshes as failed");
-  }
-
-  app.ctx.vulnWorker.start();
-  // Idempotent and inert until an administrator switches detection on.
-  app.ctx.maliciousWorker.start();
+  // --- modules -------------------------------------------------------------
+  // Each module's background jobs and start-up checks, from the module list. See lifecycle.ts.
+  await startModuleJobs(app.ctx, app.log);
   // Cheap and idempotent: it does nothing at all until an administrator enables report
   // delivery, and the database prevents a restart from resending a report already sent.
   app.ctx.reportScheduler.start();
 
-  const scanning = await app.ctx.settings.vulnScanningEnabled();
-  if (scanning) {
-    const availability = await app.ctx.scanner.availability();
-    if (!availability.available) {
-      // Reported, not fatal. Everything except vulnerability data still works, and
-      // refusing to boot over an optional feature would be a worse outcome than saying
-      // clearly that it is unavailable.
-      app.log.warn(
-        { attempts: availability.attempts },
-        "vulnerability scanning is enabled but the grype binary was not found - scanning is unavailable",
-      );
-    } else {
-      app.log.info(
-        { version: availability.version, resolvedBy: availability.resolvedBy, path: availability.path },
-        "vulnerability scanner ready",
-      );
-    }
-  } else {
-    app.log.info("vulnerability scanning is disabled (enable it under Admin -> Vulnerability scanning)");
-  }
+  await runModuleStartupChecks(app.ctx, app.log);
 
   // --- housekeeping --------------------------------------------------------
   const cleanup = setInterval(() => {
@@ -109,8 +56,7 @@ async function main(): Promise<void> {
     // Stops new sweeps from starting. An in-flight one is left to finish: its writes
     // are idempotent upserts, and killing a grype subprocess mid-batch would just mean
     // the next start re-does that batch.
-    app.ctx.vulnWorker.stop();
-    app.ctx.maliciousWorker.stop();
+    stopModuleJobs(app.ctx);
     app.ctx.reportScheduler.stop();
     try {
       // Closes the server first so in-flight ingests finish before the pool goes

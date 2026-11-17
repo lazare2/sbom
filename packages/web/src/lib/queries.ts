@@ -1,6 +1,7 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
   AttentionSettings,
+  ModuleListResponse,
   InventoryReport,
   PackageDetail,
   PackageSearchResult,
@@ -141,6 +142,8 @@ export const queryKeys = {
   apiErrors: (params: Record<string, unknown>) => ["admin", "errors", params] as const,
   apiErrorSummary: ["admin", "errors", "summary"] as const,
   ingestTokens: ["admin", "ingest-tokens"] as const,
+  // --- modules ---
+  modules: ["modules"] as const,
   // --- vulnerabilities ---
   vulnStatus: ["vuln", "status"] as const,
   platformSettings: ["admin", "settings"] as const,
@@ -945,6 +948,18 @@ export function useReportRuns() {
   return useQuery({
     queryKey: queryKeys.reportRuns,
     queryFn: () => api.get<{ items: ReportRunSummary[] }>("/admin/reports"),
+  });
+}
+
+/**
+ * Which modules exist and which are on. The menu and every module page read it, so it is kept
+ * for a minute like the status endpoints it replaces for that purpose.
+ */
+export function useModules() {
+  return useQuery({
+    queryKey: queryKeys.modules,
+    queryFn: () => api.get<ModuleListResponse>("/modules"),
+    staleTime: 60_000,
   });
 }
 

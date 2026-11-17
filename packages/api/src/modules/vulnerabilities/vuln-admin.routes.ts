@@ -22,6 +22,7 @@ import { BadRequestError, NotFoundError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
 import type { Actor } from "../admin/audit.service.js";
+import type { AppContext } from "../../context.js";
 import { XrayScanner } from "../../services/scanner/xray.js";
 import type { XrayCredentials } from "../../services/scanner/xray-client.js";
 
@@ -51,6 +52,33 @@ function actorOf(request: FastifyRequest): Actor {
  * any executable on disk ships a remote-code-execution primitive to everyone who
  * deploys it.
  */
+/**
+ * Changes the scanning switch and schedule, records it, and starts the first backfill when
+ * scanning has just been switched on.
+ *
+ * Shared by this settings page and the module switch on Administration -> Modules, so the two
+ * can never behave differently.
+ */
+export async function updateVulnSettings(
+  ctx: AppContext,
+  patch: { enabled?: boolean | undefined; intervalHours?: number | undefined },
+  actor: Actor,
+): Promise<void> {
+  const { before, after } = await ctx.settings.updateVulnSettings(patch, actor);
+
+  await ctx.audit.record({
+    actor,
+    action: "vuln.settings_update",
+    targetType: "setting",
+    targetId: "vuln",
+    metadata: { before, after },
+  });
+
+  if (!before.enabled && after.enabled) {
+    ctx.vulnWorker.requestBackfillAfterEnable();
+  }
+}
+
 export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
   const { vulnDb, vulnWorker, vulnerabilities, settings, sweep, audit, config } = fastify.ctx;
 
@@ -108,21 +136,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.patch("/settings", async (request, reply) => {
     const body = parseOrThrow(updateVulnSettingsSchema, request.body);
-    const actor = actorOf(request);
-    const { before, after } = await settings.updateVulnSettings(body, actor);
-
-    await audit.record({
-      actor,
-      action: "vuln.settings_update",
-      targetType: "setting",
-      targetId: "vuln",
-      metadata: { before, after },
-    });
-
-    if (!before.enabled && after.enabled) {
-      vulnWorker.requestBackfillAfterEnable();
-    }
-
+    await updateVulnSettings(fastify.ctx, body, actorOf(request));
     return reply.send(await status());
   });
 

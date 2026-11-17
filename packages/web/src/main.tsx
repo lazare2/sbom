@@ -7,7 +7,6 @@ import { RequireAdmin, RequireAuth } from "./auth/RequireAuth.tsx";
 import { Layout } from "./components/Layout.tsx";
 import { EnvironmentProvider } from "./environments/EnvironmentProvider.tsx";
 import { EmptyState, Card } from "./components/ui.tsx";
-import { MaliciousPage } from "./pages/MaliciousPage.tsx";
 import { ApiAccessPage } from "./pages/ApiAccessPage.tsx";
 import { AnalyticsPage } from "./pages/AnalyticsPage.tsx";
 import { InventoryPage } from "./pages/InventoryPage.tsx";
@@ -37,9 +36,9 @@ import { AdminUsersPage } from "./pages/admin/AdminUsersPage.tsx";
 import { AdminSquadsPage } from "./pages/admin/AdminSquadsPage.tsx";
 import { AdminTribesPage } from "./pages/admin/AdminTribesPage.tsx";
 import { AdminAccessLayout, AdminScannersLayout, MovedTo } from "./pages/admin/AdminSections.tsx";
-import { AdminVulnerabilitiesPage } from "./pages/admin/AdminVulnerabilitiesPage.tsx";
-import { AdminMaliciousPage } from "./pages/admin/AdminMaliciousPage.tsx";
-import { AdvisoryDetailPage, VulnerabilitiesPage } from "./pages/VulnerabilitiesPage.tsx";
+import { AdminModulesPage } from "./pages/admin/AdminModulesPage.tsx";
+import { WEB_MODULES } from "./modules/index.tsx";
+import { ModuleGate } from "./modules/ModuleGate.tsx";
 import { UnauthenticatedError } from "./lib/api.ts";
 import "./index.css";
 
@@ -59,6 +58,9 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+/** Every module's scanner settings page, in module order: the tabs under Administration -> Scanners. */
+const SCANNER_PAGES = WEB_MODULES.flatMap((m) => m.adminPages ?? []).filter((p) => p.section === "scanners");
 
 function NotFoundPage() {
   return (
@@ -133,13 +135,19 @@ createRoot(document.getElementById("root")!).render(
               */}
               <Route path="/search/list/:id" element={<ComponentSearchPage mode="list" />} />
               {/*
-                Vulnerability routes stay mounted whether or not scanning is enabled. Each
-                page renders an explicit "not assessed" state instead of disappearing, so a
-                bookmarked or pasted link explains itself rather than 404ing.
+                Each module's pages, from the module list. Mounted whether or not the module is
+                on, so a bookmarked or pasted link explains itself rather than 404ing: either the
+                page shows its own "not enabled" state, or ModuleGate shows one.
               */}
-              <Route path="/vulnerabilities" element={<VulnerabilitiesPage />} />
-              <Route path="/vulnerabilities/:vulnerabilityId" element={<AdvisoryDetailPage />} />
-              <Route path="/malicious" element={<MaliciousPage />} />
+              {WEB_MODULES.flatMap((m) =>
+                (m.routes ?? []).map((r) => (
+                  <Route
+                    key={`${m.id}:${r.path}`}
+                    path={r.path}
+                    element={m.pagesExplainDisabled ? r.element : <ModuleGate id={m.id}>{r.element}</ModuleGate>}
+                  />
+                )),
+              )}
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/api-access" element={<ApiAccessPage />} />
@@ -183,13 +191,22 @@ createRoot(document.getElementById("root")!).render(
                   and a 404 on a path that worked yesterday reads as a broken deployment.
                 */}
                 <Route path="settings" element={<Navigate to="/admin/configuration" replace />} />
+                <Route path="modules" element={<AdminModulesPage />} />
+                {/* Each module's settings: scanners grouped under one tab, others on their own. */}
                 <Route path="scanners" element={<AdminScannersLayout />}>
-                  <Route index element={<Navigate to="/admin/scanners/vulnerabilities" replace />} />
-                  <Route path="vulnerabilities" element={<AdminVulnerabilitiesPage />} />
-                  <Route path="malicious" element={<AdminMaliciousPage />} />
+                  <Route index element={<Navigate to={`/admin/scanners/${SCANNER_PAGES[0]?.path ?? ""}`} replace />} />
+                  {SCANNER_PAGES.map((p) => (
+                    <Route key={p.path} path={p.path} element={p.element} />
+                  ))}
                 </Route>
-                <Route path="vulnerabilities" element={<MovedTo to="/admin/scanners/vulnerabilities" />} />
-                <Route path="malicious" element={<MovedTo to="/admin/scanners/malicious" />} />
+                {WEB_MODULES.flatMap((m) => m.adminPages ?? [])
+                  .filter((p) => p.section === undefined)
+                  .map((p) => (
+                    <Route key={p.path} path={p.path} element={p.element} />
+                  ))}
+                {WEB_MODULES.flatMap((m) => m.adminRedirects ?? []).map((r) => (
+                  <Route key={r.from} path={r.from} element={<MovedTo to={r.to} />} />
+                ))}
                 <Route path="audit" element={<AdminAuditPage />} />
                 <Route path="errors" element={<AdminErrorsPage />} />
               </Route>

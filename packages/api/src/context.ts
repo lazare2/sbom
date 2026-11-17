@@ -61,6 +61,9 @@ import { UnavailableScanner } from "./services/scanner/provider-scanner.js";
 import { TrivyScanner } from "./services/scanner/trivy.js";
 import { XrayScanner } from "./services/scanner/xray.js";
 import { rowsOf, type Row } from "./modules/applications/applications.service.js";
+import { PLATFORM_MODULES } from "./modules/platform/index.js";
+import type { PlatformModule } from "./modules/platform/module.js";
+import { ModuleRegistry } from "./modules/platform/registry.js";
 
 /**
  * Wiring for the whole application.
@@ -154,6 +157,11 @@ export interface AppContext {
   adminScans: ScansAdminService;
   adminMalicious: MaliciousAdminService;
   attributeDefinitions: AttributeDefinitionsService;
+  /**
+   * The modules this server runs (modules/platform/index.ts), their switches, their own
+   * services and the action plan they contribute to.
+   */
+  modules: ModuleRegistry;
 }
 
 export interface BuildContextOverrides {
@@ -162,6 +170,8 @@ export interface BuildContextOverrides {
   blobStore?: BlobStore;
   /** Substituted by the wiring tests so they never spawn a subprocess. */
   scanner?: VulnerabilityScanner;
+  /** The module list. Tests pass their own to prove a module plugs in without central edits. */
+  modules?: readonly PlatformModule[];
 }
 
 export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextOverrides = {}): AppContext {
@@ -473,7 +483,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const adminScans = new ScansAdminService({ db, blobStore, audit });
   const attributeDefinitions = new AttributeDefinitionsService({ db, audit });
 
-  return {
+  const ctx: AppContext = {
     config,
     db,
     logger,
@@ -525,5 +535,9 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     adminScans,
     adminMalicious,
     attributeDefinitions,
+    modules: new ModuleRegistry(overrides.modules ?? PLATFORM_MODULES),
   };
+  // After the core graph exists, so a module's services can depend on any of it.
+  ctx.modules.buildServices(ctx);
+  return ctx;
 }

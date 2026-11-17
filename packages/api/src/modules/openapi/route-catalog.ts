@@ -18,6 +18,7 @@ import {
   resetUserPasswordRequestSchema,
   resolveAccessRequestSchema,
   setGroupMembersRequestSchema,
+  setModuleEnabledSchema,
   setSignInMethodSchema,
   setSquadAccessSchema,
   squadSettingsSchema,
@@ -556,6 +557,23 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     summary: "One advisory, and everywhere it lands.",
     tag: "Vulnerabilities",
     auth: "user",
+  },
+  "GET /api/v1/modules": {
+    summary: "The platform's modules and which of them are switched on.",
+    tag: "Modules",
+    auth: "user",
+    notes:
+      "A switched-off module keeps its data and its addresses; its reads answer that the " +
+      "feature is not enabled.",
+  },
+  "PATCH /api/v1/admin/modules/:id": {
+    summary: "Switch a module on or off. Its data is kept either way.",
+    tag: "Modules",
+    auth: "admin",
+    body: setModuleEnabledSchema,
+    notes:
+      "The same switch as on the module's own settings page, with the same audit entry and " +
+      "the same first update when it is switched on. 400 for a module that cannot be switched off.",
   },
   "GET /api/v1/vuln-status": {
     summary: "Whether scanning is on, which provider is active, and how fresh its data is.",

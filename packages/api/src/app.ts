@@ -24,14 +24,12 @@ import { dashboardRoutes } from "./modules/dashboard/dashboard.routes.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
 import { ingestionRoutes } from "./modules/ingestion/ingestion.routes.js";
 import { RouteCollector } from "./modules/openapi/route-collector.js";
+import { ROUTE_CATALOG, type RouteMeta } from "./modules/openapi/route-catalog.js";
+import { PLATFORM_MODULES } from "./modules/platform/index.js";
+import { moduleAdminRoutes, moduleRoutes } from "./modules/platform/module.routes.js";
 import { openapiRoutes } from "./modules/openapi/openapi.routes.js";
 import { manualUploadRoutes } from "./modules/ingestion/manual-upload.routes.js";
-import {
-  vulnerabilityRoutes,
-  vulnStatusRoutes,
-} from "./modules/vulnerabilities/vulnerability.routes.js";
 import { reportRoutes } from "./modules/reports/reports.routes.js";
-import { maliciousRoutes, maliciousStatusRoutes } from "./modules/malicious/malicious.routes.js";
 import { scanRoutes } from "./modules/scans/scans.routes.js";
 import { authPlugin } from "./plugins/auth.plugin.js";
 import { contextPlugin } from "./plugins/context.plugin.js";
@@ -90,6 +88,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   // assert that every route in it is documented.
   app.decorate("routeTable", routeCollector);
 
+  /*
+    The API documentation: the central catalog plus what each module documents for its own
+    addresses. Merged once here, so the document and its coverage test read the same thing.
+  */
+  const modules = options.modules ?? PLATFORM_MODULES;
+  const routeCatalog: Record<string, RouteMeta> = { ...ROUTE_CATALOG };
+  for (const module of modules) {
+    for (const [key, meta] of Object.entries(module.routeDocs ?? {})) {
+      if (key in routeCatalog) throw new Error(`module "${module.id}" documents ${key} twice`);
+      routeCatalog[key] = meta;
+    }
+  }
+  app.decorate("routeCatalog", routeCatalog);
+
   // --- security & parsing ---------------------------------------------------
   await app.register(helmet, {
     // The API serves JSON only - the SPA is served by nginx (or Vite in dev),
@@ -138,6 +150,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     ...(options.db ? { db: options.db } : {}),
     ...(options.blobStore ? { blobStore: options.blobStore } : {}),
     ...(options.scanner ? { scanner: options.scanner } : {}),
+    modules,
     config,
   });
   await app.register(authPlugin);
@@ -186,23 +199,31 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       await api.register(inventoryRoutes, { prefix: "/inventory" });
 
       /*
-       * Vulnerability reads, in two scopes on purpose.
-       *
-       * `vulnerabilityRoutes` refuses with 409 `vuln_scanning_disabled` when the
-       * feature is off, so an unscanned estate can never be rendered as one with zero
-       * vulnerabilities. `vulnStatusRoutes` stays readable in that state, because the
-       * SPA has to be able to tell "disabled" from "broken" to decide what to show.
-       */
-      await api.register(vulnerabilityRoutes, { prefix: "" });
-      await api.register(vulnStatusRoutes, { prefix: "/vuln-status" });
+        Which modules exist and which are on: read by the menu on every page, and switched on
+        Administration -> Modules.
+      */
+      await api.register(moduleRoutes, { prefix: "/modules" });
+      await api.register(moduleAdminRoutes, { prefix: "/admin/modules" });
 
       /*
-       * Malicious packages, split the same way and for the same reason: the findings route
-       * refuses with 409 while detection is off so an unchecked estate can never render as a
-       * clean one, while the status route stays readable so the UI can say which it is.
-       */
-      await api.register(maliciousRoutes, { prefix: "/malicious" });
-      await api.register(maliciousStatusRoutes, { prefix: "/malicious-status" });
+        Each module's own addresses, from the module list rather than named here. Admin routes
+        get `requireAdmin` from the frame, in a scope of their own, so a module cannot forget it.
+      */
+      for (const module of modules) {
+        for (const routes of module.routes ?? []) {
+          if (routes.access === "admin") {
+            await api.register(
+              async (scoped) => {
+                scoped.addHook("preHandler", scoped.requireAdmin);
+                await scoped.register(routes.plugin);
+              },
+              { prefix: routes.prefix },
+            );
+          } else {
+            await api.register(routes.plugin, { prefix: routes.prefix });
+          }
+        }
+      }
 
       // Write APIs. Guarded as a whole scope by `requireAdmin`, so a route
       // added to that file is protected whether or not its author thought about it.
