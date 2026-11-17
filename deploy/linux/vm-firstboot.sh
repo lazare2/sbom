@@ -101,4 +101,9 @@ fi
 # The installer's disc holds a copy of this installation's secrets only when it moved one;
 # CREDENTIALS.txt is written on a fresh install. Both stay inside this machine.
 touch /srv/sbom/firstboot.done
+
+# cloud-init's work is done. Left on, it finds no disc at the next start (the installer
+# removes it), takes the machine for a new one and regenerates the SSH host keys - which
+# the Windows scripts then rightly refuse to trust.
+touch /etc/cloud/cloud-init.disabled
 echo "== done, $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
