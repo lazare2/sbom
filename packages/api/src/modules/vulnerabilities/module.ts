@@ -1,4 +1,6 @@
+import { acceptRiskSchema } from "@sbom/shared";
 import type { PlatformModule } from "../platform/module.js";
+import { acceptRiskRoutes } from "./accept-risk.routes.js";
 import { buildActionPlan } from "./action-plan.js";
 import { planInputFor, urgencyCountsFor } from "./project-urgency.js";
 import { updateVulnSettings, vulnAdminRoutes } from "./vuln-admin.routes.js";
@@ -33,7 +35,22 @@ export const vulnerabilitiesModule: PlatformModule = {
     { prefix: "", access: "user", plugin: vulnerabilityRoutes },
     { prefix: "/vuln-status", access: "user", plugin: vulnStatusRoutes },
     { prefix: "/admin/vuln", access: "admin", plugin: vulnAdminRoutes },
+    // Team leads (and administrators) accepting a risk on one project. Checks the lead itself.
+    { prefix: "", access: "user", plugin: acceptRiskRoutes },
   ],
+
+  routeDocs: {
+    "POST /api/v1/applications/:id/accepted-risks": {
+      summary: "Accept a risk on one project: for its squad's team leads and for administrators.",
+      tag: "Vulnerabilities",
+      auth: "user",
+      body: acceptRiskSchema,
+      notes:
+        "Reason and end date are required; the risk applies again once the end date passes. 403 " +
+        "for anybody who is neither an administrator nor a team lead of a squad the project " +
+        "belongs to; 404 for a project outside the caller's access.",
+    },
+  },
 
   jobs: [
     {
@@ -59,12 +76,14 @@ export const vulnerabilitiesModule: PlatformModule = {
   actionPlan: {
     async actions(ctx, request) {
       const { findings, context } = await planInputFor(ctx.db, request.applicationId);
-      return buildActionPlan(findings, context);
+      const targets = await ctx.settings.getTargetDates();
+      return buildActionPlan(findings, context, { targets, since: request.since, now: new Date() });
     },
   },
 
   projectUrgency: {
-    counts: (ctx, applicationIds) => urgencyCountsFor(ctx.db, applicationIds),
+    counts: async (ctx, applicationIds, visits) =>
+      urgencyCountsFor(ctx.db, applicationIds, await ctx.settings.getTargetDates(), visits),
   },
 
   async startupCheck(ctx) {

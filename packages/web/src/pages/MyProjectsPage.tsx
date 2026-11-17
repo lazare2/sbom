@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Card, CardHeader, EmptyState, ErrorBanner, LoadingBlock, PageHeader, Table, TableWrap, Td, Th, Tr } from "../components/ui.tsx";
+import { Badge, Card, CardHeader, EmptyState, ErrorBanner, LoadingBlock, PageHeader, Table, TableWrap, Td, Th, Tr } from "../components/ui.tsx";
 import { ProjectStatusBadge } from "../components/ActionPlan.tsx";
 import { formatRelative } from "../lib/format.ts";
 import { useMyProjects } from "../lib/queries.ts";
@@ -65,7 +65,16 @@ export function MyProjectsPage() {
                         {p.name}
                       </Link>
                     </Td>
-                    <Td className="text-sm text-text-muted">{p.reason}</Td>
+                    <Td className="text-sm text-text-muted">
+                      {p.reason}
+                      {p.counts.newSinceVisit > 0 ? (
+                        <span className="ml-2">
+                          <Badge tone="info" title="Vulnerabilities that appeared after your previous visit to this project.">
+                            {p.counts.newSinceVisit} new
+                          </Badge>
+                        </span>
+                      ) : null}
+                    </Td>
                     <Td className="text-sm text-text-muted">{p.lastBuildAt ? formatRelative(p.lastBuildAt) : "never"}</Td>
                     <Td className="text-xs text-text-muted">{p.via.join(", ")}</Td>
                   </Tr>

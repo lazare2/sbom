@@ -27,6 +27,7 @@ import {
   setTribeSquadsSchema,
   setTribeApplicationsSchema,
   setSquadMembersSchema,
+  setSquadLeadSchema,
   setUserApplicationAccessSchema,
   setUserSquadsSchema,
   setUserEnvironmentsRequestSchema,
@@ -834,6 +835,15 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     notes:
       "Membership is access: every member reaches what the squad is granted, in addition to " +
       "their own grants, and the estates those applications live in come with it.",
+  },
+  "PUT /api/v1/admin/squads/:id/members/:userId/lead": {
+    summary: "Mark a squad member as team lead, or not.",
+    tag: "Admin: squads",
+    auth: "admin",
+    body: setSquadLeadSchema,
+    notes:
+      "A team lead may accept a risk on the squad's projects, with a reason and an end date. " +
+      "404 when the account is not a member of the squad.",
   },
   "PUT /api/v1/admin/squads/:id/access": {
     summary: "Replace the groups and applications a squad is granted.",

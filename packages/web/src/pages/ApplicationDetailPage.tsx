@@ -43,7 +43,7 @@ import {
 } from "../components/Findings.tsx";
 import { ScanningDisabledNotice } from "../components/Severity.tsx";
 import { FixRecommendationsCard } from "../components/FixRecommendations.tsx";
-import { useApplicationVulnerabilities, useModules, useVulnStatus } from "../lib/queries.ts";
+import { useActionPlan, useApplicationVulnerabilities, useModules, useVulnStatus } from "../lib/queries.ts";
 import {
   Badge,
   Button,
@@ -769,6 +769,8 @@ function VulnerabilitiesTab({
     scope is shared by both views on purpose: narrowing to the base image and switching to
     recommendations should show the base image's upgrades, not quietly widen back out.
   */
+  // Whether this person may accept a risk here (an administrator, or a lead of its squad).
+  const plan = useActionPlan(applicationId);
   const viewSwitch = (
     <div role="tablist" aria-label="Vulnerability views" className="mb-3 flex gap-1 rounded-md bg-bg-subtle p-1 sm:w-fit">
       {(
@@ -824,6 +826,7 @@ function VulnerabilitiesTab({
           isLoading={isLoading}
           isFetching={isFetching}
           applicationId={applicationId}
+          canAcceptRisk={plan.data?.canAcceptRisk === true}
           onPageChange={(page) => setFilters((prev) => ({ ...prev, page }))}
         />
       </FindingsCard>

@@ -25,6 +25,8 @@ import {
   setSignInMethodSchema,
   setSquadAccessSchema,
   setSquadMembersSchema,
+  setSquadLeadSchema,
+  uuidSchema,
   setUserSquadsSchema,
   updateSquadSchema,
   oidcConnectionInputSchema,
@@ -50,6 +52,8 @@ import type { Actor } from "./audit.service.js";
 import { OidcClient } from "../../services/auth/oidc-client.js";
 
 /** The acting admin, denormalised onto every audit row this request writes. */
+const squadMemberParamsSchema = z.object({ id: uuidSchema, userId: uuidSchema });
+
 function actorOf(request: FastifyRequest): Actor {
   const user = getUser(request);
   // The token, when one authenticated this request rather than a browser session. See the
@@ -392,6 +396,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const body = parseOrThrow(setSquadMembersSchema, request.body);
     return reply.send({ squad: await squads.setMembers(id, body.userIds, actorOf(request)) });
+  });
+
+  /** One member's "Team lead" tick box. Its own call, so ticking one never resends the list. */
+  fastify.put("/squads/:id/members/:userId/lead", async (request, reply) => {
+    const { id, userId } = parseOrThrow(squadMemberParamsSchema, request.params, "Params");
+    const { isLead } = parseOrThrow(setSquadLeadSchema, request.body);
+    return reply.send({ squad: await squads.setLead(id, userId, isLead, actorOf(request)) });
   });
 
   /** The complete grant set: groups and individual applications, across any environment. */

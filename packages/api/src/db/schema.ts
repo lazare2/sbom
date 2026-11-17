@@ -371,6 +371,12 @@ export const squadMember = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Team lead of this squad: may accept a risk on the squad's projects, alone, with a reason
+     * and an end date. A mark on the membership rather than a kind of account, so a person can
+     * lead one squad and be a member of another. Every existing member starts as not a lead.
+     */
+    isLead: boolean("is_lead").notNull().default(false),
   },
   (t) => [
     primaryKey({ name: "squad_member_pkey", columns: [t.squadId, t.userId] }),
@@ -1579,6 +1585,26 @@ export const vulnerabilitySuppression = pgTable(
     index("vulnerability_suppression_component_idx").on(t.componentId),
     index("vulnerability_suppression_application_idx").on(t.applicationId),
   ],
+);
+
+/**
+ * When a person last opened a project's action plan, for "new since your last visit".
+ *
+ * One row per person and project, replaced on each visit. Losing it costs nothing but the
+ * "new" marks, so it holds no history and nothing else reads it.
+ */
+export const projectVisit = pgTable(
+  "project_visit",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => application.id, { onDelete: "cascade" }),
+    visitedAt: timestamp("visited_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: "project_visit_pkey", columns: [t.userId, t.applicationId] })],
 );
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ import {
 } from "@sbom/shared";
 import { useServerSort, type SortControl } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
-import { useCreateSuppression } from "../lib/mutations.ts";
+import { useAcceptRisk, useCreateSuppression } from "../lib/mutations.ts";
 import { formatNumber } from "../lib/format.ts";
 import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
 import { advisoryHeadline } from "../lib/advisory.ts";
@@ -234,6 +234,7 @@ export function FindingsTable({
   applicationId,
   onPageChange,
   sort,
+  canAcceptRisk,
 }: {
   data: Paginated<VulnerabilityFinding> | undefined;
   isLoading: boolean;
@@ -243,8 +244,13 @@ export function FindingsTable({
   onPageChange: (page: number) => void;
   /** Omit for a table rendered without sortable headers. */
   sort?: SortControl<(typeof findingSort)["fields"][number]>;
+  /** The caller leads a squad of this project: "Accept risk" for this project only. */
+  canAcceptRisk?: boolean;
 }) {
   const { isAdmin } = useAuth();
+  // Administrators keep their wider option; a team lead gets the project-only one.
+  const leadOnly = !isAdmin && canAcceptRisk === true && applicationId !== undefined;
+  const showAccept = isAdmin || leadOnly;
   const [accepting, setAccepting] = useState<VulnerabilityFinding | null>(null);
   const on = (field: (typeof findingSort)["fields"][number]) => (sort ? () => sort.toggle(field) : undefined);
   const at = (field: (typeof findingSort)["fields"][number]) => (sort ? sort.stateOf(field) : undefined);
@@ -282,7 +288,7 @@ export function FindingsTable({
                 CVSS
               </Th>
               <Th width="120px">Attack from</Th>
-              {isAdmin ? <Th width="110px" /> : null}
+              {showAccept ? <Th width="110px" /> : null}
             </tr>
           </thead>
           <tbody>
@@ -368,7 +374,7 @@ export function FindingsTable({
                 <Td>
                   <AttackVectorBadge exploitability={finding.exploitability} />
                 </Td>
-                {isAdmin ? (
+                {showAccept ? (
                   <Td>
                     {finding.suppressed ? null : (
                       <Button size="sm" variant="ghost" onClick={() => setAccepting(finding)}>
@@ -390,11 +396,11 @@ export function FindingsTable({
         onPageChange={onPageChange}
         isFetching={isFetching}
       />
-      <AcceptRiskModal
-        finding={accepting}
-        applicationId={applicationId}
-        onClose={() => setAccepting(null)}
-      />
+      {leadOnly ? (
+        <LeadAcceptRiskModal finding={accepting} applicationId={applicationId!} onClose={() => setAccepting(null)} />
+      ) : (
+        <AcceptRiskModal finding={accepting} applicationId={applicationId} onClose={() => setAccepting(null)} />
+      )}
     </>
   );
 }
@@ -566,6 +572,132 @@ function AcceptRiskModal({
         ) : null}
 
         <FormError error={create.error} />
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * A team lead accepting a risk on one of their squads' projects.
+ *
+ * Always this project only, and the end date is required: the risk comes back on its own when
+ * the date passes. The claim (real and accepted, or not reached) is chosen as on the
+ * administrator's form, for the same reason - it is published in VEX documents.
+ */
+function LeadAcceptRiskModal({
+  finding,
+  applicationId,
+  onClose,
+}: {
+  finding: VulnerabilityFinding | null;
+  applicationId: string;
+  onClose: () => void;
+}) {
+  const accept = useAcceptRisk(applicationId);
+  const [reason, setReason] = useState("");
+  const [until, setUntil] = useState("");
+  const [scope, setScope] = useState<"package" | "project">("package");
+  const [vexStatus, setVexStatus] = useState<VexStatus | "">("");
+  const [justification, setJustification] = useState<VexJustification | "">("");
+
+  if (!finding) return null;
+  const target = finding;
+  const today = new Date().toISOString().slice(0, 10);
+  const needsJustification = vexStatus !== "" && requiresJustification(vexStatus);
+  const complete =
+    reason.trim().length >= 3 && until > today && vexStatus !== "" && (!needsJustification || justification !== "");
+
+  function submit() {
+    if (vexStatus === "") return;
+    accept.mutate(
+      {
+        vulnerabilityId: target.vulnerabilityId,
+        ...(scope === "package" ? { componentId: target.componentId } : {}),
+        reason: reason.trim(),
+        // The end of the chosen day, in the browser's time zone.
+        expiresAt: new Date(`${until}T23:59:59`).toISOString(),
+        vexStatus,
+        ...(requiresJustification(vexStatus) && justification !== "" ? { vexJustification: justification } : {}),
+      },
+      {
+        onSuccess: () => {
+          setReason("");
+          setUntil("");
+          setVexStatus("");
+          setJustification("");
+          onClose();
+        },
+      },
+    );
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Accept ${finding.vulnerabilityId} in this project`}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={accept.isPending}>
+            Cancel
+          </Button>
+          <Button variant="primary" disabled={!complete || accept.isPending} onClick={submit}>
+            {accept.isPending ? "Saving…" : "Accept risk"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-xs text-text-muted">
+          As team lead you decide this alone. It is left out of this project's counts and action plan until the end
+          date, then it comes back by itself. It is recorded with your name and listed under Accepted risks.
+        </p>
+        <FormRow label="Applies to" htmlFor="lead-accept-scope">
+          <Select
+            id="lead-accept-scope"
+            value={scope}
+            onChange={(v) => setScope(v as typeof scope)}
+            ariaLabel="Accepted risk scope"
+            options={[
+              { value: "package", label: `Only ${finding.componentName} ${finding.componentVersion ?? ""} in this project`.trim() },
+              { value: "project", label: "Every package in this project" },
+            ]}
+          />
+        </FormRow>
+        <FormRow label="Until (required)" htmlFor="lead-accept-until">
+          <input
+            id="lead-accept-until"
+            type="date"
+            min={today}
+            value={until}
+            onChange={(e) => setUntil(e.target.value)}
+            className="h-[34px] w-full rounded-md border border-border-strong bg-bg-raised px-2 text-sm text-text-base"
+          />
+        </FormRow>
+        <FormRow label="Why (required)" htmlFor="lead-accept-reason">
+          <Textarea id="lead-accept-reason" value={reason} onChange={setReason} rows={3} />
+        </FormRow>
+        <FormRow label="What is being claimed" htmlFor="lead-accept-vex">
+          <Select
+            id="lead-accept-vex"
+            value={vexStatus}
+            onChange={(v) => setVexStatus(v as VexStatus | "")}
+            ariaLabel="VEX status"
+            options={[{ value: "", label: "Choose…" }, ...vexStatuses.map((v) => ({ value: v, label: VEX_STATUS_LABELS[v] }))]}
+          />
+        </FormRow>
+        {needsJustification ? (
+          <FormRow label="Justification" htmlFor="lead-accept-justification">
+            <Select
+              id="lead-accept-justification"
+              value={justification}
+              onChange={(v) => setJustification(v as VexJustification | "")}
+              ariaLabel="VEX justification"
+              options={[{ value: "", label: "Choose…" }, ...vexJustifications.map((j) => ({ value: j, label: VEX_JUSTIFICATION_LABELS[j] }))]}
+            />
+          </FormRow>
+        ) : null}
+        <FormError error={accept.error} />
       </div>
     </Modal>
   );

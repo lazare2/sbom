@@ -313,7 +313,7 @@ export async function vulnAdminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/suppressions", async (request, reply) => {
     const body = parseOrThrow(createSuppressionSchema, request.body);
     const actor = actorOf(request);
-    const created = await vulnerabilities.createSuppression(body, actor, await requireScope(request));
+    const created = await vulnerabilities.createSuppression(body, actor, (await requireScope(request)).id);
 
     await audit.record({
       actor,

@@ -1,6 +1,7 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
   ActionPlanResponse,
+  TargetDates,
   MyProjectsResponse,
   AttentionSettings,
   ModuleListResponse,
@@ -990,11 +991,27 @@ export function useMyProjects() {
   });
 }
 
-/** One project's status and action plan. */
-export function useActionPlan(applicationId: string) {
+/**
+ * One project's status and action plan.
+ *
+ * Opening it records a visit. `since` keeps "new since your last visit" measured from the same
+ * point while the page stays open, rather than each refresh clearing the marks just shown.
+ */
+export function useActionPlan(applicationId: string, since?: string | null) {
   return useQuery({
-    queryKey: queryKeys.actionPlan(applicationId),
-    queryFn: () => api.get<ActionPlanResponse>(`/applications/${encodeURIComponent(applicationId)}/action-plan`),
+    queryKey: [...queryKeys.actionPlan(applicationId), since ?? null],
+    queryFn: () =>
+      api.get<ActionPlanResponse>(
+        `/applications/${encodeURIComponent(applicationId)}/action-plan${since ? `?since=${encodeURIComponent(since)}` : ""}`,
+      ),
+  });
+}
+
+/** Target dates, for Administration -> Configuration. */
+export function useTargetDates() {
+  return useQuery({
+    queryKey: ["admin", "developer", "targets"],
+    queryFn: () => api.get<{ targets: TargetDates }>("/admin/developer/targets"),
   });
 }
 

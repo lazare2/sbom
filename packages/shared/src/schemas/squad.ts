@@ -159,7 +159,13 @@ export interface SquadMember {
   lastName: string | null;
   role: "admin" | "user";
   isActive: boolean;
+  /** Team lead of this squad: may accept a risk on the squad's projects. */
+  isLead: boolean;
 }
+
+/** One tick box on a squad's member list. */
+export const setSquadLeadSchema = z.object({ isLead: z.boolean() });
+export type SetSquadLead = z.infer<typeof setSquadLeadSchema>;
 
 /** A granted group or application, named, with the estate it lives in. */
 export interface SquadGrant {

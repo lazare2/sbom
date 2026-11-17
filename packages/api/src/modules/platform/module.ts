@@ -66,7 +66,11 @@ export interface PlatformModule {
 
 export interface ProjectUrgencyContributor {
   /** Counts per application id. The ids are already access-checked by the caller. */
-  counts(ctx: AppContext, applicationIds: readonly string[]): Promise<Map<string, ProjectUrgencyCounts>>;
+  counts(
+    ctx: AppContext,
+    applicationIds: readonly string[],
+    visits: ReadonlyMap<string, Date>,
+  ): Promise<Map<string, ProjectUrgencyCounts>>;
 }
 
 export interface ModuleToggle {
@@ -113,6 +117,8 @@ export interface ActionPlanRequest {
   readonly applicationId: string;
   /** The caller's access. The frame has already checked the project is inside it. */
   readonly access: ReadAccess;
+  /** The caller's previous visit to the project, for "new since your last visit". */
+  readonly since: Date | null;
 }
 
 export type { ActionPlanItem, ModuleActionPlanItem } from "@sbom/shared";

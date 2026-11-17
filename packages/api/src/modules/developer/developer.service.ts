@@ -12,6 +12,7 @@ import { rowsOf, type Row } from "../applications/applications.service.js";
 import { applicationInScope, type ReadAccess, type ReadScope } from "../environments/environment.service.js";
 import { SQUAD_APPLICATIONS } from "../squads/reach.js";
 import { EMPTY_URGENCY_COUNTS } from "../platform/registry.js";
+import { isLeadOf } from "../squads/leads.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -75,7 +76,8 @@ export class DeveloperService {
            OR EXISTS (SELECT 1 FROM user_group WHERE user_id = ${userId}::uuid)) AS any
     `);
 
-    const counts = await this.ctx.modules.urgencyCounts(this.ctx, list.map((r) => r.id));
+    const visits = await this.visitsOf(userId, list.map((r) => r.id));
+    const counts = await this.ctx.modules.urgencyCounts(this.ctx, list.map((r) => r.id), visits);
     const projects: MyProject[] = list.map((r) => {
       const lastBuildAt = r.last_scan_at === null ? null : new Date(r.last_scan_at).toISOString();
       const c: ProjectUrgencyCounts = counts?.get(r.id) ?? { ...EMPTY_URGENCY_COUNTS };
@@ -99,10 +101,25 @@ export class DeveloperService {
     return { projects, hasMembership: rowsOf(membership)[0]?.any === true };
   }
 
-  /** One project's status and action plan. 404 when it is outside the caller's access. */
-  async actionPlan(applicationId: string, access: ReadAccess): Promise<ActionPlanResponse> {
+  /**
+   * One project's status and action plan. 404 when it is outside the caller's access.
+   *
+   * Records the visit. "New" is measured from the visit before this one; `since` lets the page
+   * keep measuring from the same point while it is open, rather than every refresh clearing the
+   * marks it has just shown.
+   */
+  async actionPlan(
+    applicationId: string,
+    user: { id: string; role: string },
+    access: ReadAccess,
+    since?: Date,
+  ): Promise<ActionPlanResponse> {
     const app = await this.ctx.applications.getById(applicationId, access);
-    const counts = await this.ctx.modules.urgencyCounts(this.ctx, [applicationId]);
+    const stored = (await this.visitsOf(user.id, [applicationId])).get(applicationId) ?? null;
+    const previous = since ?? stored;
+    const visits = new Map<string, Date>(previous ? [[applicationId, previous]] : []);
+
+    const counts = await this.ctx.modules.urgencyCounts(this.ctx, [applicationId], visits);
     const c = counts?.get(applicationId) ?? { ...EMPTY_URGENCY_COUNTS };
     const { status, reason } = projectStatus({
       counts: c,
@@ -113,7 +130,37 @@ export class DeveloperService {
     });
     // The registry checks access again before asking any module; cheap, and it keeps the rule
     // in one place for every caller.
-    const items = await this.ctx.modules.actionPlan(this.ctx, applicationId, access);
-    return { applicationId, name: app.name, status, reason, counts: c, lastBuildAt: app.lastScanAt, items };
+    const items = await this.ctx.modules.actionPlan(this.ctx, applicationId, access, previous);
+    const canAcceptRisk = user.role === "admin" || (await isLeadOf(this.ctx.db, user.id, applicationId));
+    const targets = await this.ctx.settings.getTargetDates();
+
+    await this.ctx.db.execute(sql`
+      INSERT INTO project_visit (user_id, application_id, visited_at)
+      VALUES (${user.id}::uuid, ${applicationId}::uuid, now())
+      ON CONFLICT (user_id, application_id) DO UPDATE SET visited_at = now()
+    `);
+
+    return {
+      applicationId,
+      name: app.name,
+      previousVisitAt: previous?.toISOString() ?? null,
+      canAcceptRisk,
+      targets,
+      status,
+      reason,
+      counts: c,
+      lastBuildAt: app.lastScanAt,
+      items,
+    };
+  }
+
+  /** The caller's previous visit to each project, where there was one. */
+  private async visitsOf(userId: string, applicationIds: readonly string[]): Promise<Map<string, Date>> {
+    if (applicationIds.length === 0) return new Map();
+    const rows = await this.ctx.db.execute<Row<{ application_id: string; visited_at: string | Date }>>(sql`
+      SELECT application_id, visited_at FROM project_visit
+       WHERE user_id = ${userId}::uuid AND application_id = ANY(${sql.param([...applicationIds])}::uuid[])
+    `);
+    return new Map(rowsOf(rows).map((r) => [r.application_id, new Date(r.visited_at)]));
   }
 }

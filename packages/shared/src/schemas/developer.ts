@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { SeverityCounts, VulnSeverity } from "./vulnerability.js";
 
 /**
@@ -69,6 +70,10 @@ export interface ProjectUrgencyCounts {
   none: number;
   /** Of `none`: critical or high. Said in the reason, because waiting on them is a risk too. */
   noneSerious: number;
+  /** Past their target date (see `targetDays`). */
+  late: number;
+  /** First seen after the person's previous visit to the project. 0 when there was none. */
+  newSinceVisit: number;
 }
 
 export interface ProjectStatusInput {
@@ -96,7 +101,9 @@ export function projectStatus(input: ProjectStatusInput): { status: ProjectStatu
       : { status: "nothing-to-do", reason: "Vulnerability scanning is switched off, so nothing is checked." };
   }
 
-  const staleNote = input.stale ? ` No recent build: ${built}.` : "";
+  const staleNote =
+    (c.late > 0 ? ` ${c.late} ${c.late === 1 ? "is" : "are"} past the target date.` : "") +
+    (input.stale ? ` No recent build: ${built}.` : "");
   if (c.now > 0) {
     const parts: string[] = [];
     if (c.nowUsedInAttacks > 0) parts.push(`${plural(c.nowUsedInAttacks, "vulnerability", "vulnerabilities")} used in real attacks`);
@@ -119,6 +126,48 @@ export function projectStatus(input: ProjectStatusInput): { status: ProjectStatu
     status: "nothing-to-do",
     reason: c.total === 0 ? "No known vulnerabilities." : `No critical or high vulnerability with a fix${tail}.`,
   };
+}
+
+// --- Target dates ------------------------------------------------------------------------
+
+/**
+ * How many days a team has to fix a vulnerability, by rule. Only vulnerabilities with a fix
+ * have one; the rest have none - nobody can be late fixing what cannot be fixed.
+ *
+ *   usedInAttacksDays  used in real attacks (CISA KEV), fix available      starts at 7
+ *   criticalDays       critical, fix available                              starts at the
+ *                      existing "critical fix" value in Needs attention (30) - the same setting
+ *   highDays           high, fix available                                  starts at 60
+ *
+ * The clock starts when the vulnerability was first seen in that project: the later of when it
+ * was first found in the package version and the project's first build containing that version.
+ * Where two rules apply, the shorter one wins.
+ */
+export const targetDatesSchema = z.object({
+  usedInAttacksDays: z.coerce.number().int().min(1).max(3650),
+  criticalDays: z.coerce.number().int().min(1).max(3650),
+  highDays: z.coerce.number().int().min(1).max(3650),
+});
+export type TargetDates = z.infer<typeof targetDatesSchema>;
+
+export const DEFAULT_TARGET_DATES: TargetDates = { usedInAttacksDays: 7, criticalDays: 30, highDays: 60 };
+
+export interface TargetRule {
+  days: number;
+  /** The rule in words, shown beside every date. */
+  rule: string;
+}
+
+export function targetFor(
+  f: { fixable: boolean; usedInAttacks: boolean; severity: VulnSeverity },
+  t: TargetDates,
+): TargetRule | null {
+  if (!f.fixable) return null;
+  const rules: TargetRule[] = [];
+  if (f.usedInAttacks) rules.push({ days: t.usedInAttacksDays, rule: `used in real attacks, fix available: ${t.usedInAttacksDays} days` });
+  if (f.severity === "critical") rules.push({ days: t.criticalDays, rule: `critical, fix available: ${t.criticalDays} days` });
+  if (f.severity === "high") rules.push({ days: t.highDays, rule: `high, fix available: ${t.highDays} days` });
+  return rules.sort((a, b) => a.days - b.days)[0] ?? null;
 }
 
 // --- My projects -------------------------------------------------------------------------
@@ -170,6 +219,13 @@ export interface ActionPlanItem {
   toVersion?: string;
   /** The advisories behind it, for the link to the full list. */
   vulnerabilityIds: string[];
+  /** The earliest target date among its vulnerabilities, and the rule that set it. */
+  dueAt?: string;
+  dueRule?: string;
+  /** Past `dueAt`. */
+  late?: boolean;
+  /** Some of its vulnerabilities appeared after the person's previous visit. */
+  isNew?: boolean;
 }
 
 /** An action plan item, tagged with the module that contributed it. */
@@ -180,6 +236,11 @@ export interface ModuleActionPlanItem extends ActionPlanItem {
 export interface ActionPlanResponse {
   applicationId: string;
   name: string;
+  /** The person's previous visit, which "new" is measured from. Null on a first visit. */
+  previousVisitAt: string | null;
+  /** True for administrators and for team leads of a squad this project belongs to. */
+  canAcceptRisk: boolean;
+  targets: TargetDates;
   status: ProjectStatus;
   reason: string;
   counts: ProjectUrgencyCounts;

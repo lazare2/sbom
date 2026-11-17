@@ -73,9 +73,10 @@ export class SquadsService {
           last_name: string | null;
           role: "admin" | "user";
           is_active: boolean;
+          is_lead: boolean;
         }>
       >(sql`
-        SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_active
+        SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.is_active, sm.is_lead
           FROM squad_member sm JOIN "user" u ON u.id = sm.user_id
          WHERE sm.squad_id = ${id}::uuid
          ORDER BY lower(coalesce(u.last_name, '')), lower(coalesce(u.first_name, '')), lower(u.email)
@@ -108,6 +109,7 @@ export class SquadsService {
           lastName: m.last_name,
           role: m.role,
           isActive: m.is_active,
+          isLead: m.is_lead === true,
         }),
       ),
       groups: rowsOf(groups).map(toGrant),
@@ -288,6 +290,33 @@ export class SquadsService {
       },
     });
 
+    return this.get(id);
+  }
+
+  /**
+   * Marks a member as team lead of this squad, or not. Only an existing member: leading a squad
+   * one is not on would mean nothing, and silently adding them would be a second decision.
+   */
+  async setLead(id: string, userId: string, isLead: boolean, actor: Actor): Promise<SquadDetail> {
+    await this.require(id);
+    const result = await this.deps.db.execute<Row<{ was: boolean }>>(sql`
+      UPDATE squad_member sm SET is_lead = ${isLead}
+        FROM (SELECT is_lead AS was FROM squad_member
+               WHERE squad_id = ${id}::uuid AND user_id = ${userId}::uuid FOR UPDATE) old
+       WHERE sm.squad_id = ${id}::uuid AND sm.user_id = ${userId}::uuid
+      RETURNING old.was
+    `);
+    const row = rowsOf(result)[0];
+    if (!row) throw new NotFoundError("Squad member");
+    if (row.was !== isLead) {
+      await this.deps.audit.record({
+        actor,
+        action: "squad.lead_set",
+        targetType: "squad",
+        targetId: id,
+        metadata: { userId, isLead: { from: row.was, to: isLead } },
+      });
+    }
     return this.get(id);
   }
 

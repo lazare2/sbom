@@ -1,7 +1,9 @@
 import {
   EMPTY_SEVERITY_COUNTS,
   findingUrgency,
+  targetFor,
   type ActionPlanItem,
+  type TargetDates,
   type ProjectUrgencyCounts,
   type SeverityCounts,
   type Urgency,
@@ -43,6 +45,42 @@ export interface PlanFinding {
   paths: string[];
   /** The direct dependency that brought it in, when it is transitive. */
   pulledInBy: string[];
+  /** When it was first seen in this project: the target-date clock starts here. */
+  startedAt: string;
+}
+
+/** What the dates on the plan are measured against. */
+export interface PlanTiming {
+  targets: TargetDates;
+  /** The person's previous visit; vulnerabilities seen after it are "new". */
+  since: Date | null;
+  now: Date;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The target date of one vulnerability, and the rule that set it. Null when no rule applies. */
+export function dueOf(f: PlanFinding, targets: TargetDates): { dueAt: Date; rule: string } | null {
+  const target = targetFor({ fixable: f.fixState === "fixed", usedInAttacks: f.knownExploited, severity: f.severity }, targets);
+  if (!target) return null;
+  return { dueAt: new Date(new Date(f.startedAt).getTime() + target.days * DAY_MS), rule: target.rule };
+}
+
+/** Dates for a group of vulnerabilities: the earliest target, whether it has passed, anything new. */
+function timingOf(rows: readonly PlanFinding[], timing: PlanTiming | undefined) {
+  if (!timing) return {};
+  const dues = rows
+    .map((r) => dueOf(r, timing.targets))
+    .filter((d): d is { dueAt: Date; rule: string } => d !== null)
+    .sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+  const first = dues[0];
+  const isNew = timing.since !== null && rows.some((r) => new Date(r.startedAt) > timing.since!);
+  return {
+    ...(first
+      ? { dueAt: first.dueAt.toISOString(), dueRule: first.rule, late: first.dueAt.getTime() < timing.now.getTime() }
+      : {}),
+    ...(isNew ? { isNew: true } : {}),
+  };
 }
 
 export interface PlanContext {
@@ -68,9 +106,16 @@ export function urgencyOf(f: PlanFinding): Urgency {
 }
 
 /** The counts a project's status is computed from. */
-export function urgencyCounts(findings: readonly PlanFinding[]): ProjectUrgencyCounts {
-  const c: ProjectUrgencyCounts = { total: 0, now: 0, nowUsedInAttacks: 0, soon: 0, later: 0, none: 0, noneSerious: 0 };
+export function urgencyCounts(findings: readonly PlanFinding[], timing?: PlanTiming): ProjectUrgencyCounts {
+  const c: ProjectUrgencyCounts = {
+    total: 0, now: 0, nowUsedInAttacks: 0, soon: 0, later: 0, none: 0, noneSerious: 0, late: 0, newSinceVisit: 0,
+  };
   for (const f of findings) {
+    if (timing) {
+      const due = dueOf(f, timing.targets);
+      if (due && due.dueAt.getTime() < timing.now.getTime()) c.late += 1;
+      if (timing.since && new Date(f.startedAt) > timing.since) c.newSinceVisit += 1;
+    }
     c.total += 1;
     const u = urgencyOf(f);
     c[u] += 1;
@@ -158,7 +203,11 @@ export function upgradeLine(ecosystem: string, name: string, version: string, pu
 }
 
 /** Builds the plan. Items come back unsorted by module; the frame sorts by priority. */
-export function buildActionPlan(findings: readonly PlanFinding[], context: PlanContext): ActionPlanItem[] {
+export function buildActionPlan(
+  findings: readonly PlanFinding[],
+  context: PlanContext,
+  timing?: PlanTiming,
+): ActionPlanItem[] {
   const items: ActionPlanItem[] = [];
   const fixable = (f: PlanFinding) => f.fixState === "fixed";
   const noFix: PlanFinding[] = findings.filter((f) => !fixable(f));
@@ -209,6 +258,7 @@ export function buildActionPlan(findings: readonly PlanFinding[], context: PlanC
       ...(from ? { fromVersion: from } : {}),
       ...(to ? { toVersion: to } : {}),
       vulnerabilityIds: [...new Set(rows.map((r) => r.vulnerabilityId))],
+      ...timingOf(rows, timing),
     });
   }
 
@@ -233,6 +283,7 @@ export function buildActionPlan(findings: readonly PlanFinding[], context: PlanC
       where: `Your Dockerfile's FROM line${context.imageRef ? ` (image ${context.imageRef})` : ""}: keep the tag, or move to the newest patch release of ${base}.`,
       copyLine: "docker build --pull --no-cache .",
       vulnerabilityIds: [...new Set(osFixable.map((r) => r.vulnerabilityId))],
+      ...timingOf(osFixable, timing),
     });
   }
 
@@ -251,6 +302,7 @@ export function buildActionPlan(findings: readonly PlanFinding[], context: PlanC
       usedInAttacks: noFix.filter((r) => r.knownExploited).length,
       remote: noFix.filter(isRemote).length,
       vulnerabilityIds: [...new Set(noFix.map((r) => r.vulnerabilityId))],
+      ...(timing?.since && noFix.some((r) => new Date(r.startedAt) > timing.since!) ? { isNew: true } : {}),
     });
   }
 

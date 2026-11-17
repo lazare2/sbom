@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import type { ProjectUrgencyCounts, VulnSeverity } from "@sbom/shared";
+import type { ProjectUrgencyCounts, TargetDates, VulnSeverity } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
 import type { PlanContext, PlanFinding } from "./action-plan.js";
@@ -20,13 +20,39 @@ const REMOTE = sql`substring(upper(v.cvss_vector) from ${sql.raw(`'${AV_PATTERN}
 const NOW = sql`(${FIXABLE} AND (v.known_exploited OR (v.severity = 'critical' AND ${REMOTE})))`;
 const SOON = sql`(${FIXABLE} AND NOT ${NOW} AND v.severity IN ('critical', 'high'))`;
 
+/**
+ * When the vulnerability was first seen in this project: the later of when it was first found in
+ * the package version and the project's first build containing that version. Over `cv`, `c`, `a`.
+ * The (component_id, application_id) prefix of scan_component_search_idx answers the subquery.
+ */
+export const STARTED_AT = sql`greatest(cv.first_seen_at, (
+  SELECT min(s2.created_at) FROM scan_component sc2 JOIN scan s2 ON s2.id = sc2.scan_id
+   WHERE sc2.component_id = c.id AND sc2.application_id = a.id
+))`;
+
+/** Days allowed by the target-date rules (`targetFor` in @sbom/shared), or NULL for none. */
+function targetDaysSql(t: TargetDates) {
+  // LEAST ignores NULLs, and is NULL only when no rule applies.
+  return sql`CASE WHEN NOT ${FIXABLE} THEN NULL ELSE LEAST(
+    CASE WHEN v.known_exploited THEN ${t.usedInAttacksDays}::int END,
+    CASE WHEN v.severity = 'critical' THEN ${t.criticalDays}::int END,
+    CASE WHEN v.severity = 'high' THEN ${t.highDays}::int END
+  ) END`;
+}
+
 /** Urgency counts per application, for the ids given (already access-checked by the caller). */
 export async function urgencyCountsFor(
   db: Database,
   applicationIds: readonly string[],
+  targets: TargetDates,
+  /** Each project's previous visit by the caller, for "new since your last visit". */
+  visits: ReadonlyMap<string, Date> = new Map(),
 ): Promise<Map<string, ProjectUrgencyCounts>> {
   const out = new Map<string, ProjectUrgencyCounts>();
   if (applicationIds.length === 0) return out;
+  const ids = [...applicationIds];
+  const since = ids.map((id) => visits.get(id)?.toISOString() ?? null);
+  const days = targetDaysSql(targets);
   const rows = await db.execute<
     Row<{
       id: string;
@@ -37,6 +63,8 @@ export async function urgencyCountsFor(
       later: number | string;
       none: number | string;
       none_serious: number | string;
+      late: number | string;
+      new_since: number | string;
     }>
   >(sql`
     SELECT a.id,
@@ -46,14 +74,16 @@ export async function urgencyCountsFor(
            count(*) FILTER (WHERE ${SOON})::int AS soon,
            count(*) FILTER (WHERE ${FIXABLE} AND NOT ${NOW} AND NOT ${SOON})::int AS later,
            count(*) FILTER (WHERE NOT ${FIXABLE})::int AS none,
-           count(*) FILTER (WHERE NOT ${FIXABLE} AND v.severity IN ('critical', 'high'))::int AS none_serious
+           count(*) FILTER (WHERE NOT ${FIXABLE} AND v.severity IN ('critical', 'high'))::int AS none_serious,
+           count(*) FILTER (WHERE ${STARTED_AT} + make_interval(days => ${days}) < now())::int AS late,
+           count(*) FILTER (WHERE vis.since IS NOT NULL AND ${STARTED_AT} > vis.since)::int AS new_since
       FROM application a
+      JOIN unnest(${sql.param(ids)}::uuid[], ${sql.param(since)}::timestamptz[]) AS vis(id, since) ON vis.id = a.id
       JOIN scan_component sc ON sc.scan_id = a.latest_scan_id
       JOIN component c ON c.id = sc.component_id
       JOIN component_vulnerability cv ON cv.component_id = c.id
       JOIN vulnerability v ON v.id = cv.vulnerability_id
-     WHERE a.id = ANY(${sql.param([...applicationIds])}::uuid[])
-       AND ${NOT_SUPPRESSED}
+     WHERE ${NOT_SUPPRESSED}
      GROUP BY a.id
   `);
   for (const r of rowsOf(rows)) {
@@ -65,6 +95,8 @@ export async function urgencyCountsFor(
       later: Number(r.later),
       none: Number(r.none),
       noneSerious: Number(r.none_serious),
+      late: Number(r.late),
+      newSinceVisit: Number(r.new_since),
     });
   }
   return out;
@@ -101,12 +133,14 @@ export async function planInputFor(
       cvss_vector: string | null;
       paths: string[] | null;
       pulled_in_by: string[] | null;
+      started_at: string | Date;
     }>
   >(sql`
     SELECT c.id AS component_id, c.name, c.version, c.ecosystem, c.purl,
            ${SCOPE_GROUP_EXPR} AS origin,
            v.id AS vulnerability_id, v.severity, v.known_exploited, v.cvss_vector,
-           cv.fix_state, cv.fix_versions, sc.paths, sc.pulled_in_by
+           cv.fix_state, cv.fix_versions, sc.paths, sc.pulled_in_by,
+           ${STARTED_AT} AS started_at
       FROM application a
       JOIN scan_component sc ON sc.scan_id = a.latest_scan_id
       JOIN component c ON c.id = sc.component_id
@@ -131,6 +165,7 @@ export async function planInputFor(
       cvssVector: r.cvss_vector,
       paths: r.paths ?? [],
       pulledInBy: r.pulled_in_by ?? [],
+      startedAt: new Date(r.started_at).toISOString(),
     })),
     // The pretty name when the SBOM carried one, else "debian 12" from name and version.
     context: {

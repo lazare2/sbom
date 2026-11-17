@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   PROJECT_STATUS_LABELS,
   type ActionPlanResponse,
@@ -8,6 +8,10 @@ import {
 } from "@sbom/shared";
 import { useActionPlan } from "../lib/queries.ts";
 import { formatRelative } from "../lib/format.ts";
+
+function formatDate(iso: string | undefined): string {
+  return iso ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "";
+}
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorBanner, LoadingBlock, type BadgeTone } from "./ui.tsx";
 
 const STATUS_TONE: Record<ProjectStatus, BadgeTone> = {
@@ -41,7 +45,8 @@ const SIZE_LABEL: Record<NonNullable<ModuleActionPlanItem["size"]>, string> = {
 export function planAsText(plan: ActionPlanResponse): string {
   const lines = [`Action plan for ${plan.name}: ${PROJECT_STATUS_LABELS[plan.status]}`, plan.reason, ""];
   plan.items.forEach((item, i) => {
-    lines.push(`${i + 1}. [${URGENCY_LABEL[item.urgency]}] ${item.title}`);
+    lines.push(`${i + 1}. [${URGENCY_LABEL[item.urgency]}${item.late ? ", LATE" : ""}] ${item.title}`);
+    if (item.dueAt) lines.push(`   Due ${item.dueAt.slice(0, 10)} (${item.dueRule})`);
     lines.push(`   ${item.reason}`);
     if (item.size) lines.push(`   ${SIZE_LABEL[item.size]}`);
     if (item.where) lines.push(`   Where: ${item.where}`);
@@ -73,7 +78,12 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
  * list stays one click away.
  */
 export function ActionPlanPanel({ applicationId, onShowAll }: { applicationId: string; onShowAll: () => void }) {
-  const { data, isLoading, error, refetch } = useActionPlan(applicationId);
+  // The previous visit as the first answer gave it; later refreshes keep measuring from there.
+  const [since, setSince] = useState<string | null | undefined>(undefined);
+  const { data, isLoading, error, refetch } = useActionPlan(applicationId, since);
+  useEffect(() => {
+    if (since === undefined && data) setSince(data.previousVisitAt);
+  }, [data, since]);
   if (isLoading) return <LoadingBlock label="Loading the action plan" />;
   if (error) return <ErrorBanner error={error} onRetry={() => void refetch()} />;
   if (!data) return null;
@@ -91,6 +101,10 @@ export function ActionPlanPanel({ applicationId, onShowAll }: { applicationId: s
           <>
             {data.reason}
             {data.lastBuildAt ? ` Last build ${formatRelative(data.lastBuildAt)}.` : ""}
+            {data.counts.newSinceVisit > 0
+              ? ` ${data.counts.newSinceVisit} new since your last visit (${formatRelative(data.previousVisitAt!)}).`
+              : ""}
+            {data.canAcceptRisk ? " You can accept a risk on this project from its vulnerability list." : ""}
           </>
         }
         actions={
@@ -112,10 +126,26 @@ export function ActionPlanPanel({ applicationId, onShowAll }: { applicationId: s
                 <span className="nums w-5 text-sm text-text-faint">{item.kind === "no-fix" ? "" : `${index + 1}.`}</span>
                 <Badge tone={URGENCY_TONE[item.urgency]}>{URGENCY_LABEL[item.urgency]}</Badge>
                 <span className="text-sm font-medium text-text-base">{item.title}</span>
+                {item.isNew ? (
+                  <Badge tone="info" title="Appeared after your previous visit to this project.">
+                    New
+                  </Badge>
+                ) : null}
+                {item.late ? (
+                  <Badge tone="danger" title={`Target date ${formatDate(item.dueAt)} (${item.dueRule}).`}>
+                    Late
+                  </Badge>
+                ) : null}
                 {item.size && item.size !== "unknown" ? (
                   <span className="text-xs text-text-muted">· {SIZE_LABEL[item.size]}</span>
                 ) : null}
               </div>
+              {item.dueAt ? (
+                <div className={`mt-1 pl-7 text-xs ${item.late ? "font-medium text-danger" : "text-text-muted"}`}>
+                  {item.late ? "Was due" : "Due"} {formatDate(item.dueAt)}: {item.dueRule}, counted from when it was first
+                  seen in this project.
+                </div>
+              ) : null}
               <div className="mt-1 pl-7 text-sm text-text-muted">{item.reason}</div>
               {item.where ? <div className="mt-1 pl-7 text-xs text-text-muted">Where: {item.where}</div> : null}
               {item.copyLine ? (

@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type {
+  AcceptRisk,
+  TargetDates,
   ModuleState,
   ApiTokenCreated,
   CreateApiToken,
@@ -740,6 +742,16 @@ export function useSetSquadMembers() {
   });
 }
 
+/** One member's "Team lead" tick box: saved at once, on its own. */
+export function useSetSquadLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; userId: string; isLead: boolean }) =>
+      api.put<{ squad: SquadDetail }>(`/admin/squads/${vars.id}/members/${vars.userId}/lead`, { isLead: vars.isLead }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+}
+
 export function useSetSquadAccess() {
   const qc = useQueryClient();
   return useMutation({
@@ -1020,6 +1032,31 @@ export function useClearApiErrors() {
     mutationFn: () => api.delete<{ removed: number }>("/admin/errors"),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["admin", "errors"] });
+    },
+  });
+}
+
+/** A team lead (or administrator) accepting a risk on one project: reason and end date required. */
+export function useAcceptRisk(applicationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AcceptRisk) =>
+      api.post<{ id: string }>(`/applications/${encodeURIComponent(applicationId)}/accepted-risks`, body),
+    onSuccess: () => {
+      invalidateVulnerabilities(qc);
+      void qc.invalidateQueries({ queryKey: ["developer"] });
+    },
+  });
+}
+
+/** Changes the target dates. Every action plan and status follows at once. */
+export function useUpdateTargetDates() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TargetDates) => api.put<{ targets: TargetDates }>("/admin/developer/targets", body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin"] });
+      void qc.invalidateQueries({ queryKey: ["developer"] });
     },
   });
 }

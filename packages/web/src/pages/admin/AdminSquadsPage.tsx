@@ -6,6 +6,7 @@ import {
   useDeleteSquad,
   useSetSquadAccess,
   useSetSquadMembers,
+  useSetSquadLead,
   useUpdateSquadSettings,
 } from "../../lib/mutations.ts";
 import {
@@ -316,6 +317,7 @@ function ManageSquadModal({ squadId, onClose }: { squadId: string; onClose: () =
 
 function MembersEditor({ squad, onDone }: { squad: SquadDetail; onDone: () => void }) {
   const save = useSetSquadMembers();
+  const setLead = useSetSquadLead();
   const [selected, setSelected] = useState<string[]>(squad.members.map((m) => m.id));
   const [search, setSearch] = useState("");
   const debounced = useDebounced(search, 250);
@@ -341,7 +343,11 @@ function MembersEditor({ squad, onDone }: { squad: SquadDetail; onDone: () => vo
 
   return (
     <div className="space-y-2">
-      <FormError error={save.error} />
+      <FormError error={save.error ?? setLead.error} />
+      <p className="text-[11px] text-text-muted">
+        A team lead may accept a risk on this squad's projects, with a reason and an end date. Tick "Team lead"
+        beside a saved member; it is saved at once.
+      </p>
       <TextInput value={search} onChange={setSearch} placeholder="Search people by name or email…" ariaLabel="Search people" />
       <div className="max-h-[45vh] min-h-[10rem] overflow-y-auto rounded-md border border-border-base p-2">
         {users.isLoading && rows.length === 0 ? (
@@ -359,11 +365,24 @@ function MembersEditor({ squad, onDone }: { squad: SquadDetail; onDone: () => vo
                   }
                   label={displayName(u) ? `${displayName(u)} - ${u.email}` : u.email}
                 />
-                {u.role === "admin" ? (
-                  <Badge tone="accent" title="Administrators already reach everything; membership is recorded for when that changes.">
-                    admin
-                  </Badge>
-                ) : null}
+                <span className="flex items-center gap-2">
+                  {/*
+                    Only for saved members: a lead is a mark on a membership, so a person ticked
+                    above but not yet saved has nothing to mark. Saved at once, and audited.
+                  */}
+                  {squad.members.some((m) => m.id === u.id) && selected.includes(u.id) ? (
+                    <Checkbox
+                      checked={squad.members.find((m) => m.id === u.id)?.isLead === true}
+                      onChange={(isLead) => setLead.mutate({ id: squad.id, userId: u.id, isLead })}
+                      label="Team lead"
+                    />
+                  ) : null}
+                  {u.role === "admin" ? (
+                    <Badge tone="accent" title="Administrators already reach everything; membership is recorded for when that changes.">
+                      admin
+                    </Badge>
+                  ) : null}
+                </span>
               </div>
             ))}
           </div>

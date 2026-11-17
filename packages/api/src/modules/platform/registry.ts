@@ -1,7 +1,7 @@
 import type { ModuleState, ProjectUrgencyCounts } from "@sbom/shared";
 
 export const EMPTY_URGENCY_COUNTS: ProjectUrgencyCounts = {
-  total: 0, now: 0, nowUsedInAttacks: 0, soon: 0, later: 0, none: 0, noneSerious: 0,
+  total: 0, now: 0, nowUsedInAttacks: 0, soon: 0, later: 0, none: 0, noneSerious: 0, late: 0, newSinceVisit: 0,
 };
 import type { AppContext } from "../../context.js";
 import type { Actor } from "../admin/audit.service.js";
@@ -88,6 +88,7 @@ export class ModuleRegistry {
   async urgencyCounts(
     ctx: AppContext,
     applicationIds: readonly string[],
+    visits: ReadonlyMap<string, Date> = new Map(),
   ): Promise<Map<string, ProjectUrgencyCounts> | null> {
     let any = false;
     const total = new Map<string, ProjectUrgencyCounts>();
@@ -96,7 +97,7 @@ export class ModuleRegistry {
       if (!module.projectUrgency) continue;
       if (module.toggle && !(await module.toggle.enabled(ctx))) continue;
       any = true;
-      const counts = await module.projectUrgency.counts(ctx, applicationIds);
+      const counts = await module.projectUrgency.counts(ctx, applicationIds, visits);
       for (const [appId, c] of counts) {
         const t = total.get(appId);
         if (!t) continue;
@@ -112,14 +113,19 @@ export class ModuleRegistry {
    * The project is fetched against the caller's access first, so an application outside it is a
    * 404 before any module is asked - a module cannot leak a project by forgetting to check.
    */
-  async actionPlan(ctx: AppContext, applicationId: string, access: ReadAccess): Promise<ModuleActionPlanItem[]> {
+  async actionPlan(
+    ctx: AppContext,
+    applicationId: string,
+    access: ReadAccess,
+    since: Date | null = null,
+  ): Promise<ModuleActionPlanItem[]> {
     await ctx.applications.getById(applicationId, access);
 
     const items: ModuleActionPlanItem[] = [];
     for (const module of this.list) {
       if (!module.actionPlan) continue;
       if (module.toggle && !(await module.toggle.enabled(ctx))) continue;
-      const actions = await module.actionPlan.actions(ctx, { applicationId, access });
+      const actions = await module.actionPlan.actions(ctx, { applicationId, access, since });
       for (const action of actions) items.push({ ...action, moduleId: module.id });
     }
     // Most urgent first; within the same urgency, the order modules are listed in.

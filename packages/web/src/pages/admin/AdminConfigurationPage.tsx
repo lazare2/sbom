@@ -31,6 +31,7 @@ import {
 } from "../../lib/mutations.ts";
 import { ApiError } from "../../lib/api.ts";
 import { AttentionSettingsCard } from "./AttentionSettingsCard.tsx";
+import { TargetDatesCard } from "./TargetDatesCard.tsx";
 import {
   Button,
   Card,
@@ -67,6 +68,7 @@ export function AdminConfigurationPage() {
   return (
     <div className="space-y-4">
       <StaleThresholdCard />
+      <TargetDatesCard />
       <AttentionSettingsCard />
       <SbomBackfillCard />
       <VulnIntervalCard />
