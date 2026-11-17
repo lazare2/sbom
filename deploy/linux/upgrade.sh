@@ -45,7 +45,7 @@ step "Loading the new images"
 docker load --input "$BUNDLE/images.tar" >/dev/null
 rm -rf "$TARGET/.previous"
 install -d -m 0750 "$TARGET/.previous"
-for f in docker-compose.yml start.sh images.env images.txt README.md backup.sh common.sh .env; do
+for f in docker-compose.yml start.sh images.env images.txt README.md backup.sh restore.sh common.sh .env; do
   [ -f "$TARGET/$f" ] && cp -p "$TARGET/$f" "$TARGET/.previous/$f"
 done
 install_platform_files "$BUNDLE" "$TARGET"
@@ -68,7 +68,7 @@ fi
 warn "$new_version did not start. Going back to ${old_version:-the previous version}."
 ( docker compose logs --tail 120 api > "$backup/api-failed-upgrade.log" 2>&1 ) || true
 docker compose down
-for f in docker-compose.yml start.sh images.env images.txt README.md backup.sh common.sh .env; do
+for f in docker-compose.yml start.sh images.env images.txt README.md backup.sh restore.sh common.sh .env; do
   [ -f "$TARGET/.previous/$f" ] && cp -p "$TARGET/.previous/$f" "$TARGET/$f"
 done
 docker compose up -d db

@@ -81,6 +81,7 @@ install_platform_files() {
   chmod 0755 "$dst/start.sh"
   [ -f "$src/ca/README.md" ] && install -m 0644 "$src/ca/README.md" "$dst/ca/README.md"
   install -m 0755 "$src/linux/backup.sh" "$dst/backup.sh"
+  install -m 0755 "$src/linux/restore.sh" "$dst/restore.sh"
   install -m 0644 "$src/linux/common.sh" "$dst/common.sh"
   # An override written by an administrator (extra ports, a reverse proxy) is theirs: kept.
   return 0

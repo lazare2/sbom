@@ -27,7 +27,9 @@ param(
     # Also produce a single .zip alongside the folder.
     [switch]$Compress,
     # Skip `docker build` and only re-package images already present locally.
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    # Leave out the Windows Server installer and its Linux disk (about 1.3 GB).
+    [switch]$NoWindows
 )
 
 $ErrorActionPreference = "Stop"
@@ -266,6 +268,70 @@ if errorlevel 1 (
 '@
 $launcher | Out-File -FilePath (Join-Path $bundleDir "start.cmd") -Encoding ascii
 Write-Note "start.cmd (for machines where script files are blocked)"
+
+<#
+  The Windows Server installer: a Hyper-V machine from a prepared Debian disk.
+
+  The disk is Debian's own cloud image, pinned by SHA-512 in deploy/windows/VM-IMAGE, with the
+  packages the platform needs added and everything that would reach the internet by itself
+  removed (scripts/vm-image/bake.sh, run in a privileged Linux container here). Built once and
+  cached under var/vm-image, keyed by the image and the bake script, so a server never
+  downloads an operating system or a package.
+#>
+if (-not $NoWindows) {
+    $winSource = Join-Path $deployDir "windows"
+    $winTarget = Join-Path $bundleDir "windows"
+    New-Item -ItemType Directory -Path $winTarget -Force | Out-Null
+    foreach ($f in @("install-windows.ps1", "upgrade-windows.ps1", "common.ps1")) {
+        Copy-Item (Join-Path $winSource $f) (Join-Path $winTarget $f)
+    }
+    $vmPins = @{}
+    foreach ($line in Get-Content (Join-Path $winSource "VM-IMAGE")) {
+        if ($line -match '^\s*([A-Z0-9_]+)=(\S+)') { $vmPins[$Matches[1]] = $Matches[2] }
+    }
+    $vmCache = Join-Path $repoRoot "var\vm-image"
+    New-Item -ItemType Directory -Path $vmCache -Force | Out-Null
+    $bakeScript = Join-Path $repoRoot "scripts\vm-image\bake.sh"
+    $bakeHash = (Get-FileHash $bakeScript -Algorithm SHA256).Hash.Substring(0, 12).ToLower()
+    $imageTag = ($vmPins.DEBIAN_IMAGE_URL -split '/')[-1] -replace '\.qcow2$', ''
+    $baked = Join-Path $vmCache "sbom-vm-$imageTag-$bakeHash.vhdx"
+    if (-not (Test-Path $baked)) {
+        $qcow = Join-Path $vmCache "$imageTag.qcow2"
+        if (-not (Test-Path $qcow) -or (Get-FileHash $qcow -Algorithm SHA512).Hash -ne $vmPins.DEBIAN_IMAGE_SHA512.ToUpper()) {
+            Write-Step "Downloading the Debian cloud image"
+            Invoke-WebRequest -UseBasicParsing -Uri $vmPins.DEBIAN_IMAGE_URL -OutFile $qcow
+            $hash = (Get-FileHash $qcow -Algorithm SHA512).Hash
+            if ($hash -ne $vmPins.DEBIAN_IMAGE_SHA512.ToUpper()) {
+                Remove-Item $qcow -Force
+                throw "The Debian image has SHA-512 $hash, but deploy/windows/VM-IMAGE pins $($vmPins.DEBIAN_IMAGE_SHA512). Not using it."
+            }
+        }
+        Write-Step "Preparing the virtual machine disk (a few minutes)"
+        $mountCache = ($vmCache -replace '\', '/')
+        $mountScripts = ((Split-Path $bakeScript -Parent) -replace '\', '/')
+        Invoke-Docker @("run", "--rm", "--privileged", "-v", "$($mountCache):/w", "-v", "$($mountScripts):/s:ro", "debian:trixie",
+            "bash", "/s/bake.sh", "/w/$imageTag.qcow2", "/w/sbom-vm-$imageTag-$bakeHash.vhdx") "Preparing the virtual machine disk failed."
+    }
+    Copy-Item $baked (Join-Path $winTarget "sbom-vm.vhdx")
+    $vmPackages = Join-Path $vmCache "vm-packages.txt"
+    (@("Debian image: $($vmPins.DEBIAN_IMAGE_URL)", "SHA-512: $($vmPins.DEBIAN_IMAGE_SHA512)", "Added packages:") +
+        $(if (Test-Path $vmPackages) { Get-Content $vmPackages } else { @() })) -join "`n" | Write-LfFile -Path (Join-Path $winTarget "VM-IMAGE.txt")
+
+    foreach ($name in @("install-windows", "upgrade-windows")) {
+@"
+@echo off
+REM Runs windows\$name.ps1 where the PowerShell policy blocks script files.
+REM Needs an Administrator command prompt.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0windows\$name.ps1" %*
+if errorlevel 1 (
+  echo.
+  echo $name failed. The output above says why.
+  pause
+)
+"@ | Out-File -FilePath (Join-Path $bundleDir "$name.cmd") -Encoding ascii
+    }
+    Write-Note ("windows/ (Hyper-V installer, Linux disk {0:N0} MB)" -f ((Get-Item $baked).Length / 1MB))
+}
 
 
 # The compose file resolves image tags from these, so a bundle built at one

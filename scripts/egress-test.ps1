@@ -129,7 +129,7 @@ if (-not $SkipBuild) {
 # --- the installation -------------------------------------------------------------
 Copy-Item "deploy\docker-compose.yml" $work
 New-Item -ItemType Directory -Force -Path (Join-Path $work "ca") | Out-Null
-Copy-Item "scripts\egress\proxy.mjs" (Join-Path $work "egress")
+Copy-Item "scripts\egress\proxy.mjs", "scripts\egress\fence-check.mjs" (Join-Path $work "egress")
 $adminPassword = New-Secret 20
 $ciToken = (New-Secret 48).ToLower()
 @"
@@ -192,39 +192,16 @@ $null = Assert-Status (Invoke-Api POST "/api/v1/auth/login" @{ email = "admin@sb
 
 # --- 1. the fence holds -------------------------------------------------------------
 Write-Step "Checking the fence: no direct route out"
-# Node's fetch ignores proxy variables, so this is a direct attempt. JavaScript in single
-# quotes only: PowerShell 5.1 strips double quotes from native arguments.
-$direct = Invoke-Compose -ComposeArgs @("exec", "-T", "api", "node", "-e", "fetch('https://registry.npmjs.org/',{signal:AbortSignal.timeout(8000)}).then(()=>process.exit(0),e=>{console.log(String(e.cause??e));process.exit(1)})") -AllowFail
-Add-Result "direct connection from the API is impossible" ($LASTEXITCODE -ne 0) ($direct | Select-Object -Last 1)
-$viaProxy = Invoke-Compose -ComposeArgs @("exec", "-T", "api", "node", "-e", "const s=require('net').connect(3128,'egress-proxy',()=>s.write('CONNECT registry.npmjs.org:443 HTTP/1.1
-Host: registry.npmjs.org:443
+# Run in a throwaway container on the same network as the API, with the same settings.
+$fenceArgs = @("run", "--rm", "--no-deps", "-T", "-v", "./egress:/egress", "--entrypoint", "node", "api", "/egress/fence-check.mjs")
+$direct = Invoke-Compose -ComposeArgs ($fenceArgs + "direct") -AllowFail
+Add-Result "direct connection from the API network is impossible" ($LASTEXITCODE -ne 0) (($direct | Select-Object -Last 1) -join " ")
+$viaProxy = Invoke-Compose -ComposeArgs ($fenceArgs + "proxy") -AllowFail
+Add-Result "an address outside the list is refused by the proxy" ($LASTEXITCODE -ne 0) (($viaProxy | Select-Object -Last 1) -join " ")
 
-'));s.on('data',d=>{console.log(String(d).split('
-')[0]);process.exit(/ 200 /.test(String(d))?0:1)});setTimeout(()=>process.exit(2),8000)") -AllowFail
-Add-Result "an address outside the list is refused by the proxy" ($LASTEXITCODE -ne 0) ($viaProxy | Select-Object -Last 1)
-
-# --- 2. every update, through the allowed addresses only ------------------------------------
-Write-Step "Switching on Grype, Trivy, OSV and vulnerability scanning"
-$null = Assert-Status (Invoke-Api PUT "/api/v1/admin/vuln/provider" @{ scanners = @{ grype = $true; trivy = $true; osv = $true; xray = $false } }) 200 "switch scanners on"
-$null = Assert-Status (Invoke-Api PATCH "/api/v1/admin/vuln/settings" @{ enabled = $true }) 200 "enable scanning"
-
-Write-Step "Updating the vulnerability databases (several minutes: a few hundred MB)"
-$u = Invoke-Api POST "/api/v1/admin/vuln/update" -TimeoutSec 3600
-$okOutcomes = @("updated", "already-current")
-Add-Result "vulnerability database update" ($u.Status -eq 200 -and $okOutcomes -contains $u.Json.outcome) "$($u.Json.outcome): $($u.Json.message)"
-$u.Text | Out-File (Join-Path $work "vuln-update.json") -Encoding utf8
-
-Write-Step "Updating the malicious-package list"
-$null = Assert-Status (Invoke-Api PATCH "/api/v1/admin/malicious/settings" @{ enabled = $true }) 200 "enable malicious-package checks"
-$m = Invoke-Api POST "/api/v1/admin/malicious/update" -TimeoutSec 1800
-Add-Result "malicious-package list update" ($m.Status -eq 200 -and $okOutcomes -contains $m.Json.outcome) "$($m.Json.outcome): $($m.Json.message)"
-
-# Per-scanner state, as the admin screen shows it: an update that skips one scanner shows here.
-$status = Invoke-Api GET "/api/v1/admin/vuln/status"
-$status.Text | Out-File (Join-Path $work "vuln-status.json") -Encoding utf8
-
-# --- 3. the databases work -------------------------------------------------------------
-Write-Step "Sending an SBOM with log4j-core 2.14.1 (Log4Shell) and waiting for the finding"
+# Sent before scanning is switched on: OSV downloads only the ecosystems the data contains,
+# so with no data its update has nothing to fetch and proves nothing.
+Write-Step "Sending an SBOM with log4j-core 2.14.1 (Log4Shell)"
 $sbom = Join-Path $work "sbom.json"
 $doc = @{
     bomFormat = "CycloneDX"; specVersion = "1.5"; version = 1; serialNumber = "urn:uuid:$([guid]::NewGuid())"
@@ -238,6 +215,46 @@ $doc = @{
 $raw = (& curl.exe -s --noproxy "*" -m 120 -X POST "$baseUrl/api/v1/scans" -H "Authorization: Bearer $ciToken" `
         -F "sbom=@$sbom" -F "app_name=egress-test-app" -F "commit_sha=egress1" -F "build_number=1" -F "branch=main") -join "`n"
 $scanId = ($raw | ConvertFrom-Json).scanId
+
+# --- 2. every update, through the allowed addresses only ------------------------------------
+Write-Step "Switching on Grype, Trivy, OSV and vulnerability scanning"
+$null = Assert-Status (Invoke-Api PUT "/api/v1/admin/vuln/provider" @{ scanners = @{ grype = $true; trivy = $true; osv = $true; xray = $false } }) 200 "switch scanners on"
+$null = Assert-Status (Invoke-Api PATCH "/api/v1/admin/vuln/settings" @{ enabled = $true }) 200 "enable scanning"
+
+# Switching scanning on starts an update by itself, so the test waits for whatever runs and
+# then reads the outcome, rather than racing it with a second request.
+Write-Step "Waiting for the vulnerability database update (several minutes: a few hundred MB)"
+$okOutcomes = @("updated", "already-current", "unchanged")
+$deadline = (Get-Date).AddMinutes(60)
+do {
+    Start-Sleep -Seconds 15
+    $vulnStatus = (Invoke-Api GET "/api/v1/admin/vuln/status").Json
+} while ((Get-Date) -lt $deadline -and ($vulnStatus.updates.inProgress -or $null -eq $vulnStatus.updates.last))
+$last = $vulnStatus.updates.last
+if ($okOutcomes -notcontains $last.outcome) {
+    # The automatic run failed or was skipped: one manual attempt, which the test then judges.
+    $u = Invoke-Api POST "/api/v1/admin/vuln/update" -TimeoutSec 3600
+    $last = $u.Json
+}
+Add-Result "vulnerability database update" ($okOutcomes -contains $last.outcome) "$($last.outcome): $($last.message)"
+$vulnStatus = (Invoke-Api GET "/api/v1/admin/vuln/status").Json
+foreach ($sc in @($vulnStatus.scanners | Where-Object { $_.enabled })) {
+    Add-Result "$($sc.name) database installed" ([bool]$sc.database.present) "$($sc.problem)"
+}
+(Invoke-Api GET "/api/v1/admin/vuln/status").Text | Out-File (Join-Path $work "vuln-status.json") -Encoding utf8
+
+Write-Step "Updating the malicious-package list"
+$null = Assert-Status (Invoke-Api PATCH "/api/v1/admin/malicious/settings" @{ enabled = $true }) 200 "enable malicious-package checks"
+$deadline = (Get-Date).AddMinutes(30)
+do {
+    Start-Sleep -Seconds 10
+    $attempt = @((Invoke-Api GET "/api/v1/admin/malicious/history?limit=1").Json.attempts)[0]
+} while ((Get-Date) -lt $deadline -and ($null -eq $attempt -or $null -eq $attempt.finishedAt))
+if ($okOutcomes -notcontains $attempt.outcome) { $attempt = (Invoke-Api POST "/api/v1/admin/malicious/update" -TimeoutSec 1800).Json }
+Add-Result "malicious-package list update" ($okOutcomes -contains $attempt.outcome) "$($attempt.outcome): $($attempt.message)"
+
+# --- 3. the databases work -------------------------------------------------------------
+Write-Step "Waiting for the Log4Shell finding"
 $null = Invoke-Api POST "/api/v1/admin/vuln/sweep"
 $found = $false; $deadline = (Get-Date).AddMinutes(10)
 while ((Get-Date) -lt $deadline -and -not $found) {
