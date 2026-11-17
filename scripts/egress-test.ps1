@@ -193,11 +193,15 @@ $null = Assert-Status (Invoke-Api POST "/api/v1/auth/login" @{ email = "admin@sb
 # --- 1. the fence holds -------------------------------------------------------------
 Write-Step "Checking the fence: no direct route out"
 # Run in a throwaway container on the same network as the API, with the same settings.
-$fenceArgs = @("run", "--rm", "--no-deps", "-T", "-v", "./egress:/egress", "--entrypoint", "node", "api", "/egress/fence-check.mjs")
+$fenceArgs = @("run", "--rm", "--no-deps", "-T", "-v", "$((Join-Path $work "egress") -replace "\\", "/"):/egress", "--entrypoint", "node", "api", "/egress/fence-check.mjs")
 $direct = Invoke-Compose -ComposeArgs ($fenceArgs + "direct") -AllowFail
-Add-Result "direct connection from the API network is impossible" ($LASTEXITCODE -ne 0) (($direct | Select-Object -Last 1) -join " ")
+# Judged on the script's own answer, not the exit code: a container that fails to start also
+# exits non-zero, and that proves nothing about the fence.
+$directLine = @($direct | Where-Object { $_ -match "no direct route|connected directly" }) | Select-Object -Last 1
+Add-Result "direct connection from the API network is impossible" ([string]$directLine -match "no direct route") "$directLine"
 $viaProxy = Invoke-Compose -ComposeArgs ($fenceArgs + "proxy") -AllowFail
-Add-Result "an address outside the list is refused by the proxy" ($LASTEXITCODE -ne 0) (($viaProxy | Select-Object -Last 1) -join " ")
+$proxyLine = @($viaProxy | Where-Object { $_ -match "proxy answered|proxy unreachable" }) | Select-Object -Last 1
+Add-Result "an address outside the list is refused by the proxy" ([string]$proxyLine -match " 403 ") "$proxyLine"
 
 # Sent before scanning is switched on: OSV downloads only the ecosystems the data contains,
 # so with no data its update has nothing to fetch and proves nothing.
@@ -273,6 +277,8 @@ foreach ($h in $hosts) {
     Write-Note ("{0,-48} {1,4} allowed {2,4} refused" -f $h.Name, ($h.Count - $denied), $denied)
 }
 # The npm registry is the fence check's own deliberate attempt.
+$upstreamErrors = @($entries | Where-Object { $_.upstreamError } | ForEach-Object { "$($_.host): $($_.upstreamError)" } | Sort-Object -Unique)
+if ($upstreamErrors.Count -gt 0) { Write-Note "Allowed but unreachable (a network problem, not the platform): $($upstreamErrors -join '; ')" }
 $unexpected = @($entries | Where-Object { -not $_.allowed -and $_.host -ne "registry.npmjs.org" } | ForEach-Object { $_.host } | Sort-Object -Unique)
 Add-Result "nothing tried an address outside the list" ($unexpected.Count -eq 0) ($unexpected -join ", ")
 

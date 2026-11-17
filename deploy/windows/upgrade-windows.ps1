@@ -28,6 +28,7 @@ $here = $PSScriptRoot
 $bundle = Split-Path $here -Parent
 . (Join-Path $here "common.ps1")
 
+$InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 Write-Host ""
 Write-Host "SBOM Platform - Windows Server upgrade" -ForegroundColor Cyan
 Write-Host ("=" * 66) -ForegroundColor DarkGray

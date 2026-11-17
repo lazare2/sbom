@@ -53,6 +53,7 @@ $here = $PSScriptRoot
 $bundle = Split-Path $here -Parent
 . (Join-Path $here "common.ps1")
 
+$InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $useNat = [string]::IsNullOrEmpty($SwitchName)
 $vmAddress = "$Subnet.10"
 $hostAddress = "$Subnet.1"

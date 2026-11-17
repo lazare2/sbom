@@ -68,7 +68,12 @@ server.on("connect", (req, socket, head) => {
     upstream.pipe(socket);
     socket.pipe(upstream);
   });
-  upstream.on("error", () => socket.destroy());
+  upstream.on("error", (e) => {
+    // An allowed address that cannot be reached is the network's fault, not the platform's:
+    // recorded so a failed run says which it was.
+    record({ method: "CONNECT", host, port, allowed: true, upstreamError: e.code ?? e.message });
+    socket.destroy();
+  });
   socket.on("error", () => upstream.destroy());
 });
 
