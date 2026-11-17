@@ -46,6 +46,15 @@ chmod 0700 /srv/sbom/backups
 mkdir -p /var/backups
 [ -e /var/backups/sbom-platform ] || ln -s /srv/sbom/backups /var/backups/sbom-platform
 
+# containerd too: Docker 29 keeps image and container layers there, and Docker's own records
+# on the data disk point into it. Left on the system disk, a reinstall onto a kept data disk
+# found containers whose layers were gone ("RWLayer ... is unexpectedly nil").
+mkdir -p /srv/sbom/containerd
+if [ ! -L /var/lib/containerd ]; then
+  rm -rf /var/lib/containerd
+  ln -s /srv/sbom/containerd /var/lib/containerd
+fi
+
 # Docker keeps its data on the data disk. The firewall backend is the installer's choice.
 mkdir -p /etc/docker
 if [ ! -f /etc/docker/daemon.json ]; then

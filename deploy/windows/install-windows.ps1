@@ -113,6 +113,8 @@ if ($isAdmin) {
 }
 $keyFile = Join-Path $state "vm-ssh-key"
 $knownHosts = Join-Path $state "known_hosts"
+# A new machine has new host keys; an entry from an earlier one would make SSH refuse it.
+if (Test-Path $knownHosts) { Remove-Item -Force $knownHosts }
 if (-not (Test-Path $keyFile)) {
     $previous = $ErrorActionPreference; $ErrorActionPreference = "Continue"
     & ssh-keygen.exe -q -t ed25519 -N '""' -C "sbom-platform-host" -f $keyFile 2>&1 | Out-Null

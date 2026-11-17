@@ -282,7 +282,7 @@ if (-not $NoWindows) {
     $winSource = Join-Path $deployDir "windows"
     $winTarget = Join-Path $bundleDir "windows"
     New-Item -ItemType Directory -Path $winTarget -Force | Out-Null
-    foreach ($f in @("install-windows.ps1", "upgrade-windows.ps1", "common.ps1")) {
+    foreach ($f in @("install-windows.ps1", "upgrade-windows.ps1", "uninstall-windows.ps1", "common.ps1")) {
         Copy-Item (Join-Path $winSource $f) (Join-Path $winTarget $f)
     }
     $vmPins = @{}
