@@ -23,17 +23,19 @@ docker compose up -d
 That pulls PostgreSQL, the API and the web image, creates the database, applies
 migrations, and creates the admin account. Nothing else is needed on the machine.
 
-Build `.env` from `.env.example`. Only three values are required:
+Build `.env` from `.env.example`. These values are required:
 
 ```
+SBOM_IMAGE_API=<registry>/sbom-api:<version>
+SBOM_IMAGE_WEB=<registry>/sbom-web:<version>
+POSTGRES_PASSWORD=<a generated password>
 SESSION_SECRET=<32+ random chars>
 BOOTSTRAP_ADMIN_EMAIL=admin@sbom.local
 BOOTSTRAP_ADMIN_PASSWORD=<a real password>
 ```
 
-The compose file already points at the published images (`defaullltt/sbom-api:0.1.0` and
-`defaullltt/sbom-web:0.1.0`), so no image variables are needed. Set `SBOM_IMAGE_API` and
-`SBOM_IMAGE_WEB` only to run your own build or pin an older version.
+The compose file has no default images and no default database password: name the images
+you published and pin their version, and generate the password like the secret below.
 
 Generate the secret rather than inventing one:
 
@@ -94,6 +96,62 @@ To use a different port: `.\start.ps1 -Port 9000` or `SBOM_PORT=9000 ./start.sh`
 
 ---
 
+## Option 3 - Linux server, as a service
+
+For a server that runs the platform permanently. From the unpacked bundle:
+
+```sh
+sudo sh ./linux/install.sh            # or: --port 9000
+```
+
+- Works on any 64-bit Linux with systemd: Ubuntu, Debian, RHEL and their relatives.
+- Uses the server's Docker if it has one. Otherwise it installs the Docker Engine that ships
+  in the bundle; nothing is downloaded. Docker needs `nftables` or `iptables`, which every
+  normal server installation has.
+- Installs to `/opt/sbom-platform`, starts at boot (`systemctl status sbom-platform`), and
+  backs up every night at 02:30 to `/var/backups/sbom-platform` (the last 7 are kept).
+
+| Task | Command |
+|---|---|
+| Upgrade (from the new bundle) | `sudo sh ./linux/upgrade.sh` - backs up first, rolls back by itself if the new version does not start |
+| Back up now | `sudo /opt/sbom-platform/backup.sh` |
+| Restore a backup | `sudo sh /opt/sbom-platform/restore.sh /var/backups/sbom-platform/<folder>` |
+| Remove the service | `sudo sh ./linux/uninstall.sh` - keeps all data |
+
+## Option 4 - Windows Server, in Hyper-V
+
+The platform runs in a small Linux virtual machine that ships in the bundle (`windows/`),
+so the server needs neither Docker Desktop nor a signed-in user. The machine starts with
+the server. Requires the Hyper-V role; on a virtual server, the host must allow nested
+virtualization.
+
+In **PowerShell as Administrator**, from the unpacked bundle:
+
+```powershell
+.\install-windows.cmd                         # new installation
+.\install-windows.cmd -MigrateFrom C:\sbom    # take over the Docker Desktop installation in C:\sbom
+```
+
+- Creates the machine `SBOM-Platform` (4 CPUs, 8 GB memory, 200 GB data disk; change with
+  `-Cpu`, `-MemoryGB`, `-DataDiskGB`) in `C:\SBOM-Platform` (`-InstallRoot`).
+- Gives it a private network and forwards port 8080 of the server to it (`-Port`). Other
+  machines use `http://<server>:8080`; on the server itself use `http://192.168.250.10:8080`.
+- Behind a proxy: `-Proxy http://proxy:3128`.
+- `-MigrateFrom` copies the database, the stored SBOMs and `.env` (so CI tokens, sign-ins and
+  the Xray connection keep working). The Docker Desktop installation is only read: it keeps
+  running until you stop it with `docker compose stop` in its folder. Keep its data until you
+  have checked the new installation.
+
+**Upgrade:** from the new bundle, `.\upgrade-windows.cmd`. It backs up first and rolls back
+by itself if the new version does not start.
+
+**Inside the machine** it is the Linux service of Option 3: backups at 02:30 to
+`/var/backups/sbom-platform`. A shell:
+`ssh -i C:\SBOM-Platform\state\vm-ssh-key sbomadmin@192.168.250.10`.
+Everything that matters is on the data disk (`sbom-data.vhdx`).
+
+---
+
 ## What the start script does
 
 1. Checks Docker is installed **and running** - the most common failure is a
@@ -126,10 +184,10 @@ machines sharing a session-signing key.
 | Follow the logs | `docker compose logs -f` |
 | Just the API's logs | `docker compose logs -f api` |
 | Status | `docker compose ps` |
-| **Erase everything** | `docker compose down -v` |
+| Back up | see [Backups](#backups) |
 
-`docker compose down -v` deletes the volumes: every scan, every application, and
-every stored SBOM. There is no undo.
+Never add `-v` to `docker compose down`: it deletes the volumes, that is every scan,
+every application and every stored SBOM, with no undo. Upgrades never need it.
 
 ---
 
@@ -252,6 +310,39 @@ PUBLIC_URL=http://sbom.internal.example.com:8080
 This only affects the session cookie's `Secure` flag and the allowed CORS
 origin. The UI and API are same-origin behind nginx, so the app works either way
 - but keeping it accurate matters if you later put HTTPS in front.
+
+---
+
+## Network access
+
+The bundle carries everything the installation needs: the container images, and on Linux
+the Docker Engine too. Installing, starting, upgrading and restoring download nothing.
+
+Once running, the platform needs outbound HTTPS (port 443) to these addresses **only**,
+and only for the features you switch on. Allow them on the firewall or proxy and block
+everything else:
+
+| Address | What for | Needed when |
+|---|---|---|
+| `grype.anchore.io` | Grype vulnerability database | vulnerability scanning is on |
+| `mirror.gcr.io` | Trivy vulnerability database | the Trivy scanner is on (`TRIVY_DB_REPOSITORY` can name an internal mirror instead) |
+| `osv-vulnerabilities.storage.googleapis.com` | OSV vulnerability database | the OSV scanner is on |
+| `github.com`, `codeload.github.com` | malicious-package list (OpenSSF) | malicious-package checks are on |
+
+Your own systems, if you connect them: single sign-on (for Microsoft Entra ID,
+`login.microsoftonline.com` and `graph.microsoft.com`), the mail relay, and JFrog Xray.
+
+Nothing else. No package registries, no Docker Hub, no telemetry. With none of these
+addresses open the platform still works fully; the databases are then installed by
+uploading them in **Administration** (see [Vulnerability scanning](#vulnerability-scanning)).
+
+Inbound, people need only the web port (`SBOM_PORT`, 8080 by default) and CI servers the
+same port for `POST /api/v1/scans`.
+
+Behind a proxy, set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in `.env` and restart. Every
+outbound call then goes through the proxy, except the hosts in `NO_PROXY`: keep
+`localhost,127.0.0.1,db,api,web` there and add internal systems reached directly, such as an
+internal JFrog Xray or mail relay.
 
 ---
 

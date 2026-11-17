@@ -140,6 +140,9 @@ export class GrypeScanner implements VulnerabilityScanner {
       GRYPE_DB_UPDATE_URL: this.config.GRYPE_DB_UPDATE_URL,
       GRYPE_DB_AUTO_UPDATE: "false",
       GRYPE_DB_VALIDATE_AGE: "false",
+      // Grype otherwise asks toolbox-data.anchore.io for a newer Grype on every run: an
+      // address outside the documented allow-list, and a delay on every offline scan.
+      GRYPE_CHECK_FOR_APP_UPDATE: "false",
       ...(caCert ? { GRYPE_DB_CA_CERT: caCert } : {}),
       // Keeps stdout parseable: grype writes progress to stderr, but a TTY-detected
       // interactive mode would add control characters.
@@ -384,8 +387,8 @@ export class GrypeScanner implements VulnerabilityScanner {
 /**
    * The outbound proxy this process was given, if any.
    *
-   * Node's fetch ignores these variables. Built-in support arrived in Node 24 behind
-   * NODE_USE_ENV_PROXY and the runtime image is Node 22, so the probe below is blind to a
+   * Node's fetch ignores these variables unless NODE_USE_ENV_PROXY is set (the image now
+   * sets it; a native run may not), so without this the probe below can be blind to a
    * proxy that grype -- a Go binary, which honours them -- uses perfectly well. Left
    * unhandled that asymmetry reports "no internet connection" for a download that would
    * have succeeded, and no amount of correct proxy configuration fixes it.

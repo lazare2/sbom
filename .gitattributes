@@ -21,3 +21,8 @@ Dockerfile text eol=lf
 *.png   binary
 *.zst   binary
 *.tar   binary
+
+# Everything under deploy/linux runs on Linux (scripts, systemd units, checksum files):
+# LF everywhere, or sh and systemd read a CR into every line.
+deploy/linux/** text eol=lf
+scripts/vm-image/*.sh text eol=lf

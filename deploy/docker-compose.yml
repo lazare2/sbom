@@ -3,12 +3,15 @@
 # Every image is referenced by tag and never built here. That serves two
 # deployments from one file:
 #
-#   Registry    `docker compose up -d` pulls the published images. This file plus a
-#               .env is the entire install - no repository, no Node, no PostgreSQL,
-#               no compiler. Override SBOM_IMAGE_API / SBOM_IMAGE_WEB to run your
-#               own build or pin an older version.
-#   Offline     `docker load` from the bundled images.tar supplies them under the
-#               default tags below, and nothing is fetched from the network.
+#   Registry    `docker compose up -d` pulls the images named by SBOM_IMAGE_API and
+#               SBOM_IMAGE_WEB in .env. This file plus a .env is the entire install -
+#               no repository, no Node, no PostgreSQL, no compiler.
+#   Offline     `docker load` from the bundled images.tar supplies them, the start script
+#               records their tags in .env, and nothing is fetched from the network.
+#
+# The image tags and POSTGRES_PASSWORD have no defaults on purpose. A default image let a
+# plain `docker compose up` start a months-old version, and a default password let a
+# database be created with a password anyone reading this file knows.
 #
 # Do not add a `build:` section. It would work on a connected machine with a copy of
 # the source and fail on both of the machines this file exists for.
@@ -18,13 +21,24 @@
 # keeping it patched.
 name: sbom-platform
 
+# Container logs are capped: without a limit Docker keeps every line forever, and a service
+# that runs for months fills the disk with them. 5 x 20 MB per container.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: sbom
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sbom}
+      # Required, with no default. The start scripts generate it on a first install and, on an
+      # upgrade of an installation that never had one, record the "sbom" it was created with.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run start.ps1 or start.sh}
       POSTGRES_DB: sbom
     volumes:
       - db-data:/var/lib/postgresql/data
@@ -44,14 +58,15 @@ services:
     #
     # The offline bundle loads its images under these same tags, which is what lets
     # one compose file serve both paths.
-    image: ${SBOM_IMAGE_API:-defaullltt/sbom-api:0.1.0}
+    image: ${SBOM_IMAGE_API:?SBOM_IMAGE_API is not set - run start.ps1 or start.sh, which set it from images.env}
     restart: unless-stopped
+    logging: *logging
     depends_on:
       db:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgres://sbom:${POSTGRES_PASSWORD:-sbom}@db:5432/sbom
+      DATABASE_URL: postgres://sbom:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/sbom
       API_PORT: "3000"
       API_HOST: 0.0.0.0
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
@@ -143,8 +158,9 @@ services:
     #   - "3000:3000"
 
   web:
-    image: ${SBOM_IMAGE_WEB:-defaullltt/sbom-web:0.1.0}
+    image: ${SBOM_IMAGE_WEB:?SBOM_IMAGE_WEB is not set - run start.ps1 or start.sh, which set it from images.env}
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - api
     ports:

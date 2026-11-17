@@ -52,6 +52,11 @@ RUN npm run build --workspace=@sbom/shared \
 
 FROM base AS runtime
 ENV NODE_ENV=production
+# Node's fetch ignores HTTP_PROXY/HTTPS_PROXY/NO_PROXY unless this is set. Without it, behind a
+# corporate proxy the malicious-package list and the Trivy/OSV reachability checks fail while
+# the scanners themselves (Go binaries, which read the variables) would have worked. No effect
+# when no proxy is configured.
+ENV NODE_USE_ENV_PROXY=1
 # Drop the build toolchain from the final image.
 RUN apk del python3 make g++ || true
 
@@ -80,7 +85,7 @@ WORKDIR /app/packages/api
 
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD env -u NODE_USE_ENV_PROXY node -e "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Migrate then serve. Migrations are transactional and idempotent, so a restart
 # or a second replica starting concurrently is safe.

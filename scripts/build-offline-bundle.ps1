@@ -27,7 +27,9 @@ param(
     # Also produce a single .zip alongside the folder.
     [switch]$Compress,
     # Skip `docker build` and only re-package images already present locally.
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    # Leave out the Windows Server installer and its Linux disk (about 1.3 GB).
+    [switch]$NoWindows
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +38,20 @@ Set-Location $repoRoot
 
 function Write-Step { param([string]$Text) Write-Host "==> $Text" -ForegroundColor Cyan }
 function Write-Note { param([string]$Text) Write-Host "    $Text" -ForegroundColor DarkGray }
+
+<#
+    Writes text with Unix line endings and no byte-order mark.
+
+    images.env and images.txt are read by start.sh on Linux as well as by start.ps1. Written
+    the PowerShell way they end every line in CRLF, and `read` in sh keeps the CR: each image
+    name then carries a stray character, `docker image inspect` fails for all of them, and the
+    exported tags name images that do not exist. start.ps1 trims and never noticed.
+#>
+function Write-LfFile {
+    param([Parameter(Mandatory, ValueFromPipeline)][string]$Text, [Parameter(Mandatory)][string]$Path)
+    $lf = ($Text -replace "`r`n", "`n").TrimEnd("`n") + "`n"
+    [IO.File]::WriteAllText($Path, $lf, (New-Object Text.UTF8Encoding $false))
+}
 
 <#
     Runs docker and decides success from the exit code.
@@ -158,6 +174,57 @@ foreach ($file in @("docker-compose.yml", "start.ps1", "start.sh", "README.md"))
 }
 
 <#
+  The Linux installer: scripts, systemd units, and a Docker Engine for servers that have none.
+
+  Docker ships as its static binaries plus the Compose plugin, downloaded here on the build
+  machine and checked against the SHA-256 pinned in deploy/linux/docker/VERSIONS, so a server
+  never fetches Docker from a package repository. Cached under var/docker-static between builds.
+#>
+$linuxSource = Join-Path $deployDir "linux"
+$linuxTarget = Join-Path $bundleDir "linux"
+New-Item -ItemType Directory -Path (Join-Path $linuxTarget "docker") -Force | Out-Null
+# Rewritten with LF rather than copied: a Windows checkout may hold CRLF, and a CR at the
+# end of every line breaks both sh and systemd on the server.
+Get-ChildItem $linuxSource -File | ForEach-Object {
+    [IO.File]::ReadAllText($_.FullName) | Write-LfFile -Path (Join-Path $linuxTarget $_.Name)
+}
+Get-ChildItem (Join-Path $linuxSource "docker") -File | Where-Object { $_.Name -ne "VERSIONS" } |
+    ForEach-Object { [IO.File]::ReadAllText($_.FullName) | Write-LfFile -Path (Join-Path $linuxTarget "docker\$($_.Name)") }
+
+$pins = @{}
+foreach ($line in Get-Content (Join-Path $linuxSource "docker\VERSIONS")) {
+    if ($line -match '^\s*([A-Z0-9_]+)=(\S+)') { $pins[$Matches[1]] = $Matches[2] }
+}
+$cache = Join-Path $repoRoot "var\docker-static"
+New-Item -ItemType Directory -Path $cache -Force | Out-Null
+$downloads = @(
+    @{ Name = "docker-$($pins.DOCKER_VERSION).tgz"; Sha = $pins.DOCKER_SHA256
+       Url = "https://download.docker.com/linux/static/stable/x86_64/docker-$($pins.DOCKER_VERSION).tgz" },
+    @{ Name = "docker-compose-linux-x86_64"; Sha = $pins.COMPOSE_SHA256
+       Url = "https://github.com/docker/compose/releases/download/v$($pins.COMPOSE_VERSION)/docker-compose-linux-x86_64" }
+)
+$sums = @()
+foreach ($d in $downloads) {
+    $file = Join-Path $cache $d.Name
+    $have = (Test-Path $file) -and ((Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -eq $d.Sha)
+    if (-not $have) {
+        Write-Note "downloading $($d.Name)"
+        & curl.exe -sfL --max-time 600 -o $file $d.Url
+        if ($LASTEXITCODE -ne 0) { throw "Could not download $($d.Url)." }
+        $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+        if ($hash -ne $d.Sha) {
+            Remove-Item $file -Force
+            throw "$($d.Name) has SHA-256 $hash, but deploy/linux/docker/VERSIONS pins $($d.Sha). Not using it."
+        }
+    }
+    Copy-Item $file (Join-Path $linuxTarget "docker\$($d.Name)")
+    $sums += "$($d.Sha)  $($d.Name)"
+}
+# Read by `sha256sum -c` on the server, so LF and no byte-order mark.
+($sums -join "`n") | Write-LfFile -Path (Join-Path $linuxTarget "docker\SHA256SUMS")
+Write-Note "linux/ (installer, Docker $($pins.DOCKER_VERSION), Compose $($pins.COMPOSE_VERSION))"
+
+<#
   The certificate directory, which compose bind-mounts.
 
   Omitted from the bundle originally, on the assumption that Docker creates a missing
@@ -202,6 +269,72 @@ if errorlevel 1 (
 $launcher | Out-File -FilePath (Join-Path $bundleDir "start.cmd") -Encoding ascii
 Write-Note "start.cmd (for machines where script files are blocked)"
 
+<#
+  The Windows Server installer: a Hyper-V machine from a prepared Debian disk.
+
+  The disk is Debian's own cloud image, pinned by SHA-512 in deploy/windows/VM-IMAGE, with the
+  packages the platform needs added and everything that would reach the internet by itself
+  removed (scripts/vm-image/bake.sh, run in a privileged Linux container here). Built once and
+  cached under var/vm-image, keyed by the image and the bake script, so a server never
+  downloads an operating system or a package.
+#>
+if (-not $NoWindows) {
+    $winSource = Join-Path $deployDir "windows"
+    $winTarget = Join-Path $bundleDir "windows"
+    New-Item -ItemType Directory -Path $winTarget -Force | Out-Null
+    foreach ($f in @("install-windows.ps1", "upgrade-windows.ps1", "uninstall-windows.ps1", "common.ps1")) {
+        Copy-Item (Join-Path $winSource $f) (Join-Path $winTarget $f)
+    }
+    $vmPins = @{}
+    foreach ($line in Get-Content (Join-Path $winSource "VM-IMAGE")) {
+        if ($line -match '^\s*([A-Z0-9_]+)=(\S+)') { $vmPins[$Matches[1]] = $Matches[2] }
+    }
+    $vmCache = Join-Path $repoRoot "var\vm-image"
+    New-Item -ItemType Directory -Path $vmCache -Force | Out-Null
+    $bakeScript = Join-Path $repoRoot "scripts\vm-image\bake.sh"
+    $bakeHash = (Get-FileHash $bakeScript -Algorithm SHA256).Hash.Substring(0, 12).ToLower()
+    $imageTag = ($vmPins.DEBIAN_IMAGE_URL -split '/')[-1] -replace '\.qcow2$', ''
+    $baked = Join-Path $vmCache "sbom-vm-$imageTag-$bakeHash.vhdx"
+    if (-not (Test-Path $baked)) {
+        $qcow = Join-Path $vmCache "$imageTag.qcow2"
+        if (-not (Test-Path $qcow) -or (Get-FileHash $qcow -Algorithm SHA512).Hash -ne $vmPins.DEBIAN_IMAGE_SHA512.ToUpper()) {
+            Write-Step "Downloading the Debian cloud image"
+            & curl.exe -fL --retry 5 --retry-all-errors -sS -o $qcow $vmPins.DEBIAN_IMAGE_URL
+            if ($LASTEXITCODE -ne 0) { throw "Downloading $($vmPins.DEBIAN_IMAGE_URL) failed." }
+            $hash = (Get-FileHash $qcow -Algorithm SHA512).Hash
+            if ($hash -ne $vmPins.DEBIAN_IMAGE_SHA512.ToUpper()) {
+                Remove-Item $qcow -Force
+                throw "The Debian image has SHA-512 $hash, but deploy/windows/VM-IMAGE pins $($vmPins.DEBIAN_IMAGE_SHA512). Not using it."
+            }
+        }
+        Write-Step "Preparing the virtual machine disk (a few minutes)"
+        $mountCache = ($vmCache -replace '\\', '/')
+        $mountScripts = ((Split-Path $bakeScript -Parent) -replace '\\', '/')
+        Invoke-Docker @("run", "--rm", "--privileged", "-v", "$($mountCache):/w", "-v", "$($mountScripts):/s:ro", "debian:trixie",
+            "bash", "/s/bake.sh", "/w/$imageTag.qcow2", "/w/sbom-vm-$imageTag-$bakeHash.vhdx") "Preparing the virtual machine disk failed."
+    }
+    Copy-Item $baked (Join-Path $winTarget "sbom-vm.vhdx")
+    $vmPackages = Join-Path $vmCache "vm-packages.txt"
+    (@("Debian image: $($vmPins.DEBIAN_IMAGE_URL)", "SHA-512: $($vmPins.DEBIAN_IMAGE_SHA512)", "Added packages:") +
+        $(if (Test-Path $vmPackages) { Get-Content $vmPackages } else { @() })) -join "`n" | Write-LfFile -Path (Join-Path $winTarget "VM-IMAGE.txt")
+
+    foreach ($name in @("install-windows", "upgrade-windows")) {
+@"
+@echo off
+REM Runs windows\$name.ps1 where the PowerShell policy blocks script files.
+REM Needs an Administrator command prompt.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0windows\$name.ps1" %*
+if errorlevel 1 (
+  echo.
+  echo $name failed. The output above says why.
+  pause
+)
+"@ | Out-File -FilePath (Join-Path $bundleDir "$name.cmd") -Encoding ascii
+    }
+    Write-Note ("windows/ (Hyper-V installer, Linux disk {0:N0} MB)" -f ((Get-Item $baked).Length / 1MB))
+}
+
+
 # The compose file resolves image tags from these, so a bundle built at one
 # version cannot accidentally start a differently-tagged image left on the host.
 @"
@@ -211,7 +344,7 @@ SBOM_IMAGE_WEB=$webImage
 # because .env is written once and then left alone, so an upgraded deployment would go
 # on reporting whichever version it was first installed at.
 APP_VERSION=$Version
-"@ | Out-File -FilePath (Join-Path $bundleDir "images.env") -Encoding ascii
+"@ | Write-LfFile -Path (Join-Path $bundleDir "images.env")
 
 # Read by the start scripts to decide whether `docker load` is needed at all,
 # which turns a one-minute wait into an instant start on every run after the
@@ -220,7 +353,7 @@ APP_VERSION=$Version
 $postgresImage
 $apiImage
 $webImage
-"@ | Out-File -FilePath (Join-Path $bundleDir "images.txt") -Encoding ascii
+"@ | Write-LfFile -Path (Join-Path $bundleDir "images.txt")
 
 # --- 3. save the images -----------------------------------------------------
 Write-Step "Saving images to a single archive (this is the slow part)"

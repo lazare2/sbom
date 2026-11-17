@@ -44,15 +44,15 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 # --- 1. load the bundled images -------------------------------------------
-if [ ! -f images.tar ]; then
-  fail "images.tar is missing from this folder."
-  fail "Copy the whole bundle directory across, not just the scripts."
-  exit 1
-fi
+# The archive is needed only when an image is missing. SBOM_IMAGES_TAR lets the Linux
+# installer run this script in /opt/sbom-platform while the archive stays in the bundle.
+ARCHIVE="${SBOM_IMAGES_TAR:-images.tar}"
 
 needs_load=0
 if [ -f images.txt ]; then
   while IFS= read -r image; do
+    # Bundles up to 0.3.11 wrote this file with CRLF; a kept CR breaks every image name.
+    image="$(printf '%s' "$image" | tr -d '\r')"
     [ -z "$image" ] && continue
     if ! docker image inspect "$image" >/dev/null 2>&1; then
       needs_load=1
@@ -64,8 +64,22 @@ else
 fi
 
 if [ "$needs_load" -eq 1 ]; then
+  if [ ! -f "$ARCHIVE" ]; then
+    fail "$ARCHIVE is missing, and the images it carries are not loaded yet."
+    fail "Copy the whole bundle directory across, not just the scripts."
+    exit 1
+  fi
   step "Loading container images (this takes a minute on first run)"
-  docker load --input images.tar
+  docker load --input "$ARCHIVE"
+  # Checked, not assumed: `docker load` can print an unpacking error for one image and still
+  # exit 0, and starting without it would only fail later with a far less obvious message.
+  if [ -f images.txt ]; then
+    while IFS= read -r image; do
+      image="$(printf '%s' "$image" | tr -d '\r')"
+      [ -z "$image" ] && continue
+      docker image inspect "$image" >/dev/null 2>&1 || { fail "Loading $ARCHIVE did not produce $image."; exit 1; }
+    done < images.txt
+  fi
 else
   step "Images already loaded"
 fi
@@ -82,6 +96,19 @@ fi
 rand_b64() {
   head -c $(( $1 * 2 + 16 )) /dev/urandom | base64 | tr -d '+/=\n' | cut -c"1-$1"
 }
+# Sets KEY=VALUE in .env, replacing an existing line or appending one. awk rather than
+# `sed -i`, whose flags differ between GNU and BSD.
+set_env_key() {
+  if grep -q "^$1=" .env; then
+    awk -v k="$1" -v v="$2" 'index($0, k "=") == 1 { print k "=" v; next } { print }' .env > .env.tmp
+    # Written back into the same file rather than moved over it, so .env keeps its 600 mode.
+    cat .env.tmp > .env && rm -f .env.tmp
+  else
+    printf '%s=%s
+' "$1" "$2" >> .env
+  fi
+}
+
 rand_hex() {
   od -An -tx1 -N $(( ($1 + 1) / 2 )) /dev/urandom | tr -d ' \n' | cut -c"1-$1"
 }
@@ -156,6 +183,16 @@ else
   # and then left alone -- it holds generated secrets nobody can recover -- so an upgraded
   # deployment would otherwise never gain a setting added since, and the symptom is a
   # feature that refuses to save with no obvious cause.
+  # The compose file no longer falls back to the password "sbom" when this key is missing.
+  # An installation that never had the key has been running on that fallback, so its database
+  # was created with it: write it down rather than invent a new one the database never had.
+  if ! grep -q '^POSTGRES_PASSWORD=' .env; then
+    printf '
+# Added by an upgrade: the password this database was created with.
+POSTGRES_PASSWORD=sbom
+' >> .env
+    note "Recorded the existing database password in .env"
+  fi
   if ! grep -q '^SECRETS_KEY=' .env; then
     printf '
 # Encrypts the JFrog Xray API token at rest. Added by an upgrade.
@@ -172,8 +209,14 @@ fi
 # actually shipped even if an older .env on this machine names different tags.
 if [ -f images.env ]; then
   while IFS='=' read -r key value; do
+    value="$(printf '%s' "$value" | tr -d '\r')"   # older bundles: CRLF
     case "$key" in
-      SBOM_IMAGE_*|APP_VERSION) export "$key=$value" ;;
+      SBOM_IMAGE_*|APP_VERSION)
+        export "$key=$value"
+        # Also recorded in .env, so `docker compose logs`, `ps` and `down` typed in this folder
+        # name the same images without anyone exporting anything first.
+        set_env_key "$key" "$value"
+        ;;
     esac
   done < images.env
 fi
@@ -220,7 +263,6 @@ if [ "$ready" -eq 1 ]; then
   echo ""
   note "Logs        docker compose logs -f"
   note "Stop        docker compose down          (data is kept)"
-  note "Erase all   docker compose down -v       (deletes every scan)"
 else
   printf '\033[33mThe stack started but did not answer on port %s within two minutes.\033[0m\n' "$EFFECTIVE_PORT"
   echo "Check the logs:  docker compose logs --tail=80"

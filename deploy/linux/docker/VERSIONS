@@ -1,0 +1,6 @@
+# Pinned by scripts/build-offline-bundle.ps1, which downloads these on the build machine and
+# refuses anything whose SHA-256 differs. Upgrading is an edit here.
+DOCKER_VERSION=29.10.0
+DOCKER_SHA256=7c1ebadc65c716cdc6d35fc78759ed0e4317debf43c21dd12f066f2006999def
+COMPOSE_VERSION=5.7.1
+COMPOSE_SHA256=af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf
