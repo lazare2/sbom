@@ -1274,7 +1274,7 @@ export function useUserSquads(id: string | null) {
   return useQuery({
     queryKey: queryKeys.userSquads(id ?? ""),
     queryFn: () =>
-      api.get<{ squads: Array<{ id: string; name: string }> }>(`/admin/users/${id}/squads`),
+      api.get<{ squads: Array<{ id: string; name: string; isLead: boolean }> }>(`/admin/users/${id}/squads`),
     enabled: id !== null,
   });
 }
