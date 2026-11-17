@@ -257,6 +257,36 @@ origin. The UI and API are same-origin behind nginx, so the app works either way
 
 ---
 
+## Network access
+
+The bundle carries everything the installation needs: the container images, and on Linux
+the Docker Engine too. Installing, starting, upgrading and restoring download nothing.
+
+Once running, the platform needs outbound HTTPS (port 443) to these addresses **only**,
+and only for the features you switch on. Allow them on the firewall or proxy and block
+everything else:
+
+| Address | What for | Needed when |
+|---|---|---|
+| `grype.anchore.io` | Grype vulnerability database | vulnerability scanning is on |
+| `mirror.gcr.io` | Trivy vulnerability database | the Trivy scanner is on (`TRIVY_DB_REPOSITORY` can name an internal mirror instead) |
+| `osv-vulnerabilities.storage.googleapis.com` | OSV vulnerability database | the OSV scanner is on |
+| `github.com`, `codeload.github.com` | malicious-package list (OpenSSF) | malicious-package checks are on |
+
+Your own systems, if you connect them: single sign-on (for Microsoft Entra ID,
+`login.microsoftonline.com` and `graph.microsoft.com`), the mail relay, and JFrog Xray.
+
+Nothing else. No package registries, no Docker Hub, no telemetry. With none of these
+addresses open the platform still works fully; the databases are then installed by
+uploading them in **Administration** (see [Vulnerability scanning](#vulnerability-scanning)).
+
+Inbound, people need only the web port (`SBOM_PORT`, 8080 by default) and CI servers the
+same port for `POST /api/v1/scans`.
+
+Behind a proxy, set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in `.env` and restart.
+
+---
+
 ## Backups
 
 Two Docker volumes hold everything:

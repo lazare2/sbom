@@ -140,6 +140,9 @@ export class GrypeScanner implements VulnerabilityScanner {
       GRYPE_DB_UPDATE_URL: this.config.GRYPE_DB_UPDATE_URL,
       GRYPE_DB_AUTO_UPDATE: "false",
       GRYPE_DB_VALIDATE_AGE: "false",
+      // Grype otherwise asks toolbox-data.anchore.io for a newer Grype on every run: an
+      // address outside the documented allow-list, and a delay on every offline scan.
+      GRYPE_CHECK_FOR_APP_UPDATE: "false",
       ...(caCert ? { GRYPE_DB_CA_CERT: caCert } : {}),
       // Keeps stdout parseable: grype writes progress to stderr, but a TTY-detected
       // interactive mode would add control characters.

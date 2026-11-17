@@ -68,6 +68,10 @@ export class TrivyScanner implements VulnerabilityScanner {
         ...process.env,
         TRIVY_NO_PROGRESS: "true",
         TRIVY_DISABLE_VEX_NOTICE: "true",
+        // Trivy otherwise contacts check.trivy.dev for version notices and usage statistics:
+        // outside the documented allow-list. The database download is unaffected.
+        TRIVY_SKIP_VERSION_CHECK: "true",
+        TRIVY_DISABLE_TELEMETRY: "true",
         // Go reads a CA bundle from here; a TLS-inspecting proxy needs its CA trusted.
         ...(caCert ? { SSL_CERT_FILE: caCert } : {}),
         NO_COLOR: "1",
