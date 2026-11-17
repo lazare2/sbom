@@ -53,15 +53,9 @@ import { VulnerabilityService } from "./modules/vulnerabilities/vulnerability.se
 import { VulnReportService } from "./modules/vulnerabilities/vuln-report.service.js";
 import { createBlobStore, type BlobStore } from "./services/blob-store/index.js";
 import { type VulnerabilityScanner } from "./services/scanner/index.js";
-import { sql } from "drizzle-orm";
-import { CompositeScanner, type ScannerMember } from "./services/scanner/composite.js";
-import { GrypeScanner } from "./services/scanner/grype.js";
-import { OsvScanner, OSV_DB_SOURCE } from "./services/scanner/osv.js";
-import { UnavailableScanner } from "./services/scanner/provider-scanner.js";
-import { TrivyScanner } from "./services/scanner/trivy.js";
-import { XrayScanner } from "./services/scanner/xray.js";
-import { rowsOf, type Row } from "./modules/applications/applications.service.js";
 import { PLATFORM_MODULES } from "./modules/platform/index.js";
+import { buildMaliciousServices } from "./modules/malicious/services.js";
+import { buildVulnerabilityServices } from "./modules/vulnerabilities/services.js";
 import type { PlatformModule } from "./modules/platform/module.js";
 import { ModuleRegistry } from "./modules/platform/registry.js";
 
@@ -298,162 +292,15 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     active: () => settings.moduleEnabled("reports"),
   });
 
-  // Vulnerability scanning. The scanner is a port so the wiring tests can supply a
-  // fake and never spawn grype.
-  /*
-    Resolved per call rather than constructed once. The provider is a runtime setting now, so
-    a scanner chosen at boot would keep talking to the database it was born with until
-    somebody restarted the process -- and nothing on the admin panel would say so.
-
-    Constructed after `settings`, which it reads on every resolve.
-  */
-  const grypeScanner = new GrypeScanner(config);
-  const caCert = () => grypeScanner.caCertificate();
-  const trivyScanner = new TrivyScanner(config, { caCert });
-  const osvScanner = new OsvScanner(config, {
-    caCert,
-    /*
-      One package per purl type and distribution: osv-scanner downloads a database for every
-      ecosystem a scan touches, so this is the smallest scan that fetches all of them.
-    */
-    representativePackages: async () => {
-      const rows = await db.execute<
-        Row<{ id: number | string; name: string; version: string | null; purl: string; ecosystem: string }>
-      >(sql`
-        SELECT DISTINCT ON (split_part(substr(c.purl, 5), '/', 1), coalesce(substring(c.purl from 'distro=([^&#]+)'), ''))
-               c.id, c.name, c.version, c.purl, c.ecosystem
-        FROM component c
-        WHERE c.purl LIKE 'pkg:%'
-        ORDER BY split_part(substr(c.purl, 5), '/', 1), coalesce(substring(c.purl from 'distro=([^&#]+)'), ''), c.id
-      `);
-      return rowsOf(rows).map((r) => ({
-        componentId: Number(r.id),
-        name: r.name,
-        version: r.version,
-        purl: r.purl,
-        ecosystem: r.ecosystem,
-      }));
-    },
-  });
-  const scanner: VulnerabilityScanner =
-    overrides.scanner ??
-    new CompositeScanner({
-      logger,
-      settings: () => settings.vulnScanners(),
-      watermarkStore: {
-        read: () => settings.readVulnWatermark(),
-        write: (value) => settings.writeVulnWatermark(value),
-      },
-      members: async () => {
-        const enabled = await settings.vulnScanners();
-        const members: ScannerMember[] = [];
-        if (enabled.grype) members.push({ name: "grype", scanner: grypeScanner });
-        if (enabled.trivy) members.push({ name: "trivy", scanner: trivyScanner });
-        if (enabled.osv) members.push({ name: "osv", scanner: osvScanner });
-        if (enabled.xray) {
-          const credentials = await settings.xrayCredentials();
-          members.push({
-            name: "xray",
-            scanner: credentials
-              ? new XrayScanner(credentials, { logger, assessmentEpoch: await settings.xrayAssessmentEpoch() })
-              : new UnavailableScanner(
-                  config.SECRETS_KEY
-                    ? "JFrog Xray is switched on but no connection is configured, or the stored API token could not be decrypted. Re-enter it in Administration."
-                    : "JFrog Xray is switched on but SECRETS_KEY is not set on this deployment, so the stored API token cannot be read.",
-                  "settings",
-                ),
-          });
-        }
-        return members;
-      },
-      knownAdvisories: async (names) => {
-        const known = new Map<string, string>();
-        if (names.length === 0) return known;
-        const rows = await db.execute<Row<{ id: string; aliases: string[] | null }>>(sql`
-          SELECT id, aliases FROM vulnerability
-          WHERE id = ANY(${sql.param(names)}::text[]) OR aliases && ${sql.param(names)}::text[]
-        `);
-        const wanted = new Set(names.map((n) => n.toUpperCase()));
-        // Ids first, so a name that is itself a stored advisory maps to that advisory rather
-        // than to another one that happens to list it as an alias.
-        for (const row of rowsOf(rows)) known.set(row.id.toUpperCase(), row.id);
-        for (const row of rowsOf(rows)) {
-          for (const alias of row.aliases ?? []) {
-            const key = alias.toUpperCase();
-            if (wanted.has(key) && !known.has(key)) known.set(key, row.id);
-          }
-        }
-        return known;
-      },
-      updateSources: {
-        grype: async () => config.GRYPE_DB_UPDATE_URL,
-        trivy: async () => config.TRIVY_DB_REPOSITORY,
-        osv: async () => OSV_DB_SOURCE,
-        xray: async () => (await settings.xraySettings()).connection?.baseUrl ?? null,
-      },
-    });
-  const vulnerabilities = new VulnerabilityService({ db });
-  /*
-    These two guard each other: a database may not be replaced while a sweep holds it
-    open, and a sweep may not start while it is being replaced. The references are
-    mutual, so they are passed as thunks rather than as the objects - each body runs long
-    after both constructors have returned, which is what keeps the cycle harmless.
-  */
-  const vulnDb = new VulnDbService({
+  // Vulnerability scanning: built by its module (vulnerabilities/services.ts).
+  const { scanner, vulnerabilities, vulnDb, sweep, fixAdvisor, vulnWorker } = buildVulnerabilityServices({
     db,
     config,
-    scanner,
-    settings,
-    // Annotated: without an explicit return type TypeScript tries to infer it through
-    // the mutual reference and gives up with TS7022.
-    //
-    // A fix-recommendation check holds the database open exactly as a sweep does, so it
-    // blocks a replacement for the same reason.
-    scanBusy: (): boolean => sweep.isRunning || fixAdvisor.isChecking,
-  });
-  const sweep = new SweepService({
-    db,
-    config,
-    scanner,
     settings,
     logger,
-    dbReplacing: (): boolean => vulnDb.replacingDatabase,
-  });
-  const vulnWorker = new VulnWorker({ settings, vulnDb, sweep, logger });
-  const fixAdvisor = new FixAdvisorService({
-    db,
-    scanner,
-    // The cached answers are only good for the scanner set that gave them.
-    provider: async () => {
-      const s = await settings.vulnScanners();
-      return (["grype", "trivy", "osv", "xray"] as const).filter((n) => s[n]).join("+");
-    },
-    dbReplacing: (): boolean => vulnDb.replacingDatabase,
-    logger,
+    ...(overrides.scanner ? { scanner: overrides.scanner } : {}),
   });
 
-  /*
-   * Constructed after `settings` and `mailer`, which both feed it, and after `sweep` only for
-   * readability -- there is no dependency between the two pipelines.
-   *
-   * The worker takes the alert service rather than the mailer directly, so the decision about
-   * whether an alert is due lives in one place instead of being re-derived by every trigger.
-   */
-  const maliciousFeed = new MaliciousFeedService({ db, settings, logger });
-  const maliciousMatch = new MaliciousMatchService({ db, logger });
-  const maliciousAlerts = new MaliciousAlertService({
-    db,
-    settings,
-    mailer,
-    logger,
-    publicUrl: config.PUBLIC_URL,
-  });
-  const malicious = new MaliciousService({
-    db,
-    settings,
-    feed: maliciousFeed,
-    match: maliciousMatch,
-  });
   /*
     Constructed after `settings` because it resolves both feature toggles to decide whether an
     enriched export may claim the estate was assessed. It reads nothing else, so it does not
@@ -461,13 +308,9 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   */
   const exports = new ExportService({ db, settings });
 
-  const maliciousWorker = new MaliciousWorker({
-    settings,
-    feed: maliciousFeed,
-    match: maliciousMatch,
-    alerts: maliciousAlerts,
-    logger,
-  });
+  // Malicious-package detection: built by its module (malicious/services.ts).
+  const { maliciousFeed, maliciousMatch, maliciousAlerts, malicious, maliciousWorker, adminMalicious } =
+    buildMaliciousServices({ db, config, settings, logger, mailer, audit });
 
   // Write side. (`audit` is built above, with the auth service that also writes to it.)
   const apiErrors = new ApiErrorService({ db });
@@ -479,13 +322,6 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const adminGroups = new GroupsAdminService({ db, audit, groups });
   const squads = new SquadsService({ db, audit, teams, settings });
   const tribes = new TribesService({ db, audit, teams });
-  const adminMalicious = new MaliciousAdminService({
-    db,
-    audit,
-    settings,
-    feed: maliciousFeed,
-    worker: maliciousWorker,
-  });
   const adminScans = new ScansAdminService({ db, blobStore, audit });
   const attributeDefinitions = new AttributeDefinitionsService({ db, audit });
 
