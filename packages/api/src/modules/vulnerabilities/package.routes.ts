@@ -56,7 +56,7 @@ export async function packageRoutes(fastify: FastifyInstance): Promise<void> {
   const { db, settings, fixAdvisor } = fastify.ctx;
 
   async function recommendation(environmentId: string, ecosystem: string, name: string) {
-    const map = await recommendedVersions(db, environmentId, [{ ecosystem, name }]);
+    const map = await recommendedVersions(db, environmentId, [{ ecosystem, name }], (p) => fixAdvisor.walkMany(p));
     return map.get(packageKey(ecosystem, name)) ?? null;
   }
 
@@ -68,6 +68,7 @@ export async function packageRoutes(fastify: FastifyInstance): Promise<void> {
       name,
       ecosystem,
       recommendedVersion: rec?.version ?? null,
+      checked: rec?.checked ?? false,
       clears: rec?.clears ?? 0,
       withoutFix: rec?.withoutFix ?? 0,
     };

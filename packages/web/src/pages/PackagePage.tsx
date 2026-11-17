@@ -45,6 +45,11 @@ export function PackagePage() {
                   fix, in every version used here, and not older than the newest version already in use.
                   {rec.data.withoutFix > 0 ? ` ${rec.data.withoutFix} more have no fix yet; no version clears those.` : ""}
                 </p>
+                <p className="mt-1 text-xs text-text-muted">
+                  {rec.data.checked
+                    ? "Checked against the vulnerability database: nothing with a fix remains against this version."
+                    : "Not checked against the vulnerability database yet: it clears what is reported today, but may itself be affected."}
+                </p>
               </>
             ) : (
               <p className="text-text-muted">

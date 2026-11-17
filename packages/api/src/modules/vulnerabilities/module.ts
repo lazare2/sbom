@@ -98,7 +98,9 @@ export const vulnerabilitiesModule: PlatformModule = {
       const { findings, context, environmentId } = await planInputFor(ctx.db, request.applicationId);
       const targets = await ctx.settings.getTargetDates();
       const recommended = environmentId
-        ? await recommendedVersions(ctx.db, environmentId, findings.filter((f) => f.origin === "app"))
+        ? await recommendedVersions(ctx.db, environmentId, findings.filter((f) => f.origin === "app"), (p) =>
+            ctx.fixAdvisor.walkMany(p),
+          )
         : new Map();
       return buildActionPlan(findings, { ...context, recommended }, { targets, since: request.since, now: new Date() });
     },

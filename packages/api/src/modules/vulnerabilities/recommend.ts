@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import type { VulnSeverity } from "@sbom/shared";
 import type { Database } from "../../db/client.js";
 import { rowsOf, type Row } from "../applications/applications.service.js";
-import { planPackages } from "./fix-advisor.js";
+import { planPackages, type FixAdvisorService } from "./fix-advisor.js";
 
 /**
  * The one recommended version per package, in one environment.
@@ -19,6 +19,12 @@ import { planPackages } from "./fix-advisor.js";
  */
 export interface Recommendation {
   version: string | null;
+  /**
+   * True when the version was put to the scanner and nothing with a fix remains against it.
+   * False when the scanner could not be asked: the version then clears what is reported today
+   * but may itself be affected.
+   */
+  checked: boolean;
   /** Advisories with a fix that the version clears. */
   clears: number;
   /** Advisories with no fix anywhere: no version clears these. */
@@ -33,6 +39,8 @@ export async function recommendedVersions(
   db: Database,
   environmentId: string,
   packages: ReadonlyArray<{ ecosystem: string; name: string }>,
+  /** Walks candidates forward through the scanner (FixAdvisorService.walkMany). */
+  walk?: FixAdvisorService["walkMany"],
 ): Promise<Map<string, Recommendation>> {
   const out = new Map<string, Recommendation>();
   if (packages.length === 0) return out;
@@ -77,9 +85,20 @@ export async function recommendedVersions(
       fixVersions: r.fix_versions ?? [],
     })),
   );
+  /*
+    The minimum clears what is reported today; it can itself be affected by advisories that never
+    applied to the versions in use. So, as on the Recommendations tab, it is put to the scanner and
+    moved forward while something with a later fix remains.
+  */
+  const walkable = plans
+    .filter((p) => p.minimumVersion !== null && p.purl !== null)
+    .map((p) => ({ key: p.key, name: p.name, ecosystem: p.ecosystem, purl: p.purl!, start: p.minimumVersion! }));
+  const walked = walk ? await walk(walkable) : new Map<string, { version: string; checked: boolean }>();
   for (const plan of plans) {
+    const w = walked.get(plan.key);
     out.set(plan.key, {
-      version: plan.minimumVersion,
+      version: w?.version ?? plan.minimumVersion,
+      checked: w?.checked ?? false,
       clears: plan.resolvedByMinimum,
       withoutFix: plan.advisories.length - plan.resolvedByMinimum,
     });

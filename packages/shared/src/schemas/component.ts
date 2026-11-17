@@ -285,6 +285,8 @@ export interface PackageRecommendation {
    * when no advisory has a fix, or nothing is known against it.
    */
   recommendedVersion: string | null;
+  /** Put to the scanner, and nothing with a fix remains against it. False: not checked. */
+  checked: boolean;
   clears: number;
   withoutFix: number;
 }
