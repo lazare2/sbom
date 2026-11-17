@@ -1,6 +1,9 @@
 import { sql, type SQL } from "drizzle-orm";
 import {
   attentionSettingsSchema,
+  DEFAULT_TARGET_DATES,
+  targetDatesSchema,
+  type TargetDates,
   DEFAULT_ATTENTION_SETTINGS,
   type AttentionSettings,
   type OidcSettings,
@@ -65,6 +68,12 @@ export const SETTING_KEYS = {
   reportDelivery: "report.delivery",
   /** When Analytics flags a project as needing attention, stored as one JSON object. */
   attention: "analytics.attention",
+  /**
+   * Target dates: days to fix a vulnerability used in real attacks, and a high one. The
+   * critical value is not here - it is `criticalFixDays` in `attention`, so the two places an
+   * administrator can set it cannot disagree.
+   */
+  targetDates: "developer.targets",
   /**
    * Malicious-package detection, stored as one JSON object.
    *
@@ -386,6 +395,71 @@ export class SettingsService {
     }
     this.attentionCache = { value, expiresAt: Date.now() + SettingsService.CACHE_TTL_MS };
     return value;
+  }
+
+  /**
+   * The switch of a module that has no setting of its own (Reports and analytics, Organisation).
+   * Stored as `module.<id>` = { enabled }. A module nobody has switched is on: an upgraded server
+   * keeps showing what it showed before.
+   */
+  async moduleEnabled(id: string): Promise<boolean> {
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${`module.${id}`}
+    `);
+    const value = rowsOf(rows)[0]?.value as { enabled?: unknown } | undefined;
+    return value?.enabled !== false;
+  }
+
+  async setModuleEnabled(id: string, enabled: boolean, actor: Actor | null): Promise<void> {
+    const value = { enabled };
+    await this.deps.db
+      .insert(setting)
+      .values({ key: `module.${id}`, value, updatedByUserId: actor?.id ?? null, updatedByEmail: actor?.email ?? null })
+      .onConflictDoUpdate({
+        target: setting.key,
+        set: { value, updatedAt: new Date(), updatedByUserId: actor?.id ?? null, updatedByEmail: actor?.email ?? null },
+      });
+  }
+
+  /**
+   * Target dates. Usable from the first start without anybody saving them: a missing or invalid
+   * value falls back to its starting value, and critical comes from the attention setting.
+   */
+  async getTargetDates(): Promise<TargetDates> {
+    const attention = await this.getAttentionSettings();
+    const rows = await this.deps.db.execute<Row<{ value: unknown }>>(sql`
+      SELECT value FROM setting WHERE key = ${SETTING_KEYS.targetDates}
+    `);
+    const stored = (rowsOf(rows)[0]?.value ?? {}) as Record<string, unknown>;
+    const pick = (key: "usedInAttacksDays" | "highDays") => {
+      const parsed = targetDatesSchema.shape[key].safeParse(stored[key]);
+      return parsed.success ? parsed.data : DEFAULT_TARGET_DATES[key];
+    };
+    return {
+      usedInAttacksDays: pick("usedInAttacksDays"),
+      criticalDays: attention.criticalFixDays,
+      highDays: pick("highDays"),
+    };
+  }
+
+  async updateTargetDates(
+    next: TargetDates,
+    actor: Actor | null,
+  ): Promise<{ before: TargetDates; after: TargetDates }> {
+    const before = await this.getTargetDates();
+    const value = { usedInAttacksDays: next.usedInAttacksDays, highDays: next.highDays };
+    await this.deps.db
+      .insert(setting)
+      .values({ key: SETTING_KEYS.targetDates, value, updatedByUserId: actor?.id ?? null, updatedByEmail: actor?.email ?? null })
+      .onConflictDoUpdate({
+        target: setting.key,
+        set: { value, updatedAt: new Date(), updatedByUserId: actor?.id ?? null, updatedByEmail: actor?.email ?? null },
+      });
+    if (next.criticalDays !== before.criticalDays) {
+      const attention = await this.getAttentionSettings();
+      await this.updateAttentionSettings({ ...attention, criticalFixDays: next.criticalDays }, actor);
+    }
+    return { before, after: await this.getTargetDates() };
   }
 
   async updateAttentionSettings(

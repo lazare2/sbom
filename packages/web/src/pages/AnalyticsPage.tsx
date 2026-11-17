@@ -1,3 +1,4 @@
+import { PageNumbers, usePage } from "../lib/usePage.tsx";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import type {
@@ -256,7 +257,7 @@ function Headline({ report }: { report: AnalyticsReport }) {
 // ---------------------------------------------------------------------------
 
 const FLAG_LABEL: Record<AttentionFlagKind, string> = {
-  known_exploited: "Known exploited",
+  known_exploited: "Used in real attacks",
   critical_fix_overdue: "Critical fix overdue",
   build_overdue: "Build overdue",
   vulnerabilities_rising: "Vulnerabilities rising",
@@ -273,6 +274,7 @@ function AttentionCard({ report }: { report: AnalyticsReport }) {
   const all = report.attention.projects;
   const [kind, setKind] = useState<AttentionFlagKind | "all">("all");
   const rows = kind === "all" ? all : all.filter((p) => p.flags.some((f) => f.kind === kind));
+  const paged = usePage(rows);
   const counts = Object.fromEntries(
     (Object.keys(FLAG_LABEL) as AttentionFlagKind[]).map((k) => [k, all.filter((p) => p.flags.some((f) => f.kind === k)).length]),
   ) as Record<AttentionFlagKind, number>;
@@ -287,6 +289,7 @@ function AttentionCard({ report }: { report: AnalyticsReport }) {
             title="Needs attention"
             filename="needs-attention"
             rows={rows.flatMap((p) => p.flags.map((f) => ({ p, f })))}
+            pageRows={paged.rows.flatMap((p) => p.flags.map((f) => ({ p, f })))}
             columns={[
               { header: "Project", value: (r) => r.p.name, width: 30 },
               { header: "Squads", value: (r) => exportList(r.p.squads), width: 20 },
@@ -317,11 +320,14 @@ function AttentionCard({ report }: { report: AnalyticsReport }) {
       {rows.length === 0 ? (
         <EmptyState title="Nothing flagged" hint="No project in this view meets any of the attention thresholds." />
       ) : (
+        <>
         <ul className="divide-y divide-border-base">
-          {rows.map((p) => (
+          {paged.rows.map((p) => (
             <AttentionRow key={p.applicationId} project={p} />
           ))}
         </ul>
+          <PageNumbers paged={paged} />
+        </>
       )}
     </Card>
   );
@@ -456,6 +462,7 @@ function ProjectProgressTable({ rows, vulns }: { rows: ProjectProgress[]; vulns:
     },
     (p) => p.name.toLowerCase(),
   );
+  const paged = usePage(sort.rows);
 
   if (rows.length === 0) return <EmptyState title="No applications" hint="Nothing in scope for this filter." />;
 
@@ -466,6 +473,7 @@ function ProjectProgressTable({ rows, vulns }: { rows: ProjectProgress[]; vulns:
           title="Progress by project"
           filename="progress-by-project"
           rows={sort.rows}
+            pageRows={paged.rows}
           columns={[
             { header: "Project", value: (p) => p.name, width: 32 },
             { header: "Squads", value: (p) => exportList(p.squads), width: 20 },
@@ -487,7 +495,8 @@ function ProjectProgressTable({ rows, vulns }: { rows: ProjectProgress[]; vulns:
           ]}
         />
       </div>
-      <TableWrap>
+      <>
+<TableWrap>
         <Table>
           <thead>
             <tr>
@@ -530,7 +539,7 @@ function ProjectProgressTable({ rows, vulns }: { rows: ProjectProgress[]; vulns:
             </tr>
           </thead>
           <tbody>
-            {sort.rows.map((p) => {
+            {paged.rows.map((p) => {
               const v = p.vulnerabilities;
               return (
                 <Tr key={p.applicationId}>
@@ -596,11 +605,14 @@ function ProjectProgressTable({ rows, vulns }: { rows: ProjectProgress[]; vulns:
           </tbody>
         </Table>
       </TableWrap>
+          <PageNumbers paged={paged} />
+</>
     </>
   );
 }
 
 function RollupTable({ rows, noun, vulns }: { rows: ProgressRollup[]; noun: string; vulns: boolean }) {
+  const paged = usePage(rows);
   const label = (r: ProgressRollup) => r.name ?? `No ${noun}`;
   return (
     <>
@@ -612,6 +624,7 @@ function RollupTable({ rows, noun, vulns }: { rows: ProgressRollup[]; noun: stri
           title={`Progress by ${noun}`}
           filename={`progress-by-${noun}`}
           rows={rows}
+            pageRows={paged.rows}
           columns={[
             { header: noun[0]!.toUpperCase() + noun.slice(1), value: label, width: 26 },
             { header: "Applications", value: (r) => r.applications, width: 12 },
@@ -631,7 +644,8 @@ function RollupTable({ rows, noun, vulns }: { rows: ProgressRollup[]; noun: stri
       {rows.length === 0 ? (
         <EmptyState title="No applications" />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -671,7 +685,7 @@ function RollupTable({ rows, noun, vulns }: { rows: ProgressRollup[]; noun: stri
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {paged.rows.map((r) => {
                 const v = r.vulnerabilities;
                 return (
                   <Tr key={r.name ?? "\u0000"}>
@@ -718,6 +732,8 @@ function RollupTable({ rows, noun, vulns }: { rows: ProgressRollup[]; noun: stri
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </>
   );
@@ -770,6 +786,7 @@ function BuildDeltaCard({ report }: { report: AnalyticsReport }) {
               : (p.last?.[half].introduced.total ?? null),
     (p) => p.name.toLowerCase(),
   );
+  const paged = usePage(sort.rows);
   const exportSide = (prefix: string, pick: (p: ProjectBuildDeltas) => BuildDeltaSide | undefined) =>
     (["fixed", "introduced", "unchanged"] as const).flatMap((m) =>
       (["total", "critical", "high"] as const).map((l) => ({
@@ -810,6 +827,7 @@ function BuildDeltaCard({ report }: { report: AnalyticsReport }) {
               title="Build to build"
               filename="build-to-build"
               rows={sort.rows}
+            pageRows={paged.rows}
               columns={[
                 { header: "Project", value: (p) => p.name, width: 30 },
                 { header: "Build pairs averaged", value: (p) => p.comparedBuilds, width: 12 },
@@ -827,7 +845,8 @@ function BuildDeltaCard({ report }: { report: AnalyticsReport }) {
       {rows.length === 0 ? (
         <EmptyState title="Nothing to compare yet" hint="A project needs two matched builds before one can be compared with the other." />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -885,7 +904,7 @@ function BuildDeltaCard({ report }: { report: AnalyticsReport }) {
                   <Td align="right">{""}</Td>
                 </tr>
               ) : null}
-              {sort.rows.map((p) => (
+              {paged.rows.map((p) => (
                 <Tr key={p.applicationId}>
                   <Td>
                     <Link to={`/applications/${p.applicationId}`} className="font-medium text-accent hover:underline">
@@ -914,6 +933,8 @@ function BuildDeltaCard({ report }: { report: AnalyticsReport }) {
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );
@@ -924,6 +945,7 @@ function BuildDeltaCard({ report }: { report: AnalyticsReport }) {
 // ---------------------------------------------------------------------------
 
 function AttentionPackagesCard({ rows }: { rows: AttentionPackage[] }) {
+  const paged = usePage(rows);
   return (
     <Card>
       <CardHeader
@@ -934,13 +956,14 @@ function AttentionPackagesCard({ rows }: { rows: AttentionPackage[] }) {
             title="Packages to upgrade first"
             filename="packages-to-upgrade"
             rows={rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Package", value: (r) => r.name, width: 30 },
               { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
               { header: "Applications", value: (r) => r.applications, width: 12 },
               { header: "Application names", value: (r) => exportList(r.applicationList), width: 40 },
               { header: "Critical advisories", value: (r) => r.critical, width: 12 },
-              { header: "Known exploited", value: (r) => r.knownExploited, width: 12 },
+              { header: "Used in real attacks", value: (r) => r.knownExploited, width: 12 },
               { header: "Affected versions in use", value: (r) => r.versionsInUse, width: 12 },
               { header: "Fixed in", value: (r) => exportList(r.fixVersions), width: 30 },
             ]}
@@ -950,7 +973,8 @@ function AttentionPackagesCard({ rows }: { rows: AttentionPackage[] }) {
       {rows.length === 0 ? (
         <EmptyState title="Nothing urgent" hint="No application dependency carries a critical or known-exploited advisory with a fix." />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -963,7 +987,7 @@ function AttentionPackagesCard({ rows }: { rows: AttentionPackage[] }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {paged.rows.map((r) => (
                 <Tr key={`${r.name}|${r.ecosystem}`}>
                   <Td>
                     <Link
@@ -989,12 +1013,15 @@ function AttentionPackagesCard({ rows }: { rows: AttentionPackage[] }) {
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );
 }
 
 function FragmentationRisingCard({ rows, periodDays }: { rows: FragmentationTrend[]; periodDays: number }) {
+  const paged = usePage(rows);
   return (
     <Card>
       <CardHeader
@@ -1005,6 +1032,7 @@ function FragmentationRisingCard({ rows, periodDays }: { rows: FragmentationTren
             title="Fragmentation getting worse"
             filename="fragmentation-rising"
             rows={rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Package", value: (r) => r.name, width: 30 },
               { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
@@ -1018,7 +1046,8 @@ function FragmentationRisingCard({ rows, periodDays }: { rows: FragmentationTren
       {rows.length === 0 ? (
         <EmptyState title="No spread" hint="No package moved into more versions during the window." />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -1032,7 +1061,7 @@ function FragmentationRisingCard({ rows, periodDays }: { rows: FragmentationTren
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {paged.rows.map((r) => (
                 <Tr key={`${r.name}|${r.ecosystem}`}>
                   <Td>
                     <Link
@@ -1054,6 +1083,8 @@ function FragmentationRisingCard({ rows, periodDays }: { rows: FragmentationTren
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );
@@ -1290,6 +1321,7 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
       f === "package" ? r.name : f === "version" ? r.version : f === "firstSeen" ? r.firstSeenAt : r.applications,
     (r) => r.componentId,
   );
+  const paged = usePage(sort.rows);
   return (
     <Card>
       <CardHeader
@@ -1300,6 +1332,7 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
             title="New packages"
             filename="new-packages"
             rows={sort.rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Package", value: (p) => p.name, width: 32 },
               { header: "Ecosystem", value: (p) => p.ecosystem, width: 12 },
@@ -1316,7 +1349,8 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
           hint="No package currently deployed first appeared inside this window."
         />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -1335,7 +1369,7 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
               </tr>
             </thead>
             <tbody>
-              {sort.rows.map((p) => (
+              {paged.rows.map((p) => (
                 <Tr key={p.componentId}>
                   <Td>
                     <Link
@@ -1358,6 +1392,8 @@ function NewPackagesCard({ report }: { report: AnalyticsReport }) {
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );

@@ -31,6 +31,7 @@ import {
 } from "../../lib/mutations.ts";
 import { ApiError } from "../../lib/api.ts";
 import { AttentionSettingsCard } from "./AttentionSettingsCard.tsx";
+import { TargetDatesCard } from "./TargetDatesCard.tsx";
 import {
   Button,
   Card,
@@ -67,6 +68,7 @@ export function AdminConfigurationPage() {
   return (
     <div className="space-y-4">
       <StaleThresholdCard />
+      <TargetDatesCard />
       <AttentionSettingsCard />
       <SbomBackfillCard />
       <VulnIntervalCard />
@@ -180,7 +182,7 @@ function StaleThresholdCard() {
   return (
     <Card>
       <CardHeader
-        title="Stale applications"
+        title="No recent build (stale applications)"
         subtitle="How long an application can go without a scan before it is reported as stale."
       />
       {query.isLoading ? (

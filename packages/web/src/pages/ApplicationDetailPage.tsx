@@ -1,3 +1,5 @@
+import { SupportMarks } from "../components/SupportMarks.tsx";
+import { ActionPlanPanel } from "../components/ActionPlan.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { RemovedComponent, ScanComponentEntry, ScanSummary, SeverityCounts, SortDirection } from "@sbom/shared";
@@ -42,7 +44,7 @@ import {
 } from "../components/Findings.tsx";
 import { ScanningDisabledNotice } from "../components/Severity.tsx";
 import { FixRecommendationsCard } from "../components/FixRecommendations.tsx";
-import { useApplicationVulnerabilities, useVulnStatus } from "../lib/queries.ts";
+import { useActionPlan, useApplicationVulnerabilities, useModules, useVulnStatus } from "../lib/queries.ts";
 import {
   Badge,
   Button,
@@ -68,14 +70,14 @@ import {
   Tr,
 } from "../components/ui.tsx";
 
-const TABS = ["components", "history", "removed", "changes", "vulnerabilities"] as const;
+const TABS = ["plan", "components", "history", "removed", "changes", "vulnerabilities"] as const;
 /** The two views inside the Vulnerabilities tab. */
 const VULN_VIEWS = ["findings", "recommendations"] as const;
 const COMPONENT_SORTS = componentListSort.fields;
 const DIRECTIONS = ["asc", "desc"] as const;
 
 const DEFAULTS = {
-  tab: "components" as (typeof TABS)[number],
+  tab: "plan" as (typeof TABS)[number],
   q: "",
   ecosystem: "",
   sortBy: componentListSort.defaultField,
@@ -96,7 +98,7 @@ const DEFAULTS = {
 const urlSpec = {
   defaults: DEFAULTS,
   parse: (params: URLSearchParams) => ({
-    tab: readEnum(params, "tab", TABS, "components"),
+    tab: readEnum(params, "tab", TABS, "plan"),
     q: readString(params, "q"),
     ecosystem: readString(params, "ecosystem"),
     sortBy: readEnum(params, "sortBy", COMPONENT_SORTS, componentListSort.defaultField),
@@ -121,8 +123,15 @@ export function ApplicationDetailPage() {
 
   const { data: app, isLoading, error, refetch } = useApplication(id);
   const { data: definitions } = useAttributeDefinitions();
+  /*
+    On or off from the module list, which answers at once. The vulnerability status endpoint
+    asks the scanner program and can take seconds on its first call; reading the switch from it
+    hid this tab and showed "switched off" until it answered.
+  */
+  const modules = useModules();
   const { data: vulnStatus } = useVulnStatus();
-  const vulnEnabled = vulnStatus?.enabled === true;
+  const vulnModule = modules.data?.modules.find((m) => m.id === "vulnerabilities");
+  const vulnEnabled = vulnModule ? vulnModule.enabled : vulnStatus?.enabled === true;
 
   if (isLoading) return <LoadingBlock label="Loading application" />;
   if (error) return <ErrorBanner error={error} onRetry={() => void refetch()} />;
@@ -141,7 +150,7 @@ export function ApplicationDetailPage() {
             <StatusBadge status={app.status} />
             {app.isStale ? (
               <Badge tone="warn" title="No scan received recently - the component list may be out of date.">
-                Stale
+                No recent build
               </Badge>
             ) : null}
           </span>
@@ -232,6 +241,7 @@ export function ApplicationDetailPage() {
               */}
               <Field label="Runs on">
                 <PlatformChips platform={app.platform} linkFilters />
+                <SupportMarks platform={app.platform} />
               </Field>
             </div>
             <Field label="First seen">{formatDateTime(app.createdAt)}</Field>
@@ -256,6 +266,8 @@ export function ApplicationDetailPage() {
       </div>
 
       <div role="tablist" aria-label="Application views" className="mb-3 flex gap-1 border-b border-border-base">
+        {/* First and opened by default: what to do, before the lists it is computed from. */}
+        <TabButton active={state.tab === "plan"} onClick={() => setState({ tab: "plan" })} label="Action plan" />
         <TabButton
           active={state.tab === "components"}
           onClick={() => setState({ tab: "components", page: 1 })}
@@ -285,7 +297,9 @@ export function ApplicationDetailPage() {
         />
       </div>
 
-      {state.tab === "components" ? (
+      {state.tab === "plan" ? (
+        <ActionPlanPanel applicationId={app.id} onShowAll={() => setState({ tab: "vulnerabilities", vulnView: "findings" })} />
+      ) : state.tab === "components" ? (
         <ComponentsTab
           applicationId={app.id}
           applicationName={app.name}
@@ -757,11 +771,13 @@ function VulnerabilitiesTab({
     scope is shared by both views on purpose: narrowing to the base image and switching to
     recommendations should show the base image's upgrades, not quietly widen back out.
   */
+  // Whether this person may accept a risk here (an administrator, or a lead of its squad).
+  const plan = useActionPlan(applicationId);
   const viewSwitch = (
     <div role="tablist" aria-label="Vulnerability views" className="mb-3 flex gap-1 rounded-md bg-bg-subtle p-1 sm:w-fit">
       {(
         [
-          ["findings", "Findings"],
+          ["findings", "All vulnerabilities"],
           ["recommendations", "Recommendations"],
         ] as const
       ).map(([id, label]) => (
@@ -812,6 +828,7 @@ function VulnerabilitiesTab({
           isLoading={isLoading}
           isFetching={isFetching}
           applicationId={applicationId}
+          canAcceptRisk={plan.data?.canAcceptRisk === true}
           onPageChange={(page) => setFilters((prev) => ({ ...prev, page }))}
         />
       </FindingsCard>

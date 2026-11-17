@@ -57,7 +57,7 @@ describe("the OpenAPI document covers the API", () => {
       to everybody who reads the document rather than the source, and nothing else would ever
       point it out.
     */
-    const missing = undocumentedRoutes(await routes());
+    const missing = undocumentedRoutes(await routes(), app!.routeCatalog);
     expect(
       missing,
       `these routes have no entry in route-catalog.ts:\n  ${missing.join("\n  ")}`,
@@ -67,7 +67,7 @@ describe("the OpenAPI document covers the API", () => {
   it("describes no route that no longer exists", async () => {
     // The other direction: a stale entry is a promise the server will not keep, and a 404
     // against a documented endpoint reads as a deployment fault rather than a dead document.
-    const stale = staleCatalogEntries(await routes());
+    const stale = staleCatalogEntries(await routes(), app!.routeCatalog);
     expect(
       stale,
       `route-catalog.ts describes routes that are not registered:\n  ${stale.join("\n  ")}`,

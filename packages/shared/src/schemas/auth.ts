@@ -62,5 +62,7 @@ export const sessionUserSchema = z.object({
    */
   mustChangePassword: z.boolean(),
   createdAt: z.string(),
+  /** Team lead of at least one squad: lands on "My teams" after signing in. */
+  isTeamLead: z.boolean().optional(),
 });
 export type SessionUser = z.infer<typeof sessionUserSchema>;

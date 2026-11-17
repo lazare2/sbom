@@ -389,6 +389,13 @@ Write-Host "  2. Windows:  .\start.cmd    (or .\start.ps1)" -ForegroundColor Whi
 Write-Host "     Linux:    ./start.sh" -ForegroundColor White
 Write-Host "  3. Open http://localhost:8080 and sign in with CREDENTIALS.txt" -ForegroundColor White
 Write-Host ""
+Write-Host "  As a service instead (starts at boot, nightly backups):" -ForegroundColor Yellow
+Write-Host "     Linux server:    sudo sh ./linux/install.sh" -ForegroundColor White
+if (-not $NoWindows) {
+    Write-Host "     Windows Server:  .\install-windows.cmd   (in PowerShell as Administrator; Hyper-V)" -ForegroundColor White
+}
+Write-Host "  The install guide is README.md in the bundle." -ForegroundColor White
+Write-Host ""
 Write-Note "start.cmd is there for machines whose PowerShell policy refuses script"
 Write-Note "files. It does the same thing; start.ps1 works where the policy allows it."
 Write-Note "Upgrading an existing deployment? Do NOT use 'docker compose down -v' --"

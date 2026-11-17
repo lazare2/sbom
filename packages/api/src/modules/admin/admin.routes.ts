@@ -5,7 +5,6 @@ import {
   attributeDefinitionSchema,
   confirmApplicationRequestSchema,
   createApplicationRequestSchema,
-  acknowledgeMaliciousRequestSchema,
   createGroupRequestSchema,
   createIngestTokenRequestSchema,
   createSquadSchema,
@@ -19,7 +18,6 @@ import {
   listApiErrorsQuerySchema,
   listAccessRequestsQuerySchema,
   listAuditLogQuerySchema,
-  listMaliciousHistoryQuerySchema,
   listUsersQuerySchema,
   mergeApplicationRequestSchema,
   resetUserPasswordRequestSchema,
@@ -27,6 +25,8 @@ import {
   setSignInMethodSchema,
   setSquadAccessSchema,
   setSquadMembersSchema,
+  setSquadLeadSchema,
+  uuidSchema,
   setUserSquadsSchema,
   updateSquadSchema,
   oidcConnectionInputSchema,
@@ -39,7 +39,6 @@ import {
   type OidcDiagnosis,
   setUserEnvironmentsRequestSchema,
   updateGroupRequestSchema,
-  updateMaliciousSettingsSchema,
   updateApplicationRequestSchema,
   updateAttributeDefinitionSchema,
   updateUserRequestSchema,
@@ -49,11 +48,12 @@ import {
 import { ConflictError, NotFoundError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
-import { vulnAdminRoutes } from "../vulnerabilities/vuln-admin.routes.js";
 import type { Actor } from "./audit.service.js";
 import { OidcClient } from "../../services/auth/oidc-client.js";
 
 /** The acting admin, denormalised onto every audit row this request writes. */
+const squadMemberParamsSchema = z.object({ id: uuidSchema, userId: uuidSchema });
+
 function actorOf(request: FastifyRequest): Actor {
   const user = getUser(request);
   // The token, when one authenticated this request rather than a browser session. See the
@@ -105,9 +105,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     squads,
     tribes,
     adminScans,
-    adminMalicious,
-    malicious,
-    maliciousFeed,
     attributeDefinitions,
     audit,
     apiErrors,
@@ -401,6 +398,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.send({ squad: await squads.setMembers(id, body.userIds, actorOf(request)) });
   });
 
+  /** One member's "Team lead" tick box. Its own call, so ticking one never resends the list. */
+  fastify.put("/squads/:id/members/:userId/lead", async (request, reply) => {
+    const { id, userId } = parseOrThrow(squadMemberParamsSchema, request.params, "Params");
+    const { isLead } = parseOrThrow(setSquadLeadSchema, request.body);
+    return reply.send({ squad: await squads.setLead(id, userId, isLead, actorOf(request)) });
+  });
+
   /** The complete grant set: groups and individual applications, across any environment. */
   fastify.put("/squads/:id/access", async (request, reply) => {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
@@ -474,58 +478,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     const result = await adminApplications.remove(id, actorOf(request));
     return reply.send(result);
-  });
-
-  // -------------------------------------------------------------------------
-  // Malicious packages
-  // -------------------------------------------------------------------------
-
-  /*
-    Settings and status are readable here as well as on the public status route, because the
-    admin page needs the feed's attempt history and its recipient list -- neither of which
-    belongs in a payload every signed-in user can fetch.
-  */
-  fastify.get("/malicious/settings", async (_request, reply) => {
-    return reply.send({
-      settings: await adminMalicious.getSettings(),
-      status: await malicious.status(),
-    });
-  });
-
-  fastify.patch("/malicious/settings", async (request, reply) => {
-    const body = parseOrThrow(updateMaliciousSettingsSchema, request.body);
-    return reply.send({ settings: await adminMalicious.updateSettings(body, actorOf(request)) });
-  });
-
-  fastify.get("/malicious/history", async (request, reply) => {
-    const { limit } = parseOrThrow(listMaliciousHistoryQuerySchema, request.query, "Query");
-    return reply.send({ attempts: await maliciousFeed.history(limit) });
-  });
-
-  /**
-   * Fetch the feed now.
-   *
-   * 200 with an outcome rather than a failure status when the feed cannot be reached. An
-   * air-gapped deployment reaches this path every time, and a 5xx would make a normal
-   * condition look like a broken server -- the outcome and the URL that failed are what the
-   * administrator actually needs.
-   */
-  fastify.post("/malicious/update", async (request, reply) => {
-    return reply.send(await adminMalicious.updateFeed(actorOf(request)));
-  });
-
-  /** Record a decision about a finding. Never hides it; the row stays and gains a label. */
-  fastify.post("/malicious/acknowledgements", async (request, reply) => {
-    const body = parseOrThrow(acknowledgeMaliciousRequestSchema, request.body);
-    return reply
-      .status(201)
-      .send({ acknowledgement: await adminMalicious.acknowledge(body, actorOf(request)) });
-  });
-
-  fastify.delete("/malicious/acknowledgements/:id", async (request, reply) => {
-    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
-    await adminMalicious.removeAcknowledgement(id, actorOf(request));
-    return reply.status(204).send();
   });
 
   // -------------------------------------------------------------------------
@@ -831,10 +783,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     });
     return reply.send({ settings: after });
   });
-
-  // Nested inside this scope so it inherits `requireAdmin` rather than declaring its
-  // own guard, which is the pattern that makes a forgotten guard impossible here.
-  await fastify.register(vulnAdminRoutes, { prefix: "/vuln" });
 
   // -------------------------------------------------------------------------
   // Audit trail

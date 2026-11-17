@@ -1,3 +1,4 @@
+import { leadsAnySquad } from "../squads/leads.js";
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
@@ -51,7 +52,9 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     setSessionCookie(reply, outcome.session.token, outcome.session.expiresAt);
-    return reply.send({ user: toSessionUser(outcome.user) });
+    return reply.send({
+      user: { ...toSessionUser(outcome.user), isTeamLead: await leadsAnySquad(fastify.ctx.db, outcome.user.id) },
+    });
   });
 
   fastify.post("/logout", async (request, reply) => {
@@ -68,7 +71,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
    * why it is being refused everywhere else.
    */
   fastify.get("/me", { preHandler: fastify.requireSession }, async (request, reply) => {
-    return reply.send({ user: toSessionUser(getUser(request)) });
+    const user = getUser(request);
+    return reply.send({ user: { ...toSessionUser(user), isTeamLead: await leadsAnySquad(fastify.ctx.db, user.id) } });
   });
 
   // -------------------------------------------------------------------------

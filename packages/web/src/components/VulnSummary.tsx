@@ -160,7 +160,7 @@ function ScopePanel({
           <>
             {" · "}
             <span className="font-medium text-danger">
-              {formatNumber(totals.knownExploited)} known exploited
+              {formatNumber(totals.knownExploited)} used in real attacks
             </span>
           </>
         ) : null}
@@ -214,7 +214,7 @@ export function VulnBreakdownBlock({ report }: { report: VulnerabilityReport }) 
 
       <div className="grid gap-3 lg:grid-cols-2">
         <ScopePanel
-          label="Application dependencies"
+          label="Your libraries"
           hint="fixed by changing a version"
           totals={report.app}
           scopeParam="app"
@@ -249,7 +249,7 @@ function UnfilteredReference({
   unfiltered: { app: SeverityCounts; baseImage: SeverityCounts };
 }) {
   const rows: Array<[string, SeverityCounts]> = [
-    ["Application dependencies", unfiltered.app],
+    ["Your libraries", unfiltered.app],
     ["Base image and runtimes", unfiltered.baseImage],
   ];
   return (
@@ -337,7 +337,7 @@ export function TopAdvisoriesCard() {
               { header: "Severity", value: (a) => a.severity, width: 10 },
               { header: "Advisory", value: (a) => a.vulnerabilityId, width: 22 },
               { header: "Aliases", value: (a) => exportList(a.aliases), width: 22 },
-              { header: "Known exploited", value: (a) => (a.knownExploited ? "yes" : "no"), width: 14 },
+              { header: "Used in real attacks", value: (a) => (a.knownExploited ? "yes" : "no"), width: 14 },
               { header: "Packages", value: (a) => a.affectedPackages, width: 10 },
               { header: "Package versions", value: (a) => exportList(a.affectedPackageList), width: 40 },
               { header: "Applications", value: (a) => a.currentApplications, width: 12 },
@@ -405,7 +405,7 @@ export function TopAdvisoriesCard() {
                     </Link>
                     {advisory.knownExploited ? (
                       <Badge tone="danger" title="On CISA's Known Exploited Vulnerabilities list.">
-                        exploited
+                        used in attacks
                       </Badge>
                     ) : null}
                   </Td>
@@ -683,7 +683,7 @@ export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityRep
               { header: "Version", value: (r) => r.version, width: 16 },
               { header: "Advisories", value: (r) => r.findings, width: 11 },
               { header: "Critical", value: (r) => r.critical, width: 10 },
-              { header: "Known exploited", value: (r) => r.knownExploited, width: 14 },
+              { header: "Used in real attacks", value: (r) => r.knownExploited, width: 14 },
               { header: "Applications", value: (r) => r.applications, width: 12 },
               { header: "Application names", value: (r) => exportList(r.applicationList), width: 40 },
               { header: "Fixed in", value: (r) => exportList(r.fixVersions), width: 20 },
@@ -751,7 +751,7 @@ export function TopVulnerablePackagesCard({ report }: { report: VulnerabilityRep
                     </Link>
                     {row.knownExploited > 0 ? (
                       <Badge tone="danger" title="Has an advisory on CISA's known-exploited list.">
-                        exploited
+                        used in attacks
                       </Badge>
                     ) : null}
                   </Td>
@@ -818,7 +818,7 @@ export function BaseImageExposureCard({ report }: { report: VulnerabilityReport 
             columns={[
               { header: "Base image", value: (r) => [r.osName ?? "unknown", r.osVersion].filter(Boolean).join(" "), width: 28 },
               { header: "Applications", value: (r) => r.applications, width: 12 },
-              { header: "Findings", value: (r) => r.findings, width: 10 },
+              { header: "Vulnerabilities", value: (r) => r.findings, width: 10 },
               { header: "Critical", value: (r) => r.critical, width: 10 },
               { header: "High", value: (r) => r.high, width: 10 },
             ]}

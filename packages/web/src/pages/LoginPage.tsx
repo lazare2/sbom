@@ -102,7 +102,10 @@ export function LoginPage() {
       </div>
     );
   }
-  if (user) return <Navigate to={redirectTo} replace />;
+  // Administrators land on the overview, team leads on their teams, developers on their own
+  // projects. A link that sent somebody to sign in still wins.
+  const home = user?.role === "admin" ? "/" : user?.isTeamLead ? "/my-teams" : "/my-projects";
+  if (user) return <Navigate to={from ? redirectTo : home} replace />;
 
   /*
     Tabs exist only where there is a second way in.

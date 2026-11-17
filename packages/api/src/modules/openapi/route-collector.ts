@@ -67,5 +67,7 @@ declare module "fastify" {
   interface FastifyInstance {
     /** Every route this server registered. Populated by an `onRoute` hook in `buildApp`. */
     routeTable: RouteCollector;
+    /** The API documentation: route-catalog.ts plus each module's own entries. Set in `buildApp`. */
+    routeCatalog: Readonly<Record<string, import("./route-catalog.js").RouteMeta>>;
   }
 }

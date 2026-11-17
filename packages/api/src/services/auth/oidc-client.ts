@@ -21,11 +21,10 @@ import type { OidcDiagnosis, OidcDiagnosisCode } from "@sbom/shared";
  * until the platform's own request timeout, and a sign-in attempt hangs with it. A refusal
  * after ten seconds is a diagnosis; a hang is a mystery.
  *
- * Node's `fetch` does **not** honour `HTTP_PROXY` or `HTTPS_PROXY`. Grype does, because it is
- * a Go binary, which is why those variables exist in the compose file and why an administrator
- * may reasonably expect them to apply here too. They do not, so a deployment that reaches the
- * internet only through a proxy cannot complete sign-on, and `issuer_unreachable` says so
- * rather than leaving somebody to infer it from a timeout.
+ * Node's `fetch` honours `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in the API image, which
+ * sets NODE_USE_ENV_PROXY=1 (since 0.4.0). So a deployment that reaches the internet only
+ * through a proxy signs on through the same proxy the scanners use; the provider's host must
+ * not be listed in NO_PROXY.
  */
 
 /** Ten seconds. Long enough for a cold TLS handshake through a corporate firewall, short
@@ -421,16 +420,15 @@ export class OidcClient {
  * What to do about each outcome.
  *
  * Written for somebody who did not configure the provider and cannot see it. The
- * `issuer_unreachable` text names the proxy limitation explicitly because the compose file
- * sets `HTTPS_PROXY` for Grype, which makes it reasonable to assume it applies here as well.
+ * `issuer_unreachable` text names the proxy because it is the usual cause on a filtered network.
  */
 const HINTS: Partial<Record<OidcDiagnosisCode, string>> = {
   issuer_unreachable:
     "The server itself has to reach the provider, not just the browser. Check that outbound " +
-    "443 to the issuer's host is open from this machine. Note that an outbound proxy set " +
-    "through HTTP_PROXY or HTTPS_PROXY does not apply to this request - those reach Grype " +
-    "only. If a provider address has been pinned in docker-compose.override.yml, that address " +
-    "may have been withdrawn.",
+    "443 to the issuer's host is open from this machine, or that the proxy set through " +
+    "HTTP_PROXY / HTTPS_PROXY allows it and the host is not in NO_PROXY. If a provider " +
+    "address has been pinned in docker-compose.override.yml, that address may have been " +
+    "withdrawn.",
   issuer_not_oidc:
     "Something answered but it was not a provider. The issuer URL should be the one the " +
     "provider publishes, with no trailing slash - for Entra ID, " +

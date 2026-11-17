@@ -1,41 +1,52 @@
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { EnvironmentSwitcher } from "../environments/EnvironmentSwitcher.tsx";
-import { useMaliciousStatus, useVulnStatus } from "../lib/queries.ts";
+import { WEB_MODULES } from "../modules/index.tsx";
+import { useEnabledModuleIds } from "../modules/ModuleGate.tsx";
 import { Badge, Button } from "./ui.tsx";
+import type { NavSection } from "../modules/types.ts";
 
-const NAV = [
-  { to: "/", label: "Overview", end: true },
-  { to: "/applications", label: "Applications", end: false },
-  { to: "/groups", label: "Groups", end: false },
-  { to: "/search", label: "Package search", end: false },
-  { to: "/inventory", label: "Inventory", end: false },
-  { to: "/analytics", label: "Analytics", end: false },
+type NavItem = { to: string; label: string; end: boolean; section: NavSection };
+
+/** The core pages. Modules add their own entries (modules/index.tsx). */
+const CORE_NAV: NavItem[] = [
+  { to: "/", label: "Overview", end: true, section: "estate" },
+  { to: "/applications", label: "Applications", end: false, section: "estate" },
+  { to: "/search", label: "Package search", end: false, section: "estate" },
 ];
 
-/**
- * Shown only when vulnerability scanning is enabled.
- *
- * A permanently visible nav item leading to a page that explains it has nothing to show
- * is clutter on every deployment that does not use the feature. The pages themselves stay
- * routable either way, so a pasted link still works and explains itself.
- */
-const VULN_NAV = { to: "/vulnerabilities", label: "Vulnerabilities", end: false };
+const SECTION_TITLES: Record<NavSection, string> = {
+  you: "Your work",
+  estate: "Estate",
+  reports: "Reports",
+};
 
-/** Shown only when detection is enabled, on the same reasoning as the vulnerability entry. */
-const MALICIOUS_NAV = { to: "/malicious", label: "Malicious packages", end: false };
+/**
+ * Each module's menu entries, shown only while the module is on and to the people they are for
+ * (My teams to team leads and administrators).
+ *
+ * A permanently visible entry leading to a page that explains it has nothing to show is clutter
+ * on every installation that does not use the module. The pages themselves stay routable
+ * either way, so a pasted link still works and explains itself.
+ */
+function moduleNav(enabled: Set<string>, user: { role: string; isTeamLead?: boolean | undefined } | null): NavItem[] {
+  return WEB_MODULES.filter((m) => enabled.has(m.id)).flatMap((m) =>
+    (m.nav ?? [])
+      .filter((item) => !item.visibleTo || (user !== null && item.visibleTo(user)))
+      .map((item) => ({ to: item.to, label: item.label, end: item.end ?? false, section: item.section })),
+  );
+}
 
 export function Layout() {
   const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   // Cached for a minute by the query, so this does not add a request per navigation.
-  const { data: vulnStatus } = useVulnStatus();
-  const { data: maliciousStatus } = useMaliciousStatus();
-  const navItems = [
-    ...NAV,
-    ...(vulnStatus?.enabled ? [VULN_NAV] : []),
-    ...(maliciousStatus?.enabled ? [MALICIOUS_NAV] : []),
-  ];
+  const enabledModules = useEnabledModuleIds();
+  const items = [...CORE_NAV, ...moduleNav(enabledModules, user)];
+  // Your work first, then the estate, then reports: the order a person's day goes in.
+  const sections = (["you", "estate", "reports"] as const)
+    .map((section) => ({ section, items: items.filter((i) => i.section === section) }))
+    .filter((g) => g.items.length > 0);
 
   async function handleLogout() {
     await logout();
@@ -60,10 +71,9 @@ export function Layout() {
             SBOM Platform
           </NavLink>
 
-          <nav aria-label="Main" className="flex items-center gap-1">
-            {navItems.map((item) => (
-              // `end` on the overview link only: without it, "/" matches every
-              // route and the whole nav renders as active.
+          {/* Narrow screens: the same entries in one scrolling row, since there is no room for the side menu. */}
+          <nav aria-label="Main (compact)" className="flex w-full items-center gap-1 overflow-x-auto md:hidden">
+            {sections.flatMap((g) => g.items).map((item) => (
               <NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
                 {item.label}
               </NavLink>
@@ -76,6 +86,23 @@ export function Layout() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
+            {/* One box for a project, a package or a CVE. */}
+            <form
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const q = String(new FormData(e.currentTarget).get("q") ?? "").trim();
+                if (q) navigate(`/find?q=${encodeURIComponent(q)}`);
+              }}
+            >
+              <input
+                name="q"
+                type="search"
+                placeholder="Project, package or CVE…"
+                aria-label="Search projects, packages and vulnerabilities"
+                className="h-[30px] w-56 rounded-md border border-border-strong bg-bg-raised px-2 text-sm text-text-base"
+              />
+            </form>
             {/*
               Beside the account rather than in the navigation, because it is not a place to
               go -- it changes what every other item in the navigation means.
@@ -124,9 +151,45 @@ export function Layout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1600px] px-5 py-6">
-        <Outlet />
-      </main>
+      <div className="mx-auto flex max-w-[1600px] gap-6 px-5">
+        {/*
+          The side menu, by role: your own work first (My teams for team leads, My projects), then
+          the estate, then reports, then Administration for administrators.
+        */}
+        <nav aria-label="Main" className="sticky top-[57px] hidden w-48 shrink-0 self-start py-6 md:block">
+          {sections.map((g) => (
+            <div key={g.section} className="mb-5">
+              <div className="mb-1 px-2.5 text-[11px] font-semibold tracking-wide text-text-faint uppercase">
+                {SECTION_TITLES[g.section]}
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {g.items.map((item) => (
+                  // `end` on the overview link only: without it, "/" matches every route.
+                  <NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          ))}
+          {isAdmin ? (
+            <div className="mb-5">
+              <div className="mb-1 px-2.5 text-[11px] font-semibold tracking-wide text-text-faint uppercase">
+                Administration
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <NavLink to="/admin" className={linkClass}>
+                  Admin
+                </NavLink>
+              </div>
+            </div>
+          ) : null}
+        </nav>
+
+        <main className="min-w-0 flex-1 py-6">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

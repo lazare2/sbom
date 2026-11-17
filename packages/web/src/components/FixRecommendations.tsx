@@ -94,10 +94,10 @@ export function FixRecommendationsCard({
                 { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
                 { header: "Origin", value: (r) => (r.origin === "app" ? "Application" : "Base image"), width: 12 },
                 { header: "Installed", value: (r) => exportList(r.installedVersions), width: 18 },
-                { header: "Findings", value: (r) => r.findings, width: 10 },
+                { header: "Vulnerabilities", value: (r) => r.findings, width: 10 },
                 ...severityColumns<FixRecommendation>("", (r) => r.counts),
                 { header: "Highest severity", value: (r) => r.highestSeverity, width: 15 },
-                { header: "Known exploited", value: (r) => r.knownExploited, width: 14 },
+                { header: "Used in real attacks", value: (r) => r.knownExploited, width: 14 },
                 { header: "Minimum fix", value: (r) => r.minimumVersion, width: 16 },
                 { header: "Upgrade to", value: (r) => r.recommendedVersion, width: 16 },
                 { header: "Status", value: (r) => STATUS_EXPORT_LABELS[r.status], width: 24 },
@@ -138,7 +138,7 @@ export function FixRecommendationsCard({
                   <tr>
                     <Th>Package</Th>
                     <Th width="200px">Installed</Th>
-                    <Th width="190px">Findings</Th>
+                    <Th width="190px">Vulnerabilities</Th>
                     <Th width="220px">Upgrade to</Th>
                     <Th width="200px">Checked</Th>
                     <Th width="80px" />
@@ -411,7 +411,7 @@ function RecommendationDetail({ rec }: { rec: FixRecommendation }) {
                 >
                   {advisory.vulnerabilityId}
                 </Link>
-                {advisory.knownExploited ? <Badge tone="danger">exploited</Badge> : null}
+                {advisory.knownExploited ? <Badge tone="danger">used in attacks</Badge> : null}
                 {rec.installedVersions.length > 1 && advisory.on.length > 0 ? (
                   <span className="text-text-faint">
                     {advisory.on.length === rec.installedVersions.length

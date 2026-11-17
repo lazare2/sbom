@@ -205,7 +205,7 @@ export function DashboardPage() {
       {/* Second row: the two counters that mean something is wrong. */}
       <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
-          label="Stale"
+          label="No recent build"
           value={s.applications.stale}
           hint={`Active, but no scan in ${s.staleThresholdDays} days`}
           tone={s.applications.stale > 0 ? "warn" : "ok"}

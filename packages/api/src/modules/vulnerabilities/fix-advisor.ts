@@ -626,6 +626,85 @@ export class FixAdvisorService {
   }
 
   /**
+   * Walks several packages forward from their minimum versions at once, the way the
+   * Recommendations tab does for one build: each candidate is put to the scanner, and while it is
+   * still affected by something fixed later, the later fix is tried. One scanner run per round for
+   * all packages, answers cached by database version.
+   *
+   * Returns, per key, where the walk ended. Packages it could not check keep their minimum and
+   * come back `checked: false`.
+   */
+  async walkMany(
+    packages: ReadonlyArray<{ key: string; name: string; ecosystem: string; purl: string; start: string }>,
+  ): Promise<Map<string, { version: string; checked: boolean }>> {
+    const out = new Map<string, { version: string; checked: boolean }>();
+    for (const p of packages) out.set(p.key, { version: p.start, checked: false });
+    const watermark = await this.currentWatermark();
+    if (watermark === null || packages.length === 0) return out;
+
+    const answers = new Map<string, CandidateFinding[]>();
+    let targets = new Map(packages.map((p) => [p.key, p.start]));
+    for (let round = 0; round < MAX_ROUNDS && targets.size > 0; round++) {
+      const wanted = [...targets].flatMap(([key, version]) => {
+        const p = packages.find((x) => x.key === key)!;
+        const purl = withVersion(p.purl, version);
+        return purl ? [{ plan: { key, name: p.name, ecosystem: p.ecosystem } as PackagePlan, version, purl }] : [];
+      });
+      const result = await this.lookup(wanted, watermark);
+      const known = answers.size;
+      for (const [purl, found] of result.answers) answers.set(purl, found);
+      const learned = answers.size > known;
+      const next = new Map<string, string>();
+      for (const p of packages) {
+        const walk = walkCandidate(
+          p.start,
+          (version) => {
+            const purl = withVersion(p.purl, version);
+            return purl === null ? undefined : answers.get(purl);
+          },
+          MAX_ROUNDS,
+        );
+        out.set(p.key, { version: walk.recommendedVersion, checked: walk.status === "clean" || walk.status === "residual" });
+        if (learned && result.failure === null && walk.status === "unverified" && walk.checks.length < MAX_ROUNDS) {
+          next.set(p.key, walk.recommendedVersion);
+        }
+      }
+      targets = next;
+      if (result.failure) break;
+    }
+    return out;
+  }
+
+  /**
+   * "Is this version safe to add?" - one package version put to the scanner, exactly as a
+   * recommended version is checked, and cached the same way.
+   *
+   * `not_assessed` when the scanner declines the package (no coordinate it understands), which
+   * is reported as such and never as clean.
+   */
+  async checkVersion(input: { name: string; ecosystem: string; version: string; purl: string }): Promise<
+    | { status: "checked"; findings: CandidateFinding[]; databaseBuiltAt: string }
+    | { status: "not_assessed" | "unavailable"; message: string; databaseBuiltAt: string | null }
+  > {
+    const watermark = await this.currentWatermark();
+    if (watermark === null) {
+      return { status: "unavailable", message: "The scanner has no usable vulnerability database right now.", databaseBuiltAt: null };
+    }
+    const plan = { key: "", name: input.name, ecosystem: input.ecosystem } as PackagePlan;
+    const result = await this.lookup([{ plan, version: input.version, purl: input.purl }], watermark);
+    const found = result.answers.get(input.purl);
+    if (result.failure) return { status: "unavailable", message: result.failure, databaseBuiltAt: watermark.toISOString() };
+    if (found === undefined) {
+      return {
+        status: "not_assessed",
+        message: "The scanner could not assess this package: it has no data for this kind of package.",
+        databaseBuiltAt: watermark.toISOString(),
+      };
+    }
+    return { status: "checked", findings: found, databaseBuiltAt: watermark.toISOString() };
+  }
+
+  /**
    * Answers for a set of candidate purls: from the cache where it is current, from the scanner
    * otherwise. Never throws - a scanner failure becomes a message, and the recommendations it
    * could not check are reported as unverified.

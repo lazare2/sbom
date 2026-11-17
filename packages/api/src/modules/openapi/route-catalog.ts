@@ -18,6 +18,7 @@ import {
   resetUserPasswordRequestSchema,
   resolveAccessRequestSchema,
   setGroupMembersRequestSchema,
+  setModuleEnabledSchema,
   setSignInMethodSchema,
   setSquadAccessSchema,
   squadSettingsSchema,
@@ -26,6 +27,7 @@ import {
   setTribeSquadsSchema,
   setTribeApplicationsSchema,
   setSquadMembersSchema,
+  setSquadLeadSchema,
   setUserApplicationAccessSchema,
   setUserSquadsSchema,
   setUserEnvironmentsRequestSchema,
@@ -557,6 +559,23 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     tag: "Vulnerabilities",
     auth: "user",
   },
+  "GET /api/v1/modules": {
+    summary: "The platform's modules and which of them are switched on.",
+    tag: "Modules",
+    auth: "user",
+    notes:
+      "A switched-off module keeps its data and its addresses; its reads answer that the " +
+      "feature is not enabled.",
+  },
+  "PATCH /api/v1/admin/modules/:id": {
+    summary: "Switch a module on or off. Its data is kept either way.",
+    tag: "Modules",
+    auth: "admin",
+    body: setModuleEnabledSchema,
+    notes:
+      "The same switch as on the module's own settings page, with the same audit entry and " +
+      "the same first update when it is switched on. 400 for a module that cannot be switched off.",
+  },
   "GET /api/v1/vuln-status": {
     summary: "Whether scanning is on, which provider is active, and how fresh its data is.",
     tag: "Vulnerabilities",
@@ -816,6 +835,15 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     notes:
       "Membership is access: every member reaches what the squad is granted, in addition to " +
       "their own grants, and the estates those applications live in come with it.",
+  },
+  "PUT /api/v1/admin/squads/:id/members/:userId/lead": {
+    summary: "Mark a squad member as team lead, or not.",
+    tag: "Admin: squads",
+    auth: "admin",
+    body: setSquadLeadSchema,
+    notes:
+      "A team lead may accept a risk on the squad's projects, with a reason and an end date. " +
+      "404 when the account is not a member of the squad.",
   },
   "PUT /api/v1/admin/squads/:id/access": {
     summary: "Replace the groups and applications a squad is granted.",

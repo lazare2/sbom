@@ -15,12 +15,14 @@ import {
 } from "@sbom/shared";
 import { useServerSort, type SortControl } from "../lib/useSort.ts";
 import { useAuth } from "../auth/AuthProvider.tsx";
-import { useCreateSuppression } from "../lib/mutations.ts";
+import { useAcceptRisk, useCreateSuppression } from "../lib/mutations.ts";
 import { formatNumber } from "../lib/format.ts";
 import { ComponentLocationCell, OriginBadge } from "./ComponentLocationCell.tsx";
 import { advisoryHeadline } from "../lib/advisory.ts";
 import { FixCell, FoundBy } from "./ScannerSources.tsx";
 import { ExportTableButton, exportList, fetchAllPages, locationColumns, type ExportColumn } from "./ExportTable.tsx";
+import { ATTACK_VECTOR_OPTIONS, AttackVectorBadge, attackVectorOptionLabel, exportAttackVector } from "./AttackVector.tsx";
+import type { AttackVectorFilter } from "@sbom/shared";
 import { SEVERITY_ORDER, SeverityBadge, SeverityBar } from "./Severity.tsx";
 import {
   Badge,
@@ -58,6 +60,10 @@ export interface FindingsFilters {
   severity: VulnSeverity | "";
   fixable: boolean;
   knownExploited: boolean;
+  /** Where an attacker has to be, from the CVSS vector; empty for any. */
+  attackVector: AttackVectorFilter | "";
+  /** Only findings needing neither a sign-in nor anybody's action. */
+  noPrerequisites: boolean;
   includeSuppressed: boolean;
   sortBy: (typeof findingSort)["fields"][number];
   sortDir: SortDirection;
@@ -78,6 +84,8 @@ export const DEFAULT_FINDINGS_FILTERS: FindingsFilters = {
   severity: "",
   fixable: false,
   knownExploited: false,
+  attackVector: "",
+  noPrerequisites: false,
   includeSuppressed: false,
   page: 1,
 };
@@ -98,7 +106,7 @@ export function BreakdownTiles({ breakdown }: { breakdown: VulnBreakdown }) {
     <div className="grid gap-4 border-b border-border-base p-4 sm:grid-cols-2">
       <div>
         <div className="flex items-baseline justify-between gap-2">
-          <p className="text-xs font-medium text-text-muted">Application dependencies</p>
+          <p className="text-xs font-medium text-text-muted">Your libraries</p>
           <p className="nums text-lg font-semibold text-text-base">{formatNumber(appTotal)}</p>
         </div>
         <SeverityBar counts={breakdown.app} total={scale} className="mt-2" />
@@ -109,7 +117,7 @@ export function BreakdownTiles({ breakdown }: { breakdown: VulnBreakdown }) {
             <>
               {" · "}
               <span className="font-medium text-danger">
-                {formatNumber(breakdown.appKnownExploited)} known exploited
+                {formatNumber(breakdown.appKnownExploited)} used in real attacks
               </span>
             </>
           ) : null}
@@ -141,7 +149,7 @@ export function BreakdownTiles({ breakdown }: { breakdown: VulnBreakdown }) {
 /** The scope choices, shared with the recommendations view so the two read alike. */
 export const FINDINGS_SCOPE_OPTIONS: Array<{ value: FindingsFilters["scope"]; label: string }> = [
   { value: "all", label: "Show all" },
-  { value: "app", label: "Application dependencies" },
+  { value: "app", label: "Your libraries" },
   { value: "os", label: "Base image and runtimes" },
 ];
 
@@ -177,7 +185,21 @@ export function FindingsFilterBar({
       <Checkbox
         checked={filters.knownExploited}
         onChange={(knownExploited) => onChange({ knownExploited, page: 1 })}
-        label="Known exploited"
+        label="Used in real attacks"
+      />
+      <Select
+        value={filters.attackVector}
+        onChange={(attackVector) => onChange({ attackVector: attackVector as AttackVectorFilter | "", page: 1 })}
+        ariaLabel="Attack from"
+        options={[
+          { value: "", label: "Attack from anywhere" },
+          ...ATTACK_VECTOR_OPTIONS.map((v) => ({ value: v, label: `Attack from: ${attackVectorOptionLabel(v)}` })),
+        ]}
+      />
+      <Checkbox
+        checked={filters.noPrerequisites}
+        onChange={(noPrerequisites) => onChange({ noPrerequisites, page: 1 })}
+        label="No sign-in or user action needed"
       />
       <Checkbox
         checked={filters.includeSuppressed}
@@ -195,6 +217,8 @@ export function findingsParams(filters: FindingsFilters, pageSize = 50): Record<
     severity: filters.severity || undefined,
     fixable: filters.fixable ? "true" : undefined,
     knownExploited: filters.knownExploited ? "true" : undefined,
+    attackVector: filters.attackVector || undefined,
+    noPrerequisites: filters.noPrerequisites ? "true" : undefined,
     includeSuppressed: filters.includeSuppressed ? "true" : undefined,
     sortBy: filters.sortBy,
     sortDir: filters.sortDir,
@@ -210,6 +234,7 @@ export function FindingsTable({
   applicationId,
   onPageChange,
   sort,
+  canAcceptRisk,
 }: {
   data: Paginated<VulnerabilityFinding> | undefined;
   isLoading: boolean;
@@ -219,8 +244,13 @@ export function FindingsTable({
   onPageChange: (page: number) => void;
   /** Omit for a table rendered without sortable headers. */
   sort?: SortControl<(typeof findingSort)["fields"][number]>;
+  /** The caller leads a squad of this project: "Accept risk" for this project only. */
+  canAcceptRisk?: boolean;
 }) {
   const { isAdmin } = useAuth();
+  // Administrators keep their wider option; a team lead gets the project-only one.
+  const leadOnly = !isAdmin && canAcceptRisk === true && applicationId !== undefined;
+  const showAccept = isAdmin || leadOnly;
   const [accepting, setAccepting] = useState<VulnerabilityFinding | null>(null);
   const on = (field: (typeof findingSort)["fields"][number]) => (sort ? () => sort.toggle(field) : undefined);
   const at = (field: (typeof findingSort)["fields"][number]) => (sort ? sort.stateOf(field) : undefined);
@@ -257,7 +287,8 @@ export function FindingsTable({
               <Th onSort={on("cvss")} sorted={at("cvss")} width="90px">
                 CVSS
               </Th>
-              {isAdmin ? <Th width="110px" /> : null}
+              <Th width="120px">Attack from</Th>
+              {showAccept ? <Th width="110px" /> : null}
             </tr>
           </thead>
           <tbody>
@@ -293,7 +324,7 @@ export function FindingsTable({
                     <span className="flex flex-wrap gap-1">
                       {finding.knownExploited ? (
                         <Badge tone="danger" title="On CISA's Known Exploited Vulnerabilities list.">
-                          exploited
+                          used in attacks
                         </Badge>
                       ) : null}
                       {finding.suppressed ? (
@@ -340,7 +371,10 @@ export function FindingsTable({
                   />
                 </Td>
                 <Td className="nums text-text-muted">{finding.cvssBaseScore?.toFixed(1) ?? " - "}</Td>
-                {isAdmin ? (
+                <Td>
+                  <AttackVectorBadge exploitability={finding.exploitability} />
+                </Td>
+                {showAccept ? (
                   <Td>
                     {finding.suppressed ? null : (
                       <Button size="sm" variant="ghost" onClick={() => setAccepting(finding)}>
@@ -362,11 +396,11 @@ export function FindingsTable({
         onPageChange={onPageChange}
         isFetching={isFetching}
       />
-      <AcceptRiskModal
-        finding={accepting}
-        applicationId={applicationId}
-        onClose={() => setAccepting(null)}
-      />
+      {leadOnly ? (
+        <LeadAcceptRiskModal finding={accepting} applicationId={applicationId!} onClose={() => setAccepting(null)} />
+      ) : (
+        <AcceptRiskModal finding={accepting} applicationId={applicationId} onClose={() => setAccepting(null)} />
+      )}
     </>
   );
 }
@@ -544,6 +578,132 @@ function AcceptRiskModal({
 }
 
 /**
+ * A team lead accepting a risk on one of their squads' projects.
+ *
+ * Always this project only, and the end date is required: the risk comes back on its own when
+ * the date passes. The claim (real and accepted, or not reached) is chosen as on the
+ * administrator's form, for the same reason - it is published in VEX documents.
+ */
+function LeadAcceptRiskModal({
+  finding,
+  applicationId,
+  onClose,
+}: {
+  finding: VulnerabilityFinding | null;
+  applicationId: string;
+  onClose: () => void;
+}) {
+  const accept = useAcceptRisk(applicationId);
+  const [reason, setReason] = useState("");
+  const [until, setUntil] = useState("");
+  const [scope, setScope] = useState<"package" | "project">("package");
+  const [vexStatus, setVexStatus] = useState<VexStatus | "">("");
+  const [justification, setJustification] = useState<VexJustification | "">("");
+
+  if (!finding) return null;
+  const target = finding;
+  const today = new Date().toISOString().slice(0, 10);
+  const needsJustification = vexStatus !== "" && requiresJustification(vexStatus);
+  const complete =
+    reason.trim().length >= 3 && until > today && vexStatus !== "" && (!needsJustification || justification !== "");
+
+  function submit() {
+    if (vexStatus === "") return;
+    accept.mutate(
+      {
+        vulnerabilityId: target.vulnerabilityId,
+        ...(scope === "package" ? { componentId: target.componentId } : {}),
+        reason: reason.trim(),
+        // The end of the chosen day, in the browser's time zone.
+        expiresAt: new Date(`${until}T23:59:59`).toISOString(),
+        vexStatus,
+        ...(requiresJustification(vexStatus) && justification !== "" ? { vexJustification: justification } : {}),
+      },
+      {
+        onSuccess: () => {
+          setReason("");
+          setUntil("");
+          setVexStatus("");
+          setJustification("");
+          onClose();
+        },
+      },
+    );
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Accept ${finding.vulnerabilityId} in this project`}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={accept.isPending}>
+            Cancel
+          </Button>
+          <Button variant="primary" disabled={!complete || accept.isPending} onClick={submit}>
+            {accept.isPending ? "Saving…" : "Accept risk"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-xs text-text-muted">
+          As team lead you decide this alone. It is left out of this project's counts and action plan until the end
+          date, then it comes back by itself. It is recorded with your name and listed under Accepted risks.
+        </p>
+        <FormRow label="Applies to" htmlFor="lead-accept-scope">
+          <Select
+            id="lead-accept-scope"
+            value={scope}
+            onChange={(v) => setScope(v as typeof scope)}
+            ariaLabel="Accepted risk scope"
+            options={[
+              { value: "package", label: `Only ${finding.componentName} ${finding.componentVersion ?? ""} in this project`.trim() },
+              { value: "project", label: "Every package in this project" },
+            ]}
+          />
+        </FormRow>
+        <FormRow label="Until (required)" htmlFor="lead-accept-until">
+          <input
+            id="lead-accept-until"
+            type="date"
+            min={today}
+            value={until}
+            onChange={(e) => setUntil(e.target.value)}
+            className="h-[34px] w-full rounded-md border border-border-strong bg-bg-raised px-2 text-sm text-text-base"
+          />
+        </FormRow>
+        <FormRow label="Why (required)" htmlFor="lead-accept-reason">
+          <Textarea id="lead-accept-reason" value={reason} onChange={setReason} rows={3} />
+        </FormRow>
+        <FormRow label="What is being claimed" htmlFor="lead-accept-vex">
+          <Select
+            id="lead-accept-vex"
+            value={vexStatus}
+            onChange={(v) => setVexStatus(v as VexStatus | "")}
+            ariaLabel="VEX status"
+            options={[{ value: "", label: "Choose…" }, ...vexStatuses.map((v) => ({ value: v, label: VEX_STATUS_LABELS[v] }))]}
+          />
+        </FormRow>
+        {needsJustification ? (
+          <FormRow label="Justification" htmlFor="lead-accept-justification">
+            <Select
+              id="lead-accept-justification"
+              value={justification}
+              onChange={(v) => setJustification(v as VexJustification | "")}
+              ariaLabel="VEX justification"
+              options={[{ value: "", label: "Choose…" }, ...vexJustifications.map((j) => ({ value: j, label: VEX_JUSTIFICATION_LABELS[j] }))]}
+            />
+          </FormRow>
+        ) : null}
+        <FormError error={accept.error} />
+      </div>
+    </Modal>
+  );
+}
+
+/**
  * Sort control for a findings table whose state lives in `FindingsFilters`.
  *
  * Both callers hold those filters in component state rather than the URL, so the sort rides
@@ -579,7 +739,8 @@ export const FINDING_EXPORT_COLUMNS: ExportColumn<VulnerabilityFinding>[] = [
   },
   { header: "CVSS", value: (f) => f.cvssBaseScore, width: 7 },
   { header: "EPSS", value: (f) => f.epssScore, width: 8 },
-  { header: "Known exploited", value: (f) => (f.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Used in real attacks", value: (f) => (f.knownExploited ? "yes" : "no"), width: 14 },
+  { header: "Attack from", value: (f) => exportAttackVector(f.exploitability), width: 34 },
   { header: "Accepted risk", value: (f) => (f.suppressed ? "yes" : "no"), width: 13 },
   { header: "Accepted risk reason", value: (f) => f.suppressionReason, width: 30 },
   ...locationColumns<VulnerabilityFinding>((f) => f.location),
@@ -619,7 +780,7 @@ export function FindingsCard({
             <FindingsFilterBar filters={filters} onChange={onChange} />
             {exportFrom ? (
               <ExportTableButton
-                title="Findings"
+                title="Vulnerabilities"
                 filename={exportFrom.filename}
                 fetchRows={(progress) =>
                   fetchAllPages<VulnerabilityFinding>(exportFrom.path, findingsParams(filters), progress)

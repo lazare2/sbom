@@ -1,6 +1,14 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
+  ActionPlanResponse,
+  FindResults,
+  PackageRecommendation,
+  VersionCheck,
+  MyTeamsResponse,
+  TargetDates,
+  MyProjectsResponse,
   AttentionSettings,
+  ModuleListResponse,
   InventoryReport,
   PackageDetail,
   PackageSearchResult,
@@ -141,6 +149,11 @@ export const queryKeys = {
   apiErrors: (params: Record<string, unknown>) => ["admin", "errors", params] as const,
   apiErrorSummary: ["admin", "errors", "summary"] as const,
   ingestTokens: ["admin", "ingest-tokens"] as const,
+  // --- modules ---
+  modules: ["modules"] as const,
+  // --- developer view ---
+  myProjects: ["developer", "my-projects"] as const,
+  actionPlan: (id: string) => ["developer", "action-plan", id] as const,
   // --- vulnerabilities ---
   vulnStatus: ["vuln", "status"] as const,
   platformSettings: ["admin", "settings"] as const,
@@ -214,10 +227,24 @@ export interface ComponentVersionUsage {
 export function useAttributeDefinitions(includeInactive = false) {
   return useQuery({
     queryKey: [...queryKeys.attributeDefinitions, includeInactive],
-    queryFn: () =>
-      api.get<{ definitions: AttributeDefinition[] }>(
+    queryFn: async () => {
+      const result = await api.get<{ definitions: AttributeDefinition[] }>(
         `/attribute-definitions${includeInactive ? "?includeInactive=true" : ""}`,
-      ),
+      );
+      /*
+        The seeded "Severity" attribute reads as a vulnerability severity next to the real ones,
+        so everywhere it is shown it says what it means: how important the project is to the
+        business. A label only - the stored definition is untouched, and Administration ->
+        Attributes (which asks with includeInactive) shows and edits it as stored. An
+        administrator who renamed it keeps their own name.
+      */
+      if (includeInactive) return result;
+      return {
+        definitions: result.definitions.map((d) =>
+          d.key === "severity" && d.label === "Severity" ? { ...d, label: "Business importance" } : d,
+        ),
+      };
+    },
     // Near-static during a session: these change only when an admin edits them,
     // and that edit invalidates this key explicitly.
     staleTime: 10 * 60 * 1000,
@@ -945,6 +972,85 @@ export function useReportRuns() {
   return useQuery({
     queryKey: queryKeys.reportRuns,
     queryFn: () => api.get<{ items: ReportRunSummary[] }>("/admin/reports"),
+  });
+}
+
+/**
+ * Which modules exist and which are on. The menu and every module page read it, so it is kept
+ * for a minute like the status endpoints it replaces for that purpose.
+ */
+export function useModules() {
+  return useQuery({
+    queryKey: queryKeys.modules,
+    queryFn: () => api.get<ModuleListResponse>("/modules"),
+    staleTime: 60_000,
+  });
+}
+
+/** A package's recommended version - the one every action plan names too. */
+export function usePackageRecommendation(ecosystem: string, name: string) {
+  return useQuery({
+    queryKey: ["packages", "recommendation", ecosystem, name],
+    queryFn: () => api.get<PackageRecommendation>(`/packages/recommendation${toQueryString({ ecosystem, name })}`),
+  });
+}
+
+/** "Is this version safe to add?" Asked only when a version is submitted. */
+export function useVersionCheck(ecosystem: string, name: string, version: string | null) {
+  return useQuery({
+    queryKey: ["packages", "check", ecosystem, name, version],
+    queryFn: () => api.get<VersionCheck>(`/packages/check${toQueryString({ ecosystem, name, version })}`),
+    enabled: version !== null && version !== "",
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** One search box: projects, packages and vulnerabilities. */
+export function useFind(q: string) {
+  return useQuery({
+    queryKey: ["find", q],
+    queryFn: () => api.get<FindResults>(`/find${toQueryString({ q })}`),
+    enabled: q.trim().length > 0,
+  });
+}
+
+/** The squads the signed-in team lead leads. */
+export function useMyTeams() {
+  return useQuery({
+    queryKey: ["developer", "my-teams"],
+    queryFn: () => api.get<MyTeamsResponse>("/my-teams"),
+  });
+}
+
+/** The signed-in person's own projects, most urgent first. */
+export function useMyProjects() {
+  return useQuery({
+    queryKey: queryKeys.myProjects,
+    queryFn: () => api.get<MyProjectsResponse>("/my-projects"),
+  });
+}
+
+/**
+ * One project's status and action plan.
+ *
+ * Opening it records a visit. `since` keeps "new since your last visit" measured from the same
+ * point while the page stays open, rather than each refresh clearing the marks just shown.
+ */
+export function useActionPlan(applicationId: string, since?: string | null) {
+  return useQuery({
+    queryKey: [...queryKeys.actionPlan(applicationId), since ?? null],
+    queryFn: () =>
+      api.get<ActionPlanResponse>(
+        `/applications/${encodeURIComponent(applicationId)}/action-plan${since ? `?since=${encodeURIComponent(since)}` : ""}`,
+      ),
+  });
+}
+
+/** Target dates, for Administration -> Configuration. */
+export function useTargetDates() {
+  return useQuery({
+    queryKey: ["admin", "developer", "targets"],
+    queryFn: () => api.get<{ targets: TargetDates }>("/admin/developer/targets"),
   });
 }
 

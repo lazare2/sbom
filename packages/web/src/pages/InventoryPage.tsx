@@ -1,3 +1,4 @@
+import { PageNumbers, usePage } from "../lib/usePage.tsx";
 import { Link } from "react-router";
 import type {
   EcosystemBreakdownEntry,
@@ -179,6 +180,7 @@ function LargestApplicationsCard({ rows }: { rows: TopProjectEntry[] }) {
     (r, f) => (f === "application" ? r.name : f === "platform" ? r.platform : r.packages),
     (r) => r.applicationId,
   );
+  const paged = usePage(sort.rows);
   return (
     <Card>
       <CardHeader
@@ -189,6 +191,7 @@ function LargestApplicationsCard({ rows }: { rows: TopProjectEntry[] }) {
             title="Largest applications"
             filename="largest-applications"
             rows={sort.rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Application", value: (p) => p.name, width: 36 },
               { header: "Runs on", value: (p) => p.platform, width: 32 },
@@ -201,7 +204,8 @@ function LargestApplicationsCard({ rows }: { rows: TopProjectEntry[] }) {
       {rows.length === 0 ? (
         <EmptyState title="No builds yet" hint="Applications appear here once they report an SBOM." />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -218,7 +222,7 @@ function LargestApplicationsCard({ rows }: { rows: TopProjectEntry[] }) {
               </tr>
             </thead>
             <tbody>
-              {sort.rows.map((p) => (
+              {paged.rows.map((p) => (
                 <Tr key={p.applicationId}>
                   <Td>
                     <Link to={`/applications/${p.applicationId}`} className="font-medium text-accent hover:underline">
@@ -239,6 +243,8 @@ function LargestApplicationsCard({ rows }: { rows: TopProjectEntry[] }) {
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );
@@ -296,6 +302,7 @@ function PackagesCard({
                   : (v(r)?.fixable ?? null),
     (r) => `${r.name}|${r.ecosystem}`,
   );
+  const paged = usePage(sort.rows);
 
   return (
     <Card>
@@ -307,6 +314,7 @@ function PackagesCard({
             title={title}
             filename={filename}
             rows={sort.rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Package", value: (r) => r.name, width: 32 },
               { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
@@ -319,7 +327,7 @@ function PackagesCard({
                     { header: "Advisories", value: (r: InventoryPackageEntry) => v(r)?.advisories ?? null, width: 10 },
                     { header: "Critical", value: (r: InventoryPackageEntry) => v(r)?.critical ?? null, width: 10 },
                     { header: "High", value: (r: InventoryPackageEntry) => v(r)?.high ?? null, width: 10 },
-                    { header: "Known exploited", value: (r: InventoryPackageEntry) => v(r)?.knownExploited ?? null, width: 10 },
+                    { header: "Used in real attacks", value: (r: InventoryPackageEntry) => v(r)?.knownExploited ?? null, width: 10 },
                     { header: "With a fix", value: (r: InventoryPackageEntry) => v(r)?.fixable ?? null, width: 10 },
                     {
                       header: "Vulnerable applications",
@@ -335,7 +343,8 @@ function PackagesCard({
       {rows.length === 0 ? (
         <EmptyState title="Nothing to list" hint={empty} />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -372,7 +381,7 @@ function PackagesCard({
               </tr>
             </thead>
             <tbody>
-              {sort.rows.map((r) => {
+              {paged.rows.map((r) => {
                 const vulns = v(r);
                 return (
                   <Tr key={`${r.name}|${r.ecosystem}`}>
@@ -435,6 +444,8 @@ function PackagesCard({
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );
@@ -480,6 +491,7 @@ function OperatingSystemsCard({ rows, showVulns }: { rows: InventoryOsEntry[]; s
                   : (r.vulnerabilities?.fixable ?? null),
     (r) => `${r.name}|${r.version ?? ""}`,
   );
+  const paged = usePage(sort.rows);
 
   return (
     <Card>
@@ -495,6 +507,7 @@ function OperatingSystemsCard({ rows, showVulns }: { rows: InventoryOsEntry[]; s
             title="Base images"
             filename="base-images"
             rows={sort.rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Distribution", value: (r) => osLabel(r.name), width: 18 },
               { header: "Version", value: (r) => r.version, width: 12 },
@@ -504,12 +517,12 @@ function OperatingSystemsCard({ rows, showVulns }: { rows: InventoryOsEntry[]; s
               ...(withVulns
                 ? [
                     { header: "Assessed applications", value: (r: InventoryOsEntry) => r.vulnerabilities?.assessedApplications ?? null, width: 12 },
-                    { header: "Findings", value: (r: InventoryOsEntry) => r.vulnerabilities?.findings ?? null, width: 10 },
+                    { header: "Vulnerabilities", value: (r: InventoryOsEntry) => r.vulnerabilities?.findings ?? null, width: 10 },
                     { header: "Average per application", value: (r: InventoryOsEntry) => r.vulnerabilities?.averageFindings ?? null, width: 12 },
                     { header: "Critical", value: (r: InventoryOsEntry) => r.vulnerabilities?.critical ?? null, width: 10 },
                     { header: "High", value: (r: InventoryOsEntry) => r.vulnerabilities?.high ?? null, width: 10 },
                     { header: "With a fix", value: (r: InventoryOsEntry) => r.vulnerabilities?.fixable ?? null, width: 10 },
-                    { header: "Known exploited", value: (r: InventoryOsEntry) => r.vulnerabilities?.knownExploited ?? null, width: 10 },
+                    { header: "Used in real attacks", value: (r: InventoryOsEntry) => r.vulnerabilities?.knownExploited ?? null, width: 10 },
                   ]
                 : []),
             ]}
@@ -525,7 +538,8 @@ function OperatingSystemsCard({ rows, showVulns }: { rows: InventoryOsEntry[]; s
       {rows.length === 0 ? (
         <EmptyState title="No distribution detected" hint="Scratch and distroless images report no operating system." />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -557,7 +571,7 @@ function OperatingSystemsCard({ rows, showVulns }: { rows: InventoryOsEntry[]; s
               </tr>
             </thead>
             <tbody>
-              {sort.rows.map((r) => {
+              {paged.rows.map((r) => {
                 const vulns = r.vulnerabilities;
                 const partial = vulns !== null && vulns.assessedApplications < r.applications;
                 return (
@@ -614,6 +628,8 @@ function OperatingSystemsCard({ rows, showVulns }: { rows: InventoryOsEntry[]; s
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );
@@ -631,6 +647,7 @@ function RuntimesCard({ rows }: { rows: InventoryRuntimeEntry[] }) {
     (r, f) => (f === "runtime" ? `${runtimeLabel(r.name)} ${r.version ?? ""}` : r.applications),
     (r) => `${r.name}|${r.version ?? ""}`,
   );
+  const paged = usePage(sort.rows);
   return (
     <Card>
       <CardHeader
@@ -641,6 +658,7 @@ function RuntimesCard({ rows }: { rows: InventoryRuntimeEntry[] }) {
             title="Language runtimes"
             filename="runtimes"
             rows={sort.rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Runtime", value: (r) => runtimeLabel(r.name), width: 18 },
               { header: "Version", value: (r) => r.version, width: 14 },
@@ -653,7 +671,8 @@ function RuntimesCard({ rows }: { rows: InventoryRuntimeEntry[] }) {
       {rows.length === 0 ? (
         <EmptyState title="No runtime detected" />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -666,7 +685,7 @@ function RuntimesCard({ rows }: { rows: InventoryRuntimeEntry[] }) {
               </tr>
             </thead>
             <tbody>
-              {sort.rows.map((r) => (
+              {paged.rows.map((r) => (
                 <Tr key={`${r.name}|${r.version ?? ""}`}>
                   <Td>
                     <Link
@@ -683,6 +702,8 @@ function RuntimesCard({ rows }: { rows: InventoryRuntimeEntry[] }) {
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );
@@ -699,6 +720,7 @@ function EcosystemCard({ rows: all }: { rows: EcosystemBreakdownEntry[] }) {
     (r, f) => (f === "ecosystem" ? r.ecosystem : f === "components" ? r.components : r.applications),
     (r) => r.ecosystem,
   );
+  const paged = usePage(sort.rows);
   return (
     <Card>
       <CardHeader
@@ -709,6 +731,7 @@ function EcosystemCard({ rows: all }: { rows: EcosystemBreakdownEntry[] }) {
             title="Ecosystem mix"
             filename="ecosystem-mix"
             rows={sort.rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Ecosystem", value: (e) => e.ecosystem, width: 14 },
               { header: "Packages", value: (e) => e.components, width: 10 },
@@ -721,7 +744,8 @@ function EcosystemCard({ rows: all }: { rows: EcosystemBreakdownEntry[] }) {
       {rows.length === 0 ? (
         <EmptyState title="No components yet" />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -738,7 +762,7 @@ function EcosystemCard({ rows: all }: { rows: EcosystemBreakdownEntry[] }) {
               </tr>
             </thead>
             <tbody>
-              {sort.rows.map((e) => (
+              {paged.rows.map((e) => (
                 <Tr key={e.ecosystem}>
                   <Td>
                     <Link to={`/search?ecosystem=${encodeURIComponent(e.ecosystem)}`} className="hover:underline">
@@ -757,6 +781,8 @@ function EcosystemCard({ rows: all }: { rows: EcosystemBreakdownEntry[] }) {
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );
@@ -770,6 +796,7 @@ function FragmentationCard({ rows }: { rows: FragmentationEntry[] }) {
     (r, f) => (f === "package" ? r.name : f === "count" ? r.versions : r.applications),
     (r) => `${r.name}|${r.ecosystem}`,
   );
+  const paged = usePage(sort.rows);
   return (
     <Card>
       <CardHeader
@@ -780,6 +807,7 @@ function FragmentationCard({ rows }: { rows: FragmentationEntry[] }) {
             title="Version fragmentation"
             filename="version-fragmentation"
             rows={sort.rows}
+            pageRows={paged.rows}
             columns={[
               { header: "Package", value: (r) => r.name, width: 32 },
               { header: "Ecosystem", value: (r) => r.ecosystem, width: 12 },
@@ -793,7 +821,8 @@ function FragmentationCard({ rows }: { rows: FragmentationEntry[] }) {
       {rows.length === 0 ? (
         <EmptyState title="No fragmentation" hint="Every deployed package is on a single version." />
       ) : (
-        <TableWrap>
+        <>
+<TableWrap>
           <Table>
             <thead>
               <tr>
@@ -810,7 +839,7 @@ function FragmentationCard({ rows }: { rows: FragmentationEntry[] }) {
               </tr>
             </thead>
             <tbody>
-              {sort.rows.map((f) => (
+              {paged.rows.map((f) => (
                 <Tr key={`${f.name}|${f.ecosystem}`}>
                   <Td>
                     <Link to={searchHref(f.name, f.ecosystem)} className="font-medium text-accent hover:underline">
@@ -835,6 +864,8 @@ function FragmentationCard({ rows }: { rows: FragmentationEntry[] }) {
             </tbody>
           </Table>
         </TableWrap>
+          <PageNumbers paged={paged} />
+</>
       )}
     </Card>
   );

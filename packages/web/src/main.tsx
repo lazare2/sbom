@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
@@ -6,42 +6,40 @@ import { AuthProvider } from "./auth/AuthProvider.tsx";
 import { RequireAdmin, RequireAuth } from "./auth/RequireAuth.tsx";
 import { Layout } from "./components/Layout.tsx";
 import { EnvironmentProvider } from "./environments/EnvironmentProvider.tsx";
-import { EmptyState, Card } from "./components/ui.tsx";
-import { MaliciousPage } from "./pages/MaliciousPage.tsx";
-import { ApiAccessPage } from "./pages/ApiAccessPage.tsx";
-import { AnalyticsPage } from "./pages/AnalyticsPage.tsx";
-import { InventoryPage } from "./pages/InventoryPage.tsx";
-import { ApplicationDetailPage } from "./pages/ApplicationDetailPage.tsx";
-import { ApplicationsPage } from "./pages/ApplicationsPage.tsx";
-import { GroupsPage } from "./pages/GroupsPage.tsx";
-import { GroupDetailPage } from "./pages/GroupDetailPage.tsx";
+import { EmptyState, Card, LoadingBlock } from "./components/ui.tsx";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage.tsx";
-import { ComponentSearchPage } from "./pages/ComponentSearchPage.tsx";
-import { DashboardPage } from "./pages/DashboardPage.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
-import { ScanDetailPage } from "./pages/ScanDetailPage.tsx";
-import { ScanDiffPage } from "./pages/ScanDiffPage.tsx";
-import { AdminApplicationsPage } from "./pages/admin/AdminApplicationsPage.tsx";
-import { AdminGroupsPage } from "./pages/admin/AdminGroupsPage.tsx";
-import { AdminAttributesPage } from "./pages/admin/AdminAttributesPage.tsx";
-import { AdminAuditPage } from "./pages/admin/AdminAuditPage.tsx";
-import { AdminErrorsPage } from "./pages/admin/AdminErrorsPage.tsx";
 import { AdminLayout } from "./pages/admin/AdminLayout.tsx";
-import { AdminPendingPage } from "./pages/admin/AdminPendingPage.tsx";
-import { AdminConfigurationPage } from "./pages/admin/AdminConfigurationPage.tsx";
-import { AdminReportsPage } from "./pages/admin/AdminReportsPage.tsx";
-import { AdminTokensPage } from "./pages/admin/AdminTokensPage.tsx";
-import { AdminEnvironmentsPage } from "./pages/admin/AdminEnvironmentsPage.tsx";
-import { AdminAuthenticationPage } from "./pages/admin/AdminAuthenticationPage.tsx";
-import { AdminUsersPage } from "./pages/admin/AdminUsersPage.tsx";
-import { AdminSquadsPage } from "./pages/admin/AdminSquadsPage.tsx";
-import { AdminTribesPage } from "./pages/admin/AdminTribesPage.tsx";
-import { AdminAccessLayout, AdminScannersLayout, MovedTo } from "./pages/admin/AdminSections.tsx";
-import { AdminVulnerabilitiesPage } from "./pages/admin/AdminVulnerabilitiesPage.tsx";
-import { AdminMaliciousPage } from "./pages/admin/AdminMaliciousPage.tsx";
-import { AdvisoryDetailPage, VulnerabilitiesPage } from "./pages/VulnerabilitiesPage.tsx";
+import { WEB_MODULES } from "./modules/index.tsx";
+import { ModuleGate } from "./modules/ModuleGate.tsx";
 import { UnauthenticatedError } from "./lib/api.ts";
 import "./index.css";
+
+// Each page is its own file in the build, downloaded the first time it is opened.
+const ApiAccessPage = lazy(() => import("./pages/ApiAccessPage.tsx").then((m) => ({ default: m.ApiAccessPage })));
+const ApplicationDetailPage = lazy(() => import("./pages/ApplicationDetailPage.tsx").then((m) => ({ default: m.ApplicationDetailPage })));
+const ApplicationsPage = lazy(() => import("./pages/ApplicationsPage.tsx").then((m) => ({ default: m.ApplicationsPage })));
+const ComponentSearchPage = lazy(() => import("./pages/ComponentSearchPage.tsx").then((m) => ({ default: m.ComponentSearchPage })));
+const DashboardPage = lazy(() => import("./pages/DashboardPage.tsx").then((m) => ({ default: m.DashboardPage })));
+const ScanDetailPage = lazy(() => import("./pages/ScanDetailPage.tsx").then((m) => ({ default: m.ScanDetailPage })));
+const ScanDiffPage = lazy(() => import("./pages/ScanDiffPage.tsx").then((m) => ({ default: m.ScanDiffPage })));
+const AdminApplicationsPage = lazy(() => import("./pages/admin/AdminApplicationsPage.tsx").then((m) => ({ default: m.AdminApplicationsPage })));
+const AdminGroupsPage = lazy(() => import("./pages/admin/AdminGroupsPage.tsx").then((m) => ({ default: m.AdminGroupsPage })));
+const AdminAttributesPage = lazy(() => import("./pages/admin/AdminAttributesPage.tsx").then((m) => ({ default: m.AdminAttributesPage })));
+const AdminAuditPage = lazy(() => import("./pages/admin/AdminAuditPage.tsx").then((m) => ({ default: m.AdminAuditPage })));
+const AdminErrorsPage = lazy(() => import("./pages/admin/AdminErrorsPage.tsx").then((m) => ({ default: m.AdminErrorsPage })));
+const AdminPendingPage = lazy(() => import("./pages/admin/AdminPendingPage.tsx").then((m) => ({ default: m.AdminPendingPage })));
+const AdminConfigurationPage = lazy(() => import("./pages/admin/AdminConfigurationPage.tsx").then((m) => ({ default: m.AdminConfigurationPage })));
+const AdminTokensPage = lazy(() => import("./pages/admin/AdminTokensPage.tsx").then((m) => ({ default: m.AdminTokensPage })));
+const AdminEnvironmentsPage = lazy(() => import("./pages/admin/AdminEnvironmentsPage.tsx").then((m) => ({ default: m.AdminEnvironmentsPage })));
+const AdminAuthenticationPage = lazy(() => import("./pages/admin/AdminAuthenticationPage.tsx").then((m) => ({ default: m.AdminAuthenticationPage })));
+const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage.tsx").then((m) => ({ default: m.AdminUsersPage })));
+const AdminSquadsPage = lazy(() => import("./pages/admin/AdminSquadsPage.tsx").then((m) => ({ default: m.AdminSquadsPage })));
+const AdminTribesPage = lazy(() => import("./pages/admin/AdminTribesPage.tsx").then((m) => ({ default: m.AdminTribesPage })));
+const AdminAccessLayout = lazy(() => import("./pages/admin/AdminSections.tsx").then((m) => ({ default: m.AdminAccessLayout })));
+const AdminScannersLayout = lazy(() => import("./pages/admin/AdminSections.tsx").then((m) => ({ default: m.AdminScannersLayout })));
+const MovedTo = lazy(() => import("./pages/admin/AdminSections.tsx").then((m) => ({ default: m.MovedTo })));
+const AdminModulesPage = lazy(() => import("./pages/admin/AdminModulesPage.tsx").then((m) => ({ default: m.AdminModulesPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -60,6 +58,9 @@ const queryClient = new QueryClient({
   },
 });
 
+/** Every module's scanner settings page, in module order: the tabs under Administration -> Scanners. */
+const SCANNER_PAGES = WEB_MODULES.flatMap((m) => m.adminPages ?? []).filter((p) => p.section === "scanners");
+
 function NotFoundPage() {
   return (
     <Card>
@@ -73,6 +74,7 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
+          <Suspense fallback={<LoadingBlock />}>
           <Routes>
             {/* Unauthenticated */}
             <Route path="/login" element={<LoginPage />} />
@@ -121,8 +123,6 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/" element={<DashboardPage />} />
               <Route path="/applications" element={<ApplicationsPage />} />
               <Route path="/applications/:id" element={<ApplicationDetailPage />} />
-              <Route path="/groups" element={<GroupsPage />} />
-              <Route path="/groups/:id" element={<GroupDetailPage />} />
               <Route path="/applications/:id/diff" element={<ScanDiffPage />} />
               <Route path="/scans/:id" element={<ScanDetailPage />} />
               <Route path="/search" element={<ComponentSearchPage />} />
@@ -133,15 +133,19 @@ createRoot(document.getElementById("root")!).render(
               */}
               <Route path="/search/list/:id" element={<ComponentSearchPage mode="list" />} />
               {/*
-                Vulnerability routes stay mounted whether or not scanning is enabled. Each
-                page renders an explicit "not assessed" state instead of disappearing, so a
-                bookmarked or pasted link explains itself rather than 404ing.
+                Each module's pages, from the module list. Mounted whether or not the module is
+                on, so a bookmarked or pasted link explains itself rather than 404ing: either the
+                page shows its own "not enabled" state, or ModuleGate shows one.
               */}
-              <Route path="/vulnerabilities" element={<VulnerabilitiesPage />} />
-              <Route path="/vulnerabilities/:vulnerabilityId" element={<AdvisoryDetailPage />} />
-              <Route path="/malicious" element={<MaliciousPage />} />
-              <Route path="/inventory" element={<InventoryPage />} />
-              <Route path="/analytics" element={<AnalyticsPage />} />
+              {WEB_MODULES.flatMap((m) =>
+                (m.routes ?? []).map((r) => (
+                  <Route
+                    key={`${m.id}:${r.path}`}
+                    path={r.path}
+                    element={m.pagesExplainDisabled ? r.element : <ModuleGate id={m.id}>{r.element}</ModuleGate>}
+                  />
+                )),
+              )}
               <Route path="/api-access" element={<ApiAccessPage />} />
 
               {/*
@@ -175,7 +179,6 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="environments" element={<AdminEnvironmentsPage />} />
                 <Route path="attributes" element={<AdminAttributesPage />} />
                 <Route path="tokens" element={<AdminTokensPage />} />
-                <Route path="reports" element={<AdminReportsPage />} />
                 <Route path="configuration" element={<AdminConfigurationPage />} />
                 {/*
                   The old single-field Settings page became the Configuration tab. Kept as a
@@ -183,13 +186,22 @@ createRoot(document.getElementById("root")!).render(
                   and a 404 on a path that worked yesterday reads as a broken deployment.
                 */}
                 <Route path="settings" element={<Navigate to="/admin/configuration" replace />} />
+                <Route path="modules" element={<AdminModulesPage />} />
+                {/* Each module's settings: scanners grouped under one tab, others on their own. */}
                 <Route path="scanners" element={<AdminScannersLayout />}>
-                  <Route index element={<Navigate to="/admin/scanners/vulnerabilities" replace />} />
-                  <Route path="vulnerabilities" element={<AdminVulnerabilitiesPage />} />
-                  <Route path="malicious" element={<AdminMaliciousPage />} />
+                  <Route index element={<Navigate to={`/admin/scanners/${SCANNER_PAGES[0]?.path ?? ""}`} replace />} />
+                  {SCANNER_PAGES.map((p) => (
+                    <Route key={p.path} path={p.path} element={p.element} />
+                  ))}
                 </Route>
-                <Route path="vulnerabilities" element={<MovedTo to="/admin/scanners/vulnerabilities" />} />
-                <Route path="malicious" element={<MovedTo to="/admin/scanners/malicious" />} />
+                {WEB_MODULES.flatMap((m) => m.adminPages ?? [])
+                  .filter((p) => p.section === undefined)
+                  .map((p) => (
+                    <Route key={p.path} path={p.path} element={p.element} />
+                  ))}
+                {WEB_MODULES.flatMap((m) => m.adminRedirects ?? []).map((r) => (
+                  <Route key={r.from} path={r.from} element={<MovedTo to={r.to} />} />
+                ))}
                 <Route path="audit" element={<AdminAuditPage />} />
                 <Route path="errors" element={<AdminErrorsPage />} />
               </Route>
@@ -197,6 +209,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Routes>
+          </Suspense>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>

@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router";
 import { useAccessRequests, useDashboardStats } from "../../lib/queries.ts";
 import { PageHeader } from "../../components/ui.tsx";
+import { WEB_MODULES } from "../../modules/index.tsx";
 
 const TABS = [
   { to: "/admin/applications", label: "Applications" },
@@ -11,11 +12,23 @@ const TABS = [
   { to: "/admin/environments", label: "Environments" },
   { to: "/admin/attributes", label: "Attributes" },
   { to: "/admin/tokens", label: "CI tokens" },
+  // Which parts of the platform are on, then the settings of the ones that check packages.
+  { to: "/admin/modules", label: "Modules" },
   { to: "/admin/scanners", label: "Scanners" },
-  { to: "/admin/reports", label: "Monthly report" },
   { to: "/admin/configuration", label: "Configuration" },
   { to: "/admin/audit", label: "Audit log" },
   { to: "/admin/errors", label: "Error log" },
+];
+
+/** Settings pages of modules that are not scanners get a tab of their own, before Configuration. */
+const MODULE_TABS = WEB_MODULES.flatMap((m) => m.adminPages ?? [])
+  .filter((p) => p.section === undefined)
+  .map((p) => ({ to: `/admin/${p.path}`, label: p.label }));
+const BEFORE = TABS.findIndex((t) => t.to === "/admin/configuration");
+const ALL_TABS: Array<{ to: string; label: string; badge?: "pending" | "accessRequests" }> = [
+  ...TABS.slice(0, BEFORE),
+  ...MODULE_TABS,
+  ...TABS.slice(BEFORE),
 ];
 
 export function AdminLayout() {
@@ -46,7 +59,7 @@ export function AdminLayout() {
         aria-label="Admin sections"
         className="mb-5 flex flex-wrap gap-1 border-b border-border-base pb-2"
       >
-        {TABS.map((tab) => (
+        {ALL_TABS.map((tab) => (
           <NavLink
             key={tab.to}
             to={tab.to}
