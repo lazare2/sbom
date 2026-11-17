@@ -6,6 +6,8 @@ import { getUser } from "../../plugins/auth.plugin.js";
 import { readAccess, requireScope } from "../environments/scope.js";
 import type { PlatformModule } from "../platform/module.js";
 import { DeveloperService } from "./developer.service.js";
+import { renderTeamsPdf } from "./teams-pdf.js";
+import { TeamsService } from "./teams.service.js";
 
 /** `since`: keep measuring "new" from this point while the page stays open. */
 const actionPlanQuerySchema = z.object({ since: z.string().datetime().optional() });
@@ -16,6 +18,23 @@ async function developerRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get("/my-projects", async (request, reply) => {
     return reply.send(await developer.myProjects(getUser(request).id, await requireScope(request)));
+  });
+
+  const teams = new TeamsService(fastify.ctx);
+
+  fastify.get("/my-teams", async (request, reply) => {
+    const user = getUser(request);
+    return reply.send(await teams.myTeams({ id: user.id, role: user.role }, await requireScope(request), await readAccess(request)));
+  });
+
+  fastify.get("/my-teams/pdf", async (request, reply) => {
+    const user = getUser(request);
+    const report = await teams.myTeams({ id: user.id, role: user.role }, await requireScope(request), await readAccess(request));
+    const pdf = await renderTeamsPdf(report);
+    return reply
+      .type("application/pdf")
+      .header("content-disposition", `attachment; filename="my-teams-${report.generatedAt.slice(0, 10)}.pdf"`)
+      .send(pdf);
   });
 
   fastify.get("/applications/:id/action-plan", async (request, reply) => {
@@ -67,6 +86,20 @@ export const developerModule: PlatformModule = {
   ],
 
   routeDocs: {
+    "GET /api/v1/my-teams": {
+      summary: "For each squad the caller leads: projects by status, late actions, accepted risks and the four-week trend.",
+      tag: "Developer view",
+      auth: "user",
+      notes:
+        "Only squads the caller leads; an administrator who leads none sees every squad. Projects are " +
+        "limited to the selected environment and what the caller may read. Numbers match My projects " +
+        "and each project's action plan.",
+    },
+    "GET /api/v1/my-teams/pdf": {
+      summary: "The same as a PDF.",
+      tag: "Developer view",
+      auth: "user",
+    },
     "GET /api/v1/admin/developer/targets": {
       summary: "Target dates: days to fix a vulnerability used in real attacks, a critical one and a high one.",
       tag: "Developer view",

@@ -21,10 +21,15 @@ const NAV = [
  * on every installation that does not use the module. The pages themselves stay routable
  * either way, so a pasted link still works and explains itself.
  */
-function moduleNav(enabled: Set<string>, first: boolean) {
+function moduleNav(
+  enabled: Set<string>,
+  first: boolean,
+  user: { role: string; isTeamLead?: boolean | undefined } | null,
+) {
   return WEB_MODULES.filter((m) => enabled.has(m.id)).flatMap((m) =>
     (m.nav ?? [])
       .filter((item) => (item.first ?? false) === first)
+      .filter((item) => !item.visibleTo || (user !== null && item.visibleTo(user)))
       .map((item) => ({ to: item.to, label: item.label, end: item.end ?? false })),
   );
 }
@@ -34,7 +39,11 @@ export function Layout() {
   const navigate = useNavigate();
   // Cached for a minute by the query, so this does not add a request per navigation.
   const enabledModules = useEnabledModuleIds();
-  const navItems = [...moduleNav(enabledModules, true), ...NAV, ...moduleNav(enabledModules, false)];
+  const navItems = [
+    ...moduleNav(enabledModules, true, user),
+    ...NAV,
+    ...moduleNav(enabledModules, false, user),
+  ];
 
   async function handleLogout() {
     await logout();

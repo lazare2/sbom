@@ -248,3 +248,63 @@ export interface ActionPlanResponse {
   items: ModuleActionPlanItem[];
 }
 
+
+// --- My teams (team lead view) -----------------------------------------------------------
+
+export interface TeamLateAction {
+  applicationId: string;
+  applicationName: string;
+  title: string;
+  urgency: Urgency;
+  dueAt: string;
+  dueRule: string;
+  clears: number;
+}
+
+export interface TeamAcceptedRisk {
+  id: string;
+  vulnerabilityId: string;
+  applicationId: string;
+  applicationName: string;
+  /** "name version" when it is accepted for one package version only. */
+  packageLabel: string | null;
+  reason: string;
+  expiresAt: string | null;
+  /** Ends within ENDING_SOON_DAYS. */
+  endingSoon: boolean;
+  acceptedBy: string | null;
+  acceptedAt: string;
+}
+
+/** Accepted risks ending within this many days are listed first and marked. */
+export const ENDING_SOON_DAYS = 14;
+
+/**
+ * One week of the four-week trend: critical and high vulnerabilities in the build each project
+ * had at the end of that week, as the vulnerability database knows them today. Accepted risks
+ * are left out, as everywhere. Projects without a build by then are not counted.
+ */
+export interface TeamTrendPoint {
+  weekEnding: string;
+  critical: number;
+  high: number;
+  projectsCounted: number;
+}
+
+export interface MyTeam {
+  squadId: string;
+  name: string;
+  projects: MyProject[];
+  statusCounts: Record<ProjectStatus, number>;
+  /** Action lines past their target date, latest-due first. */
+  lateActions: TeamLateAction[];
+  acceptedRisks: TeamAcceptedRisk[];
+  trend: TeamTrendPoint[];
+}
+
+export interface MyTeamsResponse {
+  teams: MyTeam[];
+  /** `lead`: the squads the person leads. `admin`: every squad, for an administrator who leads none. */
+  viewAs: "lead" | "admin";
+  generatedAt: string;
+}

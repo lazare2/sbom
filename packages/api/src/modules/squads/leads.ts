@@ -3,6 +3,14 @@ import type { Database } from "../../db/client.js";
 import { rowsOf, type Row } from "../../lib/rows.js";
 import { SQUAD_APPLICATIONS } from "./reach.js";
 
+/** Whether a person leads any squad at all. */
+export async function leadsAnySquad(db: Database, userId: string): Promise<boolean> {
+  const rows = await db.execute<Row<{ lead: boolean }>>(sql`
+    SELECT EXISTS (SELECT 1 FROM squad_member WHERE user_id = ${userId}::uuid AND is_lead) AS lead
+  `);
+  return rowsOf(rows)[0]?.lead === true;
+}
+
 /**
  * Whether a person is team lead of a squad this application belongs to.
  *

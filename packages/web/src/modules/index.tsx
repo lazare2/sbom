@@ -2,6 +2,7 @@ import { AdminMaliciousPage } from "../pages/admin/AdminMaliciousPage.tsx";
 import { AdminVulnerabilitiesPage } from "../pages/admin/AdminVulnerabilitiesPage.tsx";
 import { MaliciousPage } from "../pages/MaliciousPage.tsx";
 import { MyProjectsPage } from "../pages/MyProjectsPage.tsx";
+import { MyTeamsPage } from "../pages/MyTeamsPage.tsx";
 import { AdvisoryDetailPage, VulnerabilitiesPage } from "../pages/VulnerabilitiesPage.tsx";
 import type { WebModule } from "./types.ts";
 
@@ -15,8 +16,14 @@ export const WEB_MODULES: readonly WebModule[] = [
   {
     // Always on: the server has no switch for it, so it is always in the enabled list.
     id: "developer",
-    nav: [{ to: "/my-projects", label: "My projects", first: true }],
-    routes: [{ path: "/my-projects", element: <MyProjectsPage /> }],
+    nav: [
+      { to: "/my-teams", label: "My teams", first: true, visibleTo: (u) => u.isTeamLead === true || u.role === "admin" },
+      { to: "/my-projects", label: "My projects", first: true },
+    ],
+    routes: [
+      { path: "/my-projects", element: <MyProjectsPage /> },
+      { path: "/my-teams", element: <MyTeamsPage /> },
+    ],
   },
   {
     id: "vulnerabilities",

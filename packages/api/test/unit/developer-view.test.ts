@@ -233,3 +233,29 @@ describe("target dates (step 5)", () => {
     );
   });
 });
+
+describe("My teams PDF (step 6)", () => {
+  it("renders the squads, with their projects, late actions, accepted risks and trend", async () => {
+    const { renderTeamsPdf } = await import("../../src/modules/developer/teams-pdf.js");
+    const counts: ProjectUrgencyCounts = {
+      total: 3, now: 1, nowUsedInAttacks: 1, soon: 1, later: 1, none: 0, noneSerious: 0, late: 1, newSinceVisit: 0,
+    };
+    const pdf = await renderTeamsPdf({
+      viewAs: "lead",
+      generatedAt: "2026-11-17T12:00:00.000Z",
+      teams: [
+        {
+          squadId: "s1",
+          name: "Payments",
+          statusCounts: { "fix-now": 1, "fix-soon": 0, "no-recent-build": 0, "nothing-to-do": 0 },
+          projects: [{ applicationId: "a1", name: "payments-api", status: "fix-now", reason: "1 vulnerability used in real attacks, with a fix available.", lastBuildAt: "2026-11-16T00:00:00.000Z", counts, via: ["squad Payments"] }],
+          lateActions: [{ applicationId: "a1", applicationName: "payments-api", title: "Upgrade lodash", urgency: "now", dueAt: "2026-11-01T00:00:00.000Z", dueRule: "used in real attacks, fix available: 7 days", clears: 1 }],
+          acceptedRisks: [{ id: "r1", vulnerabilityId: "CVE-2026-1", applicationId: "a1", applicationName: "payments-api", packageLabel: "openssl 3.0", reason: "not reached", expiresAt: "2026-11-20T00:00:00.000Z", endingSoon: true, acceptedBy: "lead@example.test", acceptedAt: "2026-11-01T00:00:00.000Z" }],
+          trend: [{ weekEnding: "2026-11-17T00:00:00.000Z", critical: 2, high: 5, projectsCounted: 1 }],
+        },
+      ],
+    });
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(pdf.length).toBeGreaterThan(2000);
+  });
+});

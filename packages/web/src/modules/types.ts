@@ -31,6 +31,8 @@ export interface ModuleNavItem {
   readonly end?: boolean;
   /** Before the core entries rather than after them. */
   readonly first?: boolean;
+  /** Shown only to these people; everybody when absent. */
+  readonly visibleTo?: (user: { role: string; isTeamLead?: boolean | undefined }) => boolean;
 }
 
 export interface ModuleRoute {

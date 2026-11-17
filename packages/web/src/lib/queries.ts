@@ -1,6 +1,7 @@
 import { useQueries, useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type {
   ActionPlanResponse,
+  MyTeamsResponse,
   TargetDates,
   MyProjectsResponse,
   AttentionSettings,
@@ -980,6 +981,14 @@ export function useModules() {
     queryKey: queryKeys.modules,
     queryFn: () => api.get<ModuleListResponse>("/modules"),
     staleTime: 60_000,
+  });
+}
+
+/** The squads the signed-in team lead leads. */
+export function useMyTeams() {
+  return useQuery({
+    queryKey: ["developer", "my-teams"],
+    queryFn: () => api.get<MyTeamsResponse>("/my-teams"),
   });
 }
 

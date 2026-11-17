@@ -34,7 +34,7 @@ export function setRequestEnvironment(id: string | null): void {
  * does: it selects estates explicitly, and overwriting that with the header's selection
  * would silently narrow a deliberately cross-estate search back to one.
  */
-function withEnvironment(path: string): string {
+export function withEnvironment(path: string): string {
   if (currentEnvironmentId === null) return path;
   if (/[?&]environments?=/.test(path)) return path;
   const separator = path.includes("?") ? "&" : "?";
