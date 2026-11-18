@@ -1,6 +1,7 @@
+import { api } from "../lib/api.ts";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { AdvisoryDetail, AdvisoryImpact, AdvisorySummary, VulnScanner, VulnSeverity } from "@sbom/shared";
+import type { AdvisoryApplicationRow, AdvisoryDetail, AdvisoryImpact, AdvisorySummary, VulnScanner, VulnSeverity } from "@sbom/shared";
 import {
   useAdvisoryImpact,
   useAdvisorySearch,
@@ -168,12 +169,26 @@ export function VulnerabilitiesPage() {
           </span>
         }
         actions={
-          <ExportTableButton
-            title="Advisories"
-            filename="advisories"
-            fetchRows={(progress) => fetchAllPages<AdvisorySummary>("/vulnerabilities", params, progress)}
-            columns={ADVISORY_EXPORT_COLUMNS}
-          />
+          <span className="flex flex-wrap items-center justify-end gap-2">
+            <ExportTableButton
+              title="Advisories"
+              filename="advisories"
+              label="Export: one row per vulnerability"
+              fetchRows={(progress, options) => fetchAllPages<AdvisorySummary>("/vulnerabilities", params, progress, options)}
+              listsMayBeCut
+              columns={ADVISORY_EXPORT_COLUMNS}
+            />
+            {/* Every project that has what the filters select - "which projects have CVE-x". */}
+            <ExportTableButton
+              title="Affected projects"
+              filename="affected-projects"
+              label="Export: one row per project"
+              fetchRows={(progress) =>
+                fetchAllPages<AdvisoryApplicationRow>("/vulnerabilities/affected-applications", params, progress)
+              }
+              columns={AFFECTED_PROJECT_COLUMNS}
+            />
+          </span>
         }
       />
 
@@ -442,7 +457,12 @@ function ImpactTable({
             <ExportTableButton
               title={title}
               filename={`${advisoryId}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-              rows={rows}
+              fetchRows={async () => {
+                // The page lists up to 500 projects; the export asks for all of them.
+                const full = await api.getFull<AdvisoryImpact>(`/vulnerabilities/${encodeURIComponent(advisoryId)}`);
+                const wanted = full.applications.filter((a) => a.current === rows[0]?.current);
+                return { rows: wanted, total: wanted.length };
+              }}
               columns={[
                 { header: "Application", value: (r) => r.applicationName, width: 36 },
                 { header: "Status", value: (r) => r.applicationStatus, width: 14 },
@@ -548,6 +568,25 @@ function ImpactTable({
 }
 
 /** One row per advisory, as the advisory list shows it. */
+/** One row per advisory and project: the export behind "which projects have CVE-x". */
+const AFFECTED_PROJECT_COLUMNS: ExportColumn<AdvisoryApplicationRow>[] = [
+  { header: "Advisory", value: (r) => r.vulnerabilityId, width: 22 },
+  { header: "Aliases", value: (r) => exportList(r.aliases), width: 22 },
+  { header: "Severity", value: (r) => r.severity, width: 10 },
+  { header: "CVSS", value: (r) => r.cvssBaseScore, width: 7 },
+  { header: "Attack from", value: (r) => exportAttackVector(r.exploitability), width: 30 },
+  { header: "Used in real attacks", value: (r) => (r.knownExploited ? "yes" : "no"), width: 12 },
+  { header: "Project", value: (r) => r.applicationName, width: 32 },
+  { header: "In current build", value: (r) => (r.current ? "yes" : "no"), width: 12 },
+  { header: "Squads", value: (r) => exportList(r.squads), width: 24 },
+  { header: "Tribes", value: (r) => exportList(r.tribes), width: 20 },
+  { header: "Owner", value: (r) => r.owner, width: 20 },
+  { header: "Affected packages", value: (r) => exportList(r.packages), width: 40 },
+  { header: "Fix available", value: (r) => (r.fixAvailable ? "yes" : "no"), width: 10 },
+  { header: "Fixed in", value: (r) => exportList(r.fixVersions), width: 24 },
+  { header: "Last seen", value: (r) => exportDate(r.lastSeenAt), width: 18 },
+];
+
 const ADVISORY_EXPORT_COLUMNS: ExportColumn<AdvisorySummary>[] = [
   { header: "Severity", value: (a) => a.severity, width: 10 },
   { header: "Advisory", value: (a) => a.vulnerabilityId, width: 22 },

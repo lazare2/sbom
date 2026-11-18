@@ -1,3 +1,4 @@
+import { listCapSql } from "../../lib/list-detail.js";
 import type { ReadScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
 import {
@@ -561,7 +562,7 @@ export class VulnReportService {
         count(DISTINCT a.id)::int AS applications,
         -- Same joins, same WHERE, same grouping as the count directly above, so the
         -- expandable list on the row cannot disagree with the number it opens from.
-        (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list,
+        (array_agg(DISTINCT a.name ORDER BY a.name))[1:${listCapSql()}] AS application_list,
         bool_or(cv.fix_state = 'fixed') AS fix_available,
         array_remove(array_agg(DISTINCT fv), NULL) AS fix_versions
       FROM component_vulnerability cv

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { EXPANDABLE_LIST_CAP } from "@sbom/shared";
 import {
   writeXlsx,
   XLSX_MIME,
@@ -105,11 +106,13 @@ export async function fetchAllPages<T>(
   path: string,
   params: Record<string, unknown>,
   onProgress?: (loaded: number, total: number) => void,
+  options: { fullLists?: boolean } = {},
 ): Promise<FetchedRows<T>> {
+  const get = (url: string) => (options.fullLists ? api.getFull<Paginated<T>>(url) : api.get<Paginated<T>>(url));
   const query = (page: number) =>
     `${path}${toQueryString({ ...params, page, pageSize: EXPORT_PAGE_SIZE })}`;
 
-  const first = await api.get<Paginated<T>>(query(1));
+  const first = await get(query(1));
   const pageCount = Math.min(first.totalPages, Math.ceil(EXPORT_ROW_CAP / EXPORT_PAGE_SIZE));
   const pages: T[][] = [first.items];
   onProgress?.(first.items.length, first.total);
@@ -118,7 +121,7 @@ export async function fetchAllPages<T>(
   for (let start = 2; start <= pageCount; start += PARALLEL_PAGES) {
     const batch = [];
     for (let page = start; page < start + PARALLEL_PAGES && page <= pageCount; page++) {
-      batch.push(api.get<Paginated<T>>(query(page)));
+      batch.push(get(query(page)));
     }
     for (const result of await Promise.all(batch)) {
       pages.push(result.items);
@@ -163,6 +166,67 @@ function download(bytes: Uint8Array, filename: string) {
  * or `fetchRows` for a paginated one - usually `(p) => fetchAllPages(path, params, p)` with
  * the exact params the table's own query uses.
  */
+
+// --- full lists ------------------------------------------------------------------------------
+
+/**
+ * Where a page's whole report can be fetched again with every list whole.
+ *
+ * Screens cut the lists inside a row ("payments-api, ledger-service and 30 more"); an export
+ * should not be. A page that shows a report wraps its tables in this provider with a fetcher of
+ * the same report with full lists, and every export button inside can then offer "full lists".
+ */
+const FullListsContext = createContext<(() => Promise<unknown>) | null>(null);
+
+export function FullListsProvider({ fetchFull, children }: { fetchFull: () => Promise<unknown>; children: ReactNode }) {
+  return <FullListsContext.Provider value={fetchFull}>{children}</FullListsContext.Provider>;
+}
+
+/** A row's identity without its lists: the same row in the cut and the full report. */
+function withoutLists(value: unknown): unknown {
+  if (Array.isArray(value)) return undefined;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => !Array.isArray(v))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, withoutLists(v)]),
+    );
+  }
+  return value;
+}
+const identity = (value: unknown) => JSON.stringify(withoutLists(value));
+
+/** Every object in a payload, by identity, so a screen row can find its full twin. */
+function indexObjects(payload: unknown, into = new Map<string, unknown>()): Map<string, unknown> {
+  if (Array.isArray(payload)) payload.forEach((v) => indexObjects(v, into));
+  else if (payload && typeof payload === "object") {
+    const key = identity(payload);
+    if (!into.has(key)) into.set(key, payload);
+    Object.values(payload as Record<string, unknown>).forEach((v) => indexObjects(v, into));
+  }
+  return into;
+}
+
+/** The row with its lists replaced by the full report's, wherever it (or a part of it) is found. */
+function complete<T>(row: T, index: Map<string, unknown>): T {
+  if (row && typeof row === "object" && !Array.isArray(row)) {
+    const found = index.get(identity(row));
+    if (found) return found as T;
+    return Object.fromEntries(
+      Object.entries(row as Record<string, unknown>).map(([k, v]) => [k, complete(v, index)]),
+    ) as T;
+  }
+  return row;
+}
+
+/** Whether any list in the rows is at the screen's cap - which is when it may have been cut. */
+function hasCutList(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length >= EXPANDABLE_LIST_CAP || value.some(hasCutList);
+  if (value && typeof value === "object") return Object.values(value as Record<string, unknown>).some(hasCutList);
+  return false;
+}
+
 export function ExportTableButton<T>({
   title,
   filename,
@@ -170,6 +234,7 @@ export function ExportTableButton<T>({
   rows,
   pageRows,
   fetchRows,
+  listsMayBeCut,
   size = "sm",
   label = "Export table",
 }: {
@@ -184,7 +249,15 @@ export function ExportTableButton<T>({
    * chooses: this page, or every row (the default) - sorted and filtered as on screen either way.
    */
   pageRows?: readonly T[];
-  fetchRows?: (onProgress: (loaded: number, total: number) => void) => Promise<FetchedRows<T>>;
+  fetchRows?: (
+    onProgress: (loaded: number, total: number) => void,
+    options: { fullLists: boolean },
+  ) => Promise<FetchedRows<T>>;
+  /**
+   * For `fetchRows` exports whose rows carry lists the server cuts for the screen: offer "full
+   * lists" (fetched with X-List-Detail: full) or "as on screen".
+   */
+  listsMayBeCut?: boolean;
   size?: "sm" | "md";
   /** Button text, for a card that offers more than one export. */
   label?: string;
@@ -193,18 +266,30 @@ export function ExportTableButton<T>({
   const [error, setError] = useState<string | null>(null);
   const paged = pageRows !== undefined && rows !== undefined && pageRows.length < rows.length;
   const [which, setWhich] = useState<"all" | "page">("all");
+  const fetchFull = useContext(FullListsContext);
+  // Offered only where a list may actually have been cut; full is the default.
+  const cut = fetchRows ? listsMayBeCut === true : fetchFull !== null && hasCutList(rows ?? []);
+  const [lists, setLists] = useState<"full" | "screen">("full");
 
   const run = async () => {
     setError(null);
     setProgress("Exporting…");
     try {
-      const fetched: FetchedRows<T> = fetchRows
-        ? await fetchRows((loaded, total) =>
-            setProgress(`Exporting… ${Math.min(100, Math.round((loaded / Math.max(1, Math.min(total, EXPORT_ROW_CAP))) * 100))}%`),
+      const full = cut && lists === "full";
+      let fetched: FetchedRows<T> = fetchRows
+        ? await fetchRows(
+            (loaded, total) =>
+              setProgress(`Exporting… ${Math.min(100, Math.round((loaded / Math.max(1, Math.min(total, EXPORT_ROW_CAP))) * 100))}%`),
+            { fullLists: full },
           )
         : paged && which === "page"
           ? { rows: [...pageRows!], total: pageRows!.length }
           : { rows: [...(rows ?? [])], total: rows?.length ?? 0 };
+      if (full && !fetchRows && fetchFull) {
+        setProgress("Exporting… fetching full lists");
+        const index = indexObjects(await fetchFull());
+        fetched = { ...fetched, rows: fetched.rows.map((row) => complete(row, index)) };
+      }
 
       const now = new Date();
       const capped = fetched.total > fetched.rows.length;
@@ -213,6 +298,9 @@ export function ExportTableButton<T>({
         ["Exported at", now],
         ["Rows", fetched.rows.length],
         ...(paged ? [["Exported", which === "page" ? "the page on screen" : "every row"] as XlsxCell[]] : []),
+        ...(cut
+          ? [["Lists", lists === "full" ? "complete" : `as on screen: at most ${EXPANDABLE_LIST_CAP} names per cell`] as XlsxCell[]]
+          : []),
         ["Matching rows", fetched.total],
         ["View", window.location.href],
       ];
@@ -252,6 +340,18 @@ export function ExportTableButton<T>({
         <span className="text-[11px] text-danger" role="alert">
           Export failed: {error}
         </span>
+      ) : null}
+      {cut ? (
+        <select
+          aria-label="Lists in the export"
+          value={lists}
+          onChange={(e) => setLists(e.target.value as "full" | "screen")}
+          className="h-[26px] rounded-md border border-border-strong bg-bg-raised px-1 text-xs text-text-base"
+          title={`On screen, lists in a cell stop at ${EXPANDABLE_LIST_CAP} names`}
+        >
+          <option value="full">Full lists</option>
+          <option value="screen">Lists as on screen</option>
+        </select>
       ) : null}
       {paged ? (
         <select

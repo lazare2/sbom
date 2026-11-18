@@ -1,3 +1,4 @@
+import { api, toQueryString } from "../lib/api.ts";
 import { PageNumbers, usePage } from "../lib/usePage.tsx";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
@@ -14,7 +15,7 @@ import type {
   ProjectProgress,
 } from "@sbom/shared";
 import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
-import { ExportTableButton, exportDate, exportList } from "../components/ExportTable.tsx";
+import { ExportTableButton, exportDate, exportList, FullListsProvider } from "../components/ExportTable.tsx";
 import { CriticalHighBadges } from "../components/Severity.tsx";
 import { StatTile } from "../components/StatTile.tsx";
 import {
@@ -81,6 +82,7 @@ export function AnalyticsPage() {
   const report = query.data;
 
   return (
+    <FullListsProvider fetchFull={() => api.getFull(`/analytics/report${toQueryString({ periodDays, ...filterParams })}`)}>
     <>
       <PageHeader
         title="Analytics"
@@ -140,6 +142,7 @@ export function AnalyticsPage() {
         <AnalyticsBody report={report} />
       ) : null}
     </>
+    </FullListsProvider>
   );
 }
 

@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { getConfig, type Config } from "./config.js";
 import type { BuildContextOverrides } from "./context.js";
 import { sha256Hex } from "./lib/crypto.js";
+import { LIST_DETAIL_HEADER, runWithListDetail } from "./lib/list-detail.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
 import { applicationRoutes } from "./modules/applications/applications.routes.js";
 import { attributeRoutes } from "./modules/attributes/attributes.routes.js";
@@ -139,6 +140,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     timeWindow: "1 minute",
     // Health checks and the ingest endpoint set their own limits.
     allowList: () => false,
+  });
+
+  /*
+    Lists inside a response are cut for the screen ("and 30 more"); an export asks for them
+    whole with X-List-Detail: full. Run as the request's async context, the way
+    @fastify/request-context does, so every service the handler calls sees it.
+  */
+  app.addHook("onRequest", (request, _reply, done) => {
+    runWithListDetail(request.headers[LIST_DETAIL_HEADER] === "full", done);
   });
 
   // --- application wiring --------------------------------------------------

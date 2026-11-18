@@ -72,7 +72,7 @@ export function ExpandableCountCell({
         </div>
         {hidden > 0 ? (
           <p className="mt-1 text-[11px] text-warn" title={overflowTitle}>
-            {formatNumber(hidden)} more not shown
+            {formatNumber(hidden)} more not shown here; Export table has the full list
           </p>
         ) : null}
       </details>

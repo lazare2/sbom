@@ -1,3 +1,4 @@
+import { listCapSql } from "../../lib/list-detail.js";
 import { sql, type SQL } from "drizzle-orm";
 import {
   EXPANDABLE_LIST_CAP,
@@ -19,7 +20,7 @@ import { APP_DEPENDENCY_PREDICATE, NOT_SUPPRESSED } from "../vulnerabilities/sco
 import { toScanPlatform, type PlatformRow } from "../ingestion/platform-row.js";
 import { filteredApplications } from "./team-filter.js";
 
-const CAP = sql.raw(String(EXPANDABLE_LIST_CAP));
+const CAP = (): SQL => listCapSql();
 
 /** The OS ecosystems a base image is made of; see VulnReportService for why this list is narrow. */
 const OS_ECOSYSTEMS = ["deb", "rpm", "apk"] as const;
@@ -184,7 +185,7 @@ export class InventoryService {
       p AS (
         SELECT name_key, ecosystem, min(name) AS name,
                count(DISTINCT application_id)::int AS applications,
-               (array_agg(DISTINCT application_name ORDER BY application_name))[1:${CAP}] AS application_list,
+               (array_agg(DISTINCT application_name ORDER BY application_name))[1:${CAP()}] AS application_list,
                count(DISTINCT coalesce(version, ''))::int AS versions,
                (array_agg(DISTINCT version ORDER BY version) FILTER (WHERE version IS NOT NULL))[1:6] AS version_sample,
                coalesce(bool_or(vuln_scanned_at IS NOT NULL), false) AS assessed
@@ -232,7 +233,7 @@ export class InventoryService {
     const rows = await this.deps.db.execute<Row<OsRow>>(sql`
       SELECT s.os_name AS name, s.os_version AS version, min(s.os_pretty) AS pretty,
              count(*)::int AS applications,
-             (array_agg(a.name ORDER BY a.name))[1:${CAP}] AS application_list,
+             (array_agg(a.name ORDER BY a.name))[1:${CAP()}] AS application_list,
              count(vs.scan_id)::int AS assessed,
              coalesce(sum(vs.os_findings), 0)::int AS findings,
              coalesce(sum(vs.os_critical), 0)::int AS critical,
@@ -280,7 +281,7 @@ export class InventoryService {
     const rows = await this.deps.db.execute<Row<RuntimeRow>>(sql`
       SELECT r.value ->> 'name' AS name, r.value ->> 'version' AS version,
              count(DISTINCT a.id)::int AS applications,
-             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${CAP}] AS application_list
+             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${CAP()}] AS application_list
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.runtimes, '[]'::jsonb)) AS r(value)
@@ -301,7 +302,7 @@ export class InventoryService {
       SELECT c.ecosystem,
              count(DISTINCT c.id)::int AS components,
              count(DISTINCT a.id)::int AS applications,
-             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${CAP}] AS application_list
+             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${CAP()}] AS application_list
       FROM application a
       JOIN scan_component sc ON sc.scan_id = a.latest_scan_id
       JOIN component c ON c.id = sc.component_id

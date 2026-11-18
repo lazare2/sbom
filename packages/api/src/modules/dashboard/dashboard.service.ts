@@ -1,3 +1,4 @@
+import { listCapSql } from "../../lib/list-detail.js";
 import { sql } from "drizzle-orm";
 import { EXPANDABLE_LIST_CAP } from "@sbom/shared";
 import type {
@@ -148,7 +149,7 @@ export class DashboardService {
              -- Same FROM and WHERE as the count, so the list cannot contradict it. One row
              -- per application here (the join is on latest_scan_id), which is why the count
              -- can be count(*) and the names still need no DISTINCT beyond the aggregate's.
-             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
+             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${listCapSql()}] AS application_list
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
       WHERE a.status <> 'inactive' AND ${inGroup}
@@ -168,7 +169,7 @@ export class DashboardService {
         r.value ->> 'name'    AS name,
         r.value ->> 'version' AS version,
         count(DISTINCT a.id)::int AS applications,
-        (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
+        (array_agg(DISTINCT a.name ORDER BY a.name))[1:${listCapSql()}] AS application_list
       FROM application a
       JOIN scan s ON s.id = a.latest_scan_id
       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.runtimes, '[]'::jsonb)) AS r(value)
@@ -226,7 +227,7 @@ export class DashboardService {
       SELECT
         c.ecosystem,
         count(DISTINCT c.id)::int AS components,
-        (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list,
+        (array_agg(DISTINCT a.name ORDER BY a.name))[1:${listCapSql()}] AS application_list,
         count(DISTINCT sc.application_id)::int AS applications
       FROM scan_component sc
       JOIN application a ON a.latest_scan_id = sc.scan_id
@@ -269,7 +270,7 @@ export class DashboardService {
             NULL::text AS version,
             c.ecosystem,
             count(DISTINCT sc.application_id)::int AS applications,
-            (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
+            (array_agg(DISTINCT a.name ORDER BY a.name))[1:${listCapSql()}] AS application_list
           FROM scan_component sc
           JOIN application a ON a.latest_scan_id = sc.scan_id AND a.status <> 'inactive'
           -- Libraries only. The base OS and the language runtime are in the
@@ -286,7 +287,7 @@ export class DashboardService {
           SELECT
             c.id, c.name, c.version, c.ecosystem,
             count(DISTINCT sc.application_id)::int AS applications,
-            (array_agg(DISTINCT a.name ORDER BY a.name))[1:${sql.raw(String(EXPANDABLE_LIST_CAP))}] AS application_list
+            (array_agg(DISTINCT a.name ORDER BY a.name))[1:${listCapSql()}] AS application_list
           FROM scan_component sc
           JOIN application a ON a.latest_scan_id = sc.scan_id AND a.status <> 'inactive'
           -- Libraries only. The base OS and the language runtime are in the

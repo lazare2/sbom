@@ -1,3 +1,4 @@
+import { listCapSql } from "../../lib/list-detail.js";
 import { sql, type SQL } from "drizzle-orm";
 import {
   EXPANDABLE_LIST_CAP,
@@ -42,7 +43,7 @@ const BUILDS_BEFORE_WINDOW = 6;
 /** Rows in the package ranking and the fragmentation trend. */
 const PACKAGE_LIMIT = 25;
 
-const CAP = sql.raw(String(EXPANDABLE_LIST_CAP));
+const CAP = (): SQL => listCapSql();
 
 /**
  * The progress half of Analytics: how each project's vulnerabilities moved from build to build,
@@ -390,7 +391,7 @@ export class ProgressService {
     const rows = await this.deps.db.execute<Row<AttentionPackageRow>>(sql`
       SELECT lower(c.name) AS n, c.ecosystem, min(c.name) AS name,
              count(DISTINCT a.id)::int AS applications,
-             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${CAP}] AS application_list,
+             (array_agg(DISTINCT a.name ORDER BY a.name))[1:${CAP()}] AS application_list,
              count(DISTINCT v.id) FILTER (WHERE v.severity = 'critical')::int AS critical,
              count(DISTINCT v.id) FILTER (WHERE v.known_exploited)::int AS kev,
              count(DISTINCT coalesce(c.version, ''))::int AS versions,

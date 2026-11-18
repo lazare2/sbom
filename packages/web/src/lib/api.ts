@@ -70,16 +70,21 @@ interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   signal?: AbortSignal;
+  /** Every list inside the rows whole, not cut for the screen (X-List-Detail: full). For exports. */
+  fullLists?: boolean;
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, signal } = options;
+  const { method = "GET", body, signal, fullLists } = options;
 
   const response = await fetch(`${BASE}${withEnvironment(path)}`, {
     method,
     // Sends and accepts the session cookie.
     credentials: "same-origin",
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(fullLists ? { "X-List-Detail": "full" } : {}),
+    },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     ...(signal ? { signal } : {}),
   });
@@ -165,6 +170,8 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
 
 export const api = {
   get: <T>(path: string, signal?: AbortSignal) => request<T>(path, signal ? { signal } : {}),
+  /** A GET whose lists come back whole, for an export. */
+  getFull: <T>(path: string) => request<T>(path, { fullLists: true }),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body }),
