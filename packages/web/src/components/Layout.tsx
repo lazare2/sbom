@@ -85,10 +85,11 @@ export function Layout() {
             ) : null}
           </nav>
 
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex w-full flex-wrap items-center gap-x-3 gap-y-2 md:w-auto">
             {/* One box for a project, a package or a CVE. */}
             <form
               role="search"
+              className="min-w-0 flex-1 md:flex-none"
               onSubmit={(e) => {
                 e.preventDefault();
                 const q = String(new FormData(e.currentTarget).get("q") ?? "").trim();
@@ -100,7 +101,7 @@ export function Layout() {
                 type="search"
                 placeholder="Project, package or CVE…"
                 aria-label="Search projects, packages and vulnerabilities"
-                className="h-[30px] w-56 rounded-md border border-border-strong bg-bg-raised px-2 text-sm text-text-base"
+                className="h-[30px] w-full rounded-md border border-border-strong bg-bg-raised px-2 text-sm text-text-base md:w-56"
               />
             </form>
             {/*
