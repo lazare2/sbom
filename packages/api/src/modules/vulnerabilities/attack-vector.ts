@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import type { AttackVectorFilter } from "@sbom/shared";
+import { cvssMetricPattern, groupCvssFilter, type AttackVectorFilter, type CvssVersionFilter } from "@sbom/shared";
 
 /**
  * The attack-vector filters, in SQL over `v.cvss_vector`.
@@ -66,4 +66,27 @@ export function matchesNoPrerequisites(vector: string | null): boolean {
 export function attackVectorLetter(vector: string | null): string | null {
   if (!vector) return null;
   return new RegExp(AV_PATTERN).exec(vector.toUpperCase())?.[1] ?? null;
+}
+
+/**
+ * The full CVSS filter: one condition per metric, its values ORed, the metrics ANDed - the rule
+ * `matchesCvssFilter` in @sbom/shared states in JavaScript, with the very same patterns. The
+ * pattern is passed as a parameter, and holds only letters from the metric's own list.
+ */
+export function cvssMetricConditions(parts: readonly string[]): SQL[] {
+  return [...groupCvssFilter(parts)].map(
+    ([metric, letters]) => sql`upper(coalesce(v.cvss_vector, '')) ~ ${cvssMetricPattern(metric, letters)}`,
+  );
+}
+
+/** The vector's CVSS version as `cvssVersionOf` counts it: 4, 3, 2, or none. */
+const CVSS_VERSION = sql.raw(`(CASE
+  WHEN upper(coalesce(v.cvss_vector, '')) !~ '(?:^|[/(])AV:' THEN 'none'
+  WHEN upper(v.cvss_vector) LIKE 'CVSS:4%' THEN '4'
+  WHEN upper(v.cvss_vector) LIKE 'CVSS:3%' THEN '3'
+  ELSE '2' END)`);
+
+export function cvssVersionCondition(wanted: readonly CvssVersionFilter[]): SQL | null {
+  if (wanted.length === 0) return null;
+  return sql`${CVSS_VERSION} = ANY(${sql.param([...wanted])}::text[])`;
 }

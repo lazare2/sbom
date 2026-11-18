@@ -55,7 +55,7 @@ export function teamFilterLabel(filter: TeamFilter): string | null {
 
 export const inventoryQuerySchema = teamFilterSchema.extend({
   /** Rows per ranked table. */
-  limit: z.coerce.number().int().min(1).max(200).default(25),
+  limit: z.coerce.number().int().min(1).max(1000).default(25),
 });
 export type InventoryQuery = z.infer<typeof inventoryQuerySchema>;
 

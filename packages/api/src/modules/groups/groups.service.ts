@@ -1,3 +1,4 @@
+import { listCap } from "../../lib/list-detail.js";
 import type { EnvironmentAccess } from "@sbom/shared";
 import { groupInScope, groupReadableBy, type ReadAccess, type ReadScope } from "../environments/environment.service.js";
 import { sql, type SQL } from "drizzle-orm";
@@ -107,7 +108,7 @@ export class GroupsService {
              JOIN application a2 ON a2.id = m2.application_id
              WHERE m2.group_id = g.id
              ORDER BY lower(a2.name)
-             LIMIT ${EXPANDABLE_LIST_CAP}
+             LIMIT ${listCap()}
            ) a),
           ARRAY[]::text[]
         ) AS member_names,

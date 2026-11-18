@@ -1,3 +1,4 @@
+import { api } from "../lib/api.ts";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { ApplicationStatus, ApplicationSummary, PlatformBreakdown } from "@sbom/shared";
@@ -16,7 +17,7 @@ import { CriticalHighBadges } from "../components/Severity.tsx";
 import { formatDateTime, formatNumber, formatRelative, humanizeKey } from "../lib/format.ts";
 import { readBool, readEnum, readEnumList, readNumber, readString, useUrlState } from "../lib/useUrlState.ts";
 import { useDebounced } from "../lib/useDebounced.ts";
-import { attributeText, ExportTableButton, exportDate, exportList, fetchAllPages } from "../components/ExportTable.tsx";
+import { attributeText, ExportTableButton, exportDate, exportList, fetchAllPages, FullListsProvider } from "../components/ExportTable.tsx";
 import {
   Badge,
   Button,
@@ -218,6 +219,7 @@ export function ApplicationsPage() {
     !state.status.every((s) => DEFAULTS.status.includes(s));
 
   return (
+    <FullListsProvider fetchFull={() => api.getFull("/dashboard/platforms")}>
     <>
       <PageHeader
         title="Applications"
@@ -560,6 +562,7 @@ export function ApplicationsPage() {
         )}
       </Card>
     </>
+    </FullListsProvider>
   );
 }
 

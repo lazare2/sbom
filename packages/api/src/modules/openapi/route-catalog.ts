@@ -554,6 +554,14 @@ export const ROUTE_CATALOG: Record<string, RouteMeta> = {
     tag: "Vulnerabilities",
     auth: "user",
   },
+  "GET /api/v1/vulnerabilities/affected-applications": {
+    summary: "The advisory search as one row per advisory and application - every project that has a given CVE.",
+    tag: "Vulnerabilities",
+    auth: "user",
+    notes:
+      "Takes the same filters as GET /vulnerabilities and applies the same access. Paginated. " +
+      "Lists are never cut here; elsewhere, send X-List-Detail: full to get lists inside rows whole.",
+  },
   "GET /api/v1/vulnerabilities/:vulnerabilityId": {
     summary: "One advisory, and everywhere it lands.",
     tag: "Vulnerabilities",

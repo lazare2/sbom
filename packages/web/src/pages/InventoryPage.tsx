@@ -1,3 +1,4 @@
+import { api, toQueryString } from "../lib/api.ts";
 import { PageNumbers, usePage } from "../lib/usePage.tsx";
 import { Link } from "react-router";
 import type {
@@ -10,7 +11,7 @@ import type {
   TopProjectEntry,
 } from "@sbom/shared";
 import { ApplicationsCell } from "../components/ExpandableCounts.tsx";
-import { ExportTableButton, exportDate, exportList } from "../components/ExportTable.tsx";
+import { ExportTableButton, exportDate, exportList, FullListsProvider } from "../components/ExportTable.tsx";
 import { osLabel, runtimeLabel } from "../components/Platform.tsx";
 import { CriticalHighBadges, ScanningDisabledNotice } from "../components/Severity.tsx";
 import { ShareBar, StatTile } from "../components/StatTile.tsx";
@@ -63,9 +64,12 @@ const searchHref = (name: string, ecosystem: string) =>
 export function InventoryPage() {
   const { state, setState } = useUrlState(urlSpec);
   const { isAdmin } = useAuth();
-  const query = useInventoryReport({ ...teamFilterQuery(state), limit: 25 });
+  // The rankings page 20 rows at a time, so the page asks for far more than one screen.
+  const reportParams = { ...teamFilterQuery(state), limit: 500 };
+  const query = useInventoryReport(reportParams);
 
   return (
+    <FullListsProvider fetchFull={() => api.getFull(`/inventory/report${toQueryString(reportParams)}`)}>
     <>
       <PageHeader
         title="Inventory"
@@ -96,6 +100,7 @@ export function InventoryPage() {
         <InventoryBody report={query.data} isAdmin={isAdmin} />
       ) : null}
     </>
+    </FullListsProvider>
   );
 }
 

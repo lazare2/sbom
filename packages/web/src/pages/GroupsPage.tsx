@@ -109,7 +109,8 @@ export function GroupsPage() {
           <ExportTableButton
             title="Groups"
             filename="groups"
-            fetchRows={(progress) => fetchAllPages<ApplicationGroupSummary>("/groups", params, progress)}
+            fetchRows={(progress, options) => fetchAllPages<ApplicationGroupSummary>("/groups", params, progress, options)}
+            listsMayBeCut
             columns={[
               { header: "Group", value: (g) => g.name, width: 28 },
               { header: "Description", value: (g) => g.description, width: 40 },

@@ -1,3 +1,4 @@
+import { api, toQueryString } from "../lib/api.ts";
 import { Link } from "react-router";
 import { useAuth } from "../auth/AuthProvider.tsx";
 import { useClientSort } from "../lib/useSort.ts";
@@ -13,7 +14,7 @@ import {
   vulnFilterQuery,
 } from "../components/VulnFilter.tsx";
 import { useUrlState } from "../lib/useUrlState.ts";
-import { ExportTableButton, exportDate } from "../components/ExportTable.tsx";
+import { ExportTableButton, exportDate, FullListsProvider } from "../components/ExportTable.tsx";
 import { formatDate, formatNumber, formatRelative } from "../lib/format.ts";
 import {
   useCoverageGaps,
@@ -152,6 +153,7 @@ export function DashboardPage() {
   const s = stats.data;
 
   return (
+    <FullListsProvider fetchFull={() => Promise.all([api.getFull(`/dashboard/vulnerabilities${toQueryString(vulnFilterQuery(vulnFilter))}`), api.getFull("/dashboard/platforms")])}>
     <>
       <PageHeader
         title="Overview"
@@ -358,6 +360,7 @@ export function DashboardPage() {
         )}
       </Card>
     </>
+    </FullListsProvider>
   );
 }
 

@@ -375,13 +375,13 @@ export class SquadsService {
   }
 
   /** The squads one account is on. */
-  async forUser(userId: string): Promise<Array<{ id: string; name: string }>> {
-    const rows = await this.deps.db.execute<Row<{ id: string; name: string }>>(sql`
-      SELECT s.id, s.name FROM squad_member sm JOIN squad s ON s.id = sm.squad_id
+  async forUser(userId: string): Promise<Array<{ id: string; name: string; isLead: boolean }>> {
+    const rows = await this.deps.db.execute<Row<{ id: string; name: string; is_lead: boolean }>>(sql`
+      SELECT s.id, s.name, sm.is_lead FROM squad_member sm JOIN squad s ON s.id = sm.squad_id
        WHERE sm.user_id = ${userId}::uuid
        ORDER BY lower(s.name)
     `);
-    return rowsOf(rows);
+    return rowsOf(rows).map((r) => ({ id: r.id, name: r.name, isLead: r.is_lead === true }));
   }
 
   /** Sets one account's memberships from the account's side, as one decision. */
