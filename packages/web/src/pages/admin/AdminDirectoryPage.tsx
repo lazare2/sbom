@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
-import type { DirectoryDiagnosis, DirectoryEmailAttribute } from "@sbom/shared";
+import type { DirectoryDiagnosis, DirectoryEmailAttribute, DirectorySyncPerson, DirectorySyncPlan, DirectorySyncRun } from "@sbom/shared";
 import {
   useDirectoryGroups,
   useDirectorySettings,
+  useDirectorySync,
+  usePreviewSync,
+  useRunSync,
+  useSaveSyncSettings,
   useLinkSquad,
   useSaveDirectoryConnection,
   useTestDirectoryConnection,
@@ -50,6 +54,7 @@ export function AdminDirectoryPage() {
         <>
           <ConnectionCard />
           <SwitchCard />
+          {settings.data?.enabled ? <SyncCard /> : null}
           {settings.data?.connection ? <SquadLinksCard enabled={settings.data.enabled} /> : null}
           {settings.data?.connection ? <GroupSearchCard /> : null}
         </>
@@ -393,5 +398,204 @@ function GroupPicker({ squadId, squadName, onDone }: { squadId: string; squadNam
         </ul>
       )}
     </div>
+  );
+}
+
+// ---- the sync ---------------------------------------------------------------------------------
+
+const STATUS: Record<DirectorySyncRun["status"], { label: string; tone: "ok" | "warn" | "danger" | "neutral" }> = {
+  applied: { label: "Applied", tone: "ok" },
+  nothing_to_do: { label: "Up to date", tone: "ok" },
+  held: { label: "Waiting for approval", tone: "warn" },
+  failed: { label: "Failed", tone: "danger" },
+};
+
+/**
+ * Sync now, the last run, and the nightly schedule. A run that would remove a lot - or the first
+ * one - waits here with its plan until an administrator approves it.
+ */
+function SyncCard() {
+  const sync = useDirectorySync();
+  const preview = usePreviewSync();
+  const run = useRunSync();
+  const last = sync.data?.lastRun ?? null;
+  const shown: DirectorySyncPlan | null = preview.data ?? (last?.status === "held" ? last.plan : null);
+  const busy = run.isPending || sync.data?.running === true;
+  const hour = sync.data
+    ? `${String(sync.data.settings.hour).padStart(2, "0")}:00 server time (${sync.data.timeZone}); next run ${new Date(sync.data.nextRunAt).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })} your time`
+    : "";
+  return (
+    <Card>
+      <CardHeader
+        title="Sync"
+        subtitle={`Linked squads' members are made equal to their AD groups${hour ? `, every night at ${hour}` : ""}.`}
+      />
+      <div className="space-y-3 p-4 pt-0">
+        {last ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Badge tone={STATUS[last.status].tone}>{STATUS[last.status].label}</Badge>
+            <span className="text-text-muted">
+              Last run {new Date(last.at).toLocaleString()} (
+              {last.trigger === "nightly" ? "nightly" : last.trigger === "approval" ? "approved" : "by hand"})
+              {last.plan && last.status === "applied" ? ` · ${last.plan.totals.add} added, ${last.plan.totals.remove} removed` : ""}
+            </span>
+          </div>
+        ) : (
+          <p className="text-sm text-text-muted">No sync has run yet. The first one waits for your approval.</p>
+        )}
+        {last?.status === "failed" && last.error ? <p className="text-sm text-danger">{last.error}</p> : null}
+
+        <FormError error={run.error ?? preview.error} />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="primary"
+            disabled={busy}
+            onClick={() => {
+              preview.reset();
+              run.mutate(false);
+            }}
+          >
+            {busy ? "Syncing…" : "Sync now"}
+          </Button>
+          <Button disabled={busy || preview.isPending} onClick={() => preview.mutate()}>
+            {preview.isPending ? "Checking…" : "Preview"}
+          </Button>
+        </div>
+
+        {shown ? (
+          <PlanView
+            plan={shown}
+            title={preview.data ? "What a sync would do now" : "This sync is waiting for your approval"}
+            action={
+              shown.holdReasons.length > 0 ? (
+                <Button
+                  variant="primary"
+                  disabled={busy}
+                  onClick={() => {
+                    if (window.confirm("Apply these changes now?")) {
+                      preview.reset();
+                      run.mutate(true);
+                    }
+                  }}
+                >
+                  Approve and apply
+                </Button>
+              ) : null
+            }
+          />
+        ) : null}
+        {sync.data ? <SyncSettings /> : null}
+      </div>
+    </Card>
+  );
+}
+
+function names(people: DirectorySyncPerson[], max = 12): string {
+  const shown = people.slice(0, max).map((p) => p.email ?? p.name ?? "?");
+  return shown.join(", ") + (people.length > max ? ` and ${people.length - max} more` : "");
+}
+
+function PlanView({ plan, title, action }: { plan: DirectorySyncPlan; title: string; action: React.ReactNode }) {
+  const changed = plan.squads.filter((s) => s.add.length + s.remove.length > 0 || s.skipped);
+  return (
+    <div className="space-y-2 rounded-md border border-border-base p-3 text-sm">
+      <div className="font-medium text-text-base">{title}</div>
+      {plan.holdReasons.length > 0 ? (
+        <ul className="list-disc space-y-0.5 pl-5 text-warn">
+          {plan.holdReasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="text-text-muted">
+        {plan.totals.add} to add, {plan.totals.remove} to remove across {plan.squads.length} linked squad(s)
+        {plan.newlyMatched > 0 ? `; ${plan.newlyMatched} account(s) matched to AD for the first time` : ""}.
+      </p>
+      {changed.length === 0 ? <p className="text-text-muted">Every linked squad already matches its group.</p> : null}
+      {changed.map((s) => (
+        <div key={s.squadId} className="rounded bg-bg-subtle p-2">
+          <div className="font-medium">
+            {s.squadName} <span className="font-normal text-text-faint">← {s.groupName} · {s.current} now</span>
+          </div>
+          {s.skipped ? <div className="text-xs text-warn">{s.skipped}</div> : null}
+          {s.add.length > 0 ? <div className="text-xs text-ok">+ {names(s.add)}</div> : null}
+          {s.remove.length > 0 ? <div className="text-xs text-danger">− {names(s.remove)}</div> : null}
+        </div>
+      ))}
+      {plan.deactivate.length > 0 ? (
+        <p className="text-xs text-danger">Disabled in AD, so their accounts are deactivated and signed out: {names(plan.deactivate)}</p>
+      ) : null}
+      {plan.emailUpdates.length > 0 ? (
+        <p className="text-xs text-text-muted">
+          Address changed in AD, followed here: {plan.emailUpdates.map((e) => `${e.from} → ${e.to}`).join(", ")}
+        </p>
+      ) : null}
+      {plan.notInPlatform.length > 0 ? (
+        <p className="text-xs text-text-muted">
+          Not in the platform yet - they get their account and squads when they first sign in: {names(plan.notInPlatform)}
+        </p>
+      ) : null}
+      {plan.noEmail.length > 0 ? (
+        <p className="text-xs text-warn">No email in AD, so they cannot be matched: {names(plan.noEmail)}</p>
+      ) : null}
+      {plan.conflicts.length > 0 ? (
+        <ul className="list-disc pl-5 text-xs text-danger">
+          {plan.conflicts.map((c) => (
+            <li key={c.email}>
+              {c.email}: {c.reason}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {action}
+    </div>
+  );
+}
+
+function SyncSettings() {
+  const sync = useDirectorySync();
+  const save = useSaveSyncSettings();
+  const stored = sync.data!.settings;
+  const [hour, setHour] = useState(String(stored.hour));
+  const [maxRemovals, setMaxRemovals] = useState(String(stored.maxRemovals));
+  const [share, setShare] = useState(String(stored.maxSquadSharePct));
+  useEffect(() => {
+    setHour(String(stored.hour));
+    setMaxRemovals(String(stored.maxRemovals));
+    setShare(String(stored.maxSquadSharePct));
+  }, [stored]);
+  const valid = /^\d+$/.test(maxRemovals) && /^\d+$/.test(share) && Number(share) <= 100;
+  const changed =
+    Number(hour) !== stored.hour || Number(maxRemovals) !== stored.maxRemovals || Number(share) !== stored.maxSquadSharePct;
+  return (
+    <details className="rounded-md border border-border-base p-3">
+      <summary className="cursor-pointer text-sm text-text-base">Schedule and safety limits</summary>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <FormRow label="Nightly at" htmlFor="sync-hour" hint={`Server time (${sync.data!.timeZone})`}>
+          <Select
+            id="sync-hour"
+            value={hour}
+            onChange={setHour}
+            options={Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `${String(h).padStart(2, "0")}:00` }))}
+          />
+        </FormRow>
+        <FormRow label="Wait for approval above" htmlFor="sync-max" hint="people removed in one sync">
+          <TextInput id="sync-max" value={maxRemovals} onChange={setMaxRemovals} />
+        </FormRow>
+        <FormRow label="or above this share of a squad" htmlFor="sync-share" hint="percent of its members">
+          <TextInput id="sync-share" value={share} onChange={setShare} />
+        </FormRow>
+      </div>
+      <p className="mt-2 text-xs text-text-faint">A sync that would leave a squad with nobody always waits, and so does the first one.</p>
+      <FormError error={save.error} />
+      <div className="mt-2">
+        <Button
+          disabled={!valid || !changed || save.isPending}
+          onClick={() => save.mutate({ hour: Number(hour), maxRemovals: Number(maxRemovals), maxSquadSharePct: Number(share) })}
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </details>
   );
 }

@@ -1,5 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { directoryConnectionInputSchema, directoryGroupSearchSchema, idParamSchema, linkSquadToDirectorySchema } from "@sbom/shared";
+import {
+  directoryConnectionInputSchema,
+  directoryGroupSearchSchema,
+  directorySyncRequestSchema,
+  directorySyncSettingsSchema,
+  idParamSchema,
+  linkSquadToDirectorySchema,
+} from "@sbom/shared";
 import { AppError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
@@ -16,7 +23,7 @@ function actorOf(request: FastifyRequest): Actor {
  * up and tested first, and only then switched on.
  */
 export async function directoryAdminRoutes(fastify: FastifyInstance): Promise<void> {
-  const { directory, directoryLinks } = fastify.ctx;
+  const { directory, directoryLinks, directorySync } = fastify.ctx;
 
   fastify.get("/", async (_request, reply) => reply.send({ settings: await directory.settings() }));
 
@@ -56,5 +63,31 @@ export async function directoryAdminRoutes(fastify: FastifyInstance): Promise<vo
     const { id } = parseOrThrow(idParamSchema, request.params, "Params");
     await directoryLinks.unlink(id, actorOf(request));
     return reply.status(204).send();
+  });
+
+  /** The sync's settings, last run and whether one is running. */
+  fastify.get("/sync", async (_request, reply) => reply.send({ sync: await directorySync.state() }));
+
+  fastify.put("/sync/settings", async (request, reply) => {
+    const body = parseOrThrow(directorySyncSettingsSchema, request.body);
+    return reply.send({ sync: await directorySync.updateSettings(body, actorOf(request)) });
+  });
+
+  /** What a sync would do now. Changes nothing. 502 when the directory cannot be read. */
+  fastify.post("/sync/preview", async (_request, reply) => {
+    try {
+      return reply.send({ plan: await directorySync.preview() });
+    } catch (error) {
+      if (error instanceof DirectoryError) {
+        throw new AppError({ statusCode: 502, code: `directory_${error.code}`, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  /** Sync now. Held for approval like the nightly run, unless `approve` says the plan was seen. */
+  fastify.post("/sync", async (request, reply) => {
+    const { approve } = parseOrThrow(directorySyncRequestSchema, request.body ?? {});
+    return reply.send({ run: await directorySync.run("manual", actorOf(request), approve) });
   });
 }

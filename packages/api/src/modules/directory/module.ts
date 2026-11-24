@@ -1,4 +1,9 @@
-import { directoryConnectionInputSchema, linkSquadToDirectorySchema } from "@sbom/shared";
+import {
+  directoryConnectionInputSchema,
+  directorySyncRequestSchema,
+  directorySyncSettingsSchema,
+  linkSquadToDirectorySchema,
+} from "@sbom/shared";
 import type { PlatformModule } from "../platform/module.js";
 import { directoryAdminRoutes } from "./directory-admin.routes.js";
 
@@ -22,6 +27,15 @@ export const directoryModule: PlatformModule = {
   },
 
   routes: [{ prefix: "/admin/directory", access: "admin", plugin: directoryAdminRoutes }],
+
+  jobs: [
+    {
+      name: "directory nightly sync",
+      // Checks once a minute whether tonight's run is due; does nothing while the module is off.
+      start: (ctx) => ctx.directorySync.start(),
+      stop: (ctx) => ctx.directorySync.stop(),
+    },
+  ],
 
   routeDocs: {
     "GET /api/v1/admin/directory": {
@@ -73,6 +87,35 @@ export const directoryModule: PlatformModule = {
       tag: "Directory",
       auth: "admin",
       notes: "Allowed while the module is off. Audited as squad.directory_unlink.",
+    },
+    "GET /api/v1/admin/directory/sync": {
+      summary: "The sync's settings (nightly hour, removal limits), the server's time zone, and the last run with its plan.",
+      tag: "Directory",
+      auth: "admin",
+    },
+    "PUT /api/v1/admin/directory/sync/settings": {
+      summary: "Sets the nightly hour and the limits above which a sync waits for approval.",
+      tag: "Directory",
+      auth: "admin",
+      body: directorySyncSettingsSchema,
+      notes: "Audited as directory.sync_settings.",
+    },
+    "POST /api/v1/admin/directory/sync/preview": {
+      summary: "What a sync would do now - per squad who joins and who leaves, accounts deactivated, people not matched. Changes nothing.",
+      tag: "Directory",
+      auth: "admin",
+      notes: "502 with code directory_<step> when the directory cannot be read.",
+    },
+    "POST /api/v1/admin/directory/sync": {
+      summary: "Sync now: linked squads' members made equal to their directory groups.",
+      tag: "Directory",
+      auth: "admin",
+      body: directorySyncRequestSchema,
+      notes:
+        "Returns the run: applied, nothing_to_do, held (the first sync, or one removing more than the limits " +
+        "allow, waits; send approve: true after checking the plan) or failed (nothing changed). People are " +
+        "matched by their directory id, else by email; a disabled person leaves linked squads and, if their " +
+        "account came from single sign-on, is deactivated. 409 module_disabled or sync_running. Audited.",
     },
   },
 };

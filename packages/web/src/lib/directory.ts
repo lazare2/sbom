@@ -1,5 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { DirectoryConnectionInput, DirectoryDiagnosis, DirectoryGroup, DirectorySettings } from "@sbom/shared";
+import type {
+  DirectoryConnectionInput,
+  DirectoryDiagnosis,
+  DirectoryGroup,
+  DirectorySettings,
+  DirectorySyncPlan,
+  DirectorySyncRun,
+  DirectorySyncSettings,
+  DirectorySyncState,
+} from "@sbom/shared";
 import { api } from "./api.ts";
 
 /** The directory (Active Directory) connection, for Administration > Directory. Admin only. */
@@ -60,5 +69,41 @@ export function useUnlinkSquad() {
   return useMutation({
     mutationFn: (squadId: string) => api.delete(`/admin/directory/squad-links/${squadId}`),
     onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
+const SYNC_KEY = ["admin", "directory", "sync"] as const;
+
+/** The sync's settings and last run. Polled while a run is going on. */
+export function useDirectorySync() {
+  return useQuery({
+    queryKey: SYNC_KEY,
+    queryFn: async () => (await api.get<{ sync: DirectorySyncState }>("/admin/directory/sync")).sync,
+    refetchInterval: (q) => (q.state.data?.running ? 2000 : false),
+  });
+}
+
+/** What a sync would do now; changes nothing. */
+export function usePreviewSync() {
+  return useMutation({
+    mutationFn: async () => (await api.post<{ plan: DirectorySyncPlan }>("/admin/directory/sync/preview", {})).plan,
+  });
+}
+
+/** Sync now; `approve` applies a plan that would otherwise wait. */
+export function useRunSync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (approve: boolean) => (await api.post<{ run: DirectorySyncRun }>("/admin/directory/sync", { approve })).run,
+    onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
+export function useSaveSyncSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (settings: DirectorySyncSettings) =>
+      (await api.put<{ sync: DirectorySyncState }>("/admin/directory/sync/settings", settings)).sync,
+    onSuccess: (sync) => qc.setQueryData(SYNC_KEY, sync),
   });
 }

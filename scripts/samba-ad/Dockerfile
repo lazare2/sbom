@@ -3,7 +3,7 @@
 FROM debian:trixie
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      samba samba-ad-dc samba-ad-provision winbind python3-samba openssl ca-certificates \
+      samba samba-ad-dc samba-ad-provision winbind python3-samba ldb-tools openssl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 COPY setup.sh seed.py /opt/
 EXPOSE 636

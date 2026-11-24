@@ -116,3 +116,86 @@ export interface DirectoryPerson {
   name: string | null;
   enabled: boolean;
 }
+
+// ---------------------------------------------------------------------------------------------
+// The sync: linked squads' members from their directory groups
+// ---------------------------------------------------------------------------------------------
+
+/** A person in a sync plan: a platform account when there is one, else as the directory names them. */
+export interface DirectorySyncPerson {
+  userId: string | null;
+  email: string | null;
+  name: string | null;
+}
+
+export interface DirectorySyncSquadChange {
+  squadId: string;
+  squadName: string;
+  groupName: string;
+  /** Members now, before the change. */
+  current: number;
+  add: DirectorySyncPerson[];
+  remove: DirectorySyncPerson[];
+  /** Why this squad is left as it is this time (its group is gone, for instance), or null. */
+  skipped: string | null;
+}
+
+/** What a sync would do, or did. Nothing in it has happened until the run says "applied". */
+export interface DirectorySyncPlan {
+  computedAt: string;
+  squads: DirectorySyncSquadChange[];
+  totals: { add: number; remove: number };
+  /** Accounts matched to their directory person for the first time (by email). */
+  newlyMatched: number;
+  /** Addresses changed in the directory, followed here: the account keeps everything else. */
+  emailUpdates: Array<{ userId: string; from: string; to: string }>;
+  /** Disabled in the directory: removed from linked squads, and (SSO accounts) deactivated. */
+  deactivate: DirectorySyncPerson[];
+  /** In a linked group, with no account here yet: they get one, and their squads, at first sign-in. */
+  notInPlatform: DirectorySyncPerson[];
+  /** In a linked group with no email in the directory, so they cannot be matched to anybody. */
+  noEmail: DirectorySyncPerson[];
+  /** Refused matches, e.g. an address that now belongs to a different directory person. */
+  conflicts: Array<{ email: string; reason: string }>;
+  /** Why this plan waits for an administrator, empty when it may run on its own. */
+  holdReasons: string[];
+}
+
+export const directorySyncStatuses = ["applied", "held", "failed", "nothing_to_do"] as const;
+export type DirectorySyncStatus = (typeof directorySyncStatuses)[number];
+
+export interface DirectorySyncRun {
+  at: string;
+  trigger: "nightly" | "manual" | "approval";
+  status: DirectorySyncStatus;
+  plan: DirectorySyncPlan | null;
+  /** Why it failed; nothing was changed. */
+  error: string | null;
+}
+
+export const directorySyncSettingsSchema = z.object({
+  /** Hour of the nightly sync, in the server's time zone. */
+  hour: z.number().int().min(0).max(23).default(3),
+  /** A sync removing more people than this, across all squads, waits for approval. */
+  maxRemovals: z.number().int().min(0).max(100_000).default(10),
+  /** A sync removing more than this share of one squad's members waits for approval. */
+  maxSquadSharePct: z.number().int().min(0).max(100).default(25),
+});
+export type DirectorySyncSettings = z.output<typeof directorySyncSettingsSchema>;
+
+export const directorySyncRequestSchema = z.object({
+  /** Apply even though the plan would wait for approval: the administrator has seen it. */
+  approve: z.boolean().default(false),
+});
+
+export interface DirectorySyncState {
+  settings: DirectorySyncSettings;
+  /** The server's time zone, which the nightly hour is in. */
+  timeZone: string;
+  running: boolean;
+  lastRun: DirectorySyncRun | null;
+  /** When a sync last changed anything; null before the first. */
+  lastAppliedAt: string | null;
+  /** When the next nightly sync is due, so a screen can show it in the viewer's own time. */
+  nextRunAt: string;
+}
