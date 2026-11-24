@@ -28,6 +28,9 @@ const AdminReportsPage = lazy(() =>
   import("../pages/admin/AdminReportsPage.tsx").then((m) => ({ default: m.AdminReportsPage })),
 );
 const GroupsPage = lazy(() => import("../pages/GroupsPage.tsx").then((m) => ({ default: m.GroupsPage })));
+const AdminDirectoryPage = lazy(() =>
+  import("../pages/admin/AdminDirectoryPage.tsx").then((m) => ({ default: m.AdminDirectoryPage })),
+);
 const GroupDetailPage = lazy(() => import("../pages/GroupDetailPage.tsx").then((m) => ({ default: m.GroupDetailPage })));
 
 /**
@@ -95,5 +98,10 @@ export const WEB_MODULES: readonly WebModule[] = [
     ],
     // The monthly report's settings and past reports stay reachable while the module is off.
     adminPages: [{ path: "reports", label: "Monthly report", element: <AdminReportsPage /> }],
+  },
+  {
+    id: "directory",
+    // Set up and tested while the module is off, so its page is always reachable.
+    adminPages: [{ path: "directory", label: "Directory", element: <AdminDirectoryPage /> }],
   },
 ];

@@ -55,6 +55,7 @@ import { createBlobStore, type BlobStore } from "./services/blob-store/index.js"
 import { type VulnerabilityScanner } from "./services/scanner/index.js";
 import { PLATFORM_MODULES } from "./modules/platform/index.js";
 import { buildMaliciousServices } from "./modules/malicious/services.js";
+import { DirectoryService } from "./modules/directory/directory.service.js";
 import { buildVulnerabilityServices } from "./modules/vulnerabilities/services.js";
 import type { PlatformModule } from "./modules/platform/module.js";
 import { ModuleRegistry } from "./modules/platform/registry.js";
@@ -150,6 +151,8 @@ export interface AppContext {
   tribes: TribesService;
   adminScans: ScansAdminService;
   adminMalicious: MaliciousAdminService;
+  /** The organisation's directory (Active Directory): connection, test, and a connector. */
+  directory: DirectoryService;
   attributeDefinitions: AttributeDefinitionsService;
   /**
    * The modules this server runs (modules/platform/index.ts), their switches, their own
@@ -312,6 +315,9 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
   const { maliciousFeed, maliciousMatch, maliciousAlerts, malicious, maliciousWorker, adminMalicious } =
     buildMaliciousServices({ db, config, settings, logger, mailer, audit });
 
+  // The organisation's directory: its module (directory/module.ts) switches and configures it.
+  const directory = new DirectoryService({ db, config, audit });
+
   // Write side. (`audit` is built above, with the auth service that also writes to it.)
   const apiErrors = new ApiErrorService({ db });
   const adminUsers = new AdminUsersService({ db, sessions, audit, environments });
@@ -376,6 +382,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     tribes,
     adminScans,
     adminMalicious,
+    directory,
     attributeDefinitions,
     modules: new ModuleRegistry(overrides.modules ?? PLATFORM_MODULES),
   };

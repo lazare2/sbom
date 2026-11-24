@@ -1,4 +1,5 @@
 import { developerModule } from "../developer/module.js";
+import { directoryModule } from "../directory/module.js";
 import { maliciousModule } from "../malicious/module.js";
 import { organisationModule } from "../organisation/module.js";
 import { reportingModule } from "../reporting/module.js";
@@ -17,4 +18,5 @@ export const PLATFORM_MODULES: readonly PlatformModule[] = [
   maliciousModule,
   reportingModule,
   organisationModule,
+  directoryModule,
 ];

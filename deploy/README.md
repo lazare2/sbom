@@ -382,7 +382,10 @@ everything else:
 | `github.com`, `codeload.github.com` | malicious-package list (OpenSSF) | malicious-package checks are on |
 
 Your own systems, if you connect them: single sign-on (for Microsoft Entra ID,
-`login.microsoftonline.com` and `graph.microsoft.com`), the mail relay, and JFrog Xray.
+`login.microsoftonline.com` and `graph.microsoft.com`), the mail relay, JFrog Xray, and your
+Active Directory domain controllers (**LDAPS, TCP 636**, Administration → Directory). LDAPS is
+not web traffic: it does not go through `HTTPS_PROXY`, so the firewall must let the platform
+reach the domain controllers directly. On Windows Server that is the platform's virtual machine.
 
 Nothing else. No package registries, no Docker Hub, no telemetry. With none of these
 addresses open the platform still works fully; the databases are then installed by
