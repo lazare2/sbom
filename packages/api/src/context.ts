@@ -56,6 +56,7 @@ import { type VulnerabilityScanner } from "./services/scanner/index.js";
 import { PLATFORM_MODULES } from "./modules/platform/index.js";
 import { buildMaliciousServices } from "./modules/malicious/services.js";
 import { DirectoryService } from "./modules/directory/directory.service.js";
+import { DirectoryLinksService } from "./modules/directory/links.service.js";
 import { buildVulnerabilityServices } from "./modules/vulnerabilities/services.js";
 import type { PlatformModule } from "./modules/platform/module.js";
 import { ModuleRegistry } from "./modules/platform/registry.js";
@@ -153,6 +154,8 @@ export interface AppContext {
   adminMalicious: MaliciousAdminService;
   /** The organisation's directory (Active Directory): connection, test, and a connector. */
   directory: DirectoryService;
+  /** Which squad takes its members from which directory group. */
+  directoryLinks: DirectoryLinksService;
   attributeDefinitions: AttributeDefinitionsService;
   /**
    * The modules this server runs (modules/platform/index.ts), their switches, their own
@@ -317,6 +320,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
 
   // The organisation's directory: its module (directory/module.ts) switches and configures it.
   const directory = new DirectoryService({ db, config, audit });
+  const directoryLinks = new DirectoryLinksService({ db, audit, directory });
 
   // Write side. (`audit` is built above, with the auth service that also writes to it.)
   const apiErrors = new ApiErrorService({ db });
@@ -383,6 +387,7 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
     adminScans,
     adminMalicious,
     directory,
+    directoryLinks,
     attributeDefinitions,
     modules: new ModuleRegistry(overrides.modules ?? PLATFORM_MODULES),
   };

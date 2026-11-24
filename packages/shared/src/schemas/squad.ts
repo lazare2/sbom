@@ -148,6 +148,11 @@ export interface SquadSummary {
    * and with direct grants, so the two counts beside it do not add up to this.
    */
   reachableApplicationCount: number;
+  /**
+   * The directory group this squad's members come from, or null when they are set by hand.
+   * Linked, the member list is the directory's: changing it here is refused.
+   */
+  directoryLink: SquadDirectoryLink | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -180,3 +185,17 @@ export interface SquadDetail extends SquadSummary {
   groups: SquadGrant[];
   applications: SquadGrant[];
 }
+
+/** A squad's directory group, as last seen: `groupId` is followed, the name and DN are for show. */
+export interface SquadDirectoryLink {
+  groupId: string;
+  groupName: string;
+  groupDn: string;
+  linkedAt: string;
+}
+
+export const linkSquadToDirectorySchema = z.object({
+  /** The group's permanent id, as GET /admin/directory/groups returns it. */
+  groupId: z.string().trim().regex(/^[0-9a-fA-F-]{32,36}$/, "a directory group id"),
+});
+export type LinkSquadToDirectory = z.infer<typeof linkSquadToDirectorySchema>;

@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import type { DirectoryDiagnosis, DirectoryEmailAttribute } from "@sbom/shared";
-import { useDirectoryGroups, useDirectorySettings, useSaveDirectoryConnection, useTestDirectoryConnection } from "../../lib/directory.ts";
+import {
+  useDirectoryGroups,
+  useDirectorySettings,
+  useLinkSquad,
+  useSaveDirectoryConnection,
+  useTestDirectoryConnection,
+  useUnlinkSquad,
+} from "../../lib/directory.ts";
+import { useSquads } from "../../lib/queries.ts";
 import { useSetModuleEnabled } from "../../lib/mutations.ts";
 import { useDebounced } from "../../lib/useDebounced.ts";
 import {
@@ -42,6 +50,7 @@ export function AdminDirectoryPage() {
         <>
           <ConnectionCard />
           <SwitchCard />
+          {settings.data?.connection ? <SquadLinksCard enabled={settings.data.enabled} /> : null}
           {settings.data?.connection ? <GroupSearchCard /> : null}
         </>
       )}
@@ -271,5 +280,118 @@ function GroupSearchCard() {
         )}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Every squad and where its members come from. Linking needs the module on, because a linked
+ * squad's members can no longer be changed by hand; unlinking always works and keeps the members.
+ */
+function SquadLinksCard({ enabled }: { enabled: boolean }) {
+  const squads = useSquads();
+  const unlink = useUnlinkSquad();
+  const [picking, setPicking] = useState<string | null>(null);
+  const list = [...(squads.data?.squads ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const linked = list.filter((s) => s.directoryLink).length;
+  return (
+    <Card>
+      <CardHeader
+        title="Squads"
+        subtitle={`Link a squad to an AD group and its members come from that group. ${linked} of ${list.length} linked.`}
+      />
+      <div className="space-y-2 p-4 pt-0">
+        {!enabled ? (
+          <p className="text-xs text-text-faint">Switch the directory on above to link squads.</p>
+        ) : null}
+        <FormError error={unlink.error} />
+        {squads.isLoading ? (
+          <LoadingBlock />
+        ) : list.length === 0 ? (
+          <p className="text-sm text-text-muted">No squads yet. Create them under Administration → Access → Squads.</p>
+        ) : (
+          <ul className="divide-y divide-border-base rounded-md border border-border-base">
+            {list.map((squad) => (
+              <li key={squad.id} className="px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-text-base">{squad.name}</div>
+                    <div className="text-xs text-text-muted">
+                      {squad.directoryLink ? (
+                        <>
+                          Members from AD group <strong>{squad.directoryLink.groupName}</strong> · {squad.memberCount} now
+                        </>
+                      ) : (
+                        <>Members set by hand · {squad.memberCount}</>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {enabled ? (
+                      <Button size="sm" onClick={() => setPicking(picking === squad.id ? null : squad.id)}>
+                        {picking === squad.id ? "Cancel" : squad.directoryLink ? "Change group" : "Link to a group…"}
+                      </Button>
+                    ) : null}
+                    {squad.directoryLink ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={unlink.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Unlink "${squad.name}"? Its ${squad.memberCount} members stay, and are then set by hand.`)) {
+                            unlink.mutate(squad.id);
+                          }
+                        }}
+                      >
+                        Unlink
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                {picking === squad.id ? <GroupPicker squadId={squad.id} squadName={squad.name} onDone={() => setPicking(null)} /> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function GroupPicker({ squadId, squadName, onDone }: { squadId: string; squadName: string; onDone: () => void }) {
+  const [q, setQ] = useState(squadName);
+  const term = useDebounced(q, 300);
+  const groups = useDirectoryGroups(term);
+  const link = useLinkSquad();
+  return (
+    <div className="mt-2 space-y-2 rounded-md bg-bg-subtle p-2">
+      <TextInput value={q} onChange={setQ} placeholder="Search AD groups by name" ariaLabel={`AD group for ${squadName}`} />
+      <FormError error={link.error} />
+      {term.trim().length < 2 ? null : groups.isLoading ? (
+        <LoadingBlock />
+      ) : groups.error ? (
+        <ErrorBanner error={groups.error} onRetry={() => void groups.refetch()} />
+      ) : (groups.data ?? []).length === 0 ? (
+        <p className="text-xs text-text-muted">No group's name contains “{term.trim()}”.</p>
+      ) : (
+        <ul className="divide-y divide-border-base rounded-md border border-border-base bg-bg-raised">
+          {groups.data!.map((g) => (
+            <li key={g.id} className="flex items-center justify-between gap-2 px-3 py-1.5">
+              <div className="min-w-0">
+                <div className="text-sm text-text-base">{g.name}</div>
+                <div className="truncate text-[11px] text-text-faint">{g.dn}</div>
+              </div>
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={link.isPending}
+                onClick={() => void link.mutateAsync({ squadId, groupId: g.id }).then(onDone)}
+              >
+                Link
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

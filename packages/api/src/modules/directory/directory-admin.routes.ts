@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { directoryConnectionInputSchema, directoryGroupSearchSchema } from "@sbom/shared";
+import { directoryConnectionInputSchema, directoryGroupSearchSchema, idParamSchema, linkSquadToDirectorySchema } from "@sbom/shared";
 import { AppError } from "../../lib/errors.js";
 import { parseOrThrow } from "../../lib/validate.js";
 import { getUser } from "../../plugins/auth.plugin.js";
@@ -16,7 +16,7 @@ function actorOf(request: FastifyRequest): Actor {
  * up and tested first, and only then switched on.
  */
 export async function directoryAdminRoutes(fastify: FastifyInstance): Promise<void> {
-  const { directory } = fastify.ctx;
+  const { directory, directoryLinks } = fastify.ctx;
 
   fastify.get("/", async (_request, reply) => reply.send({ settings: await directory.settings() }));
 
@@ -39,5 +39,22 @@ export async function directoryAdminRoutes(fastify: FastifyInstance): Promise<vo
       }
       throw error;
     }
+  });
+
+  /** Every squad that takes its members from a directory group. */
+  fastify.get("/squad-links", async (_request, reply) => reply.send({ links: await directoryLinks.list() }));
+
+  /** Links a squad to a group (or moves its link to another group). Needs the module on. */
+  fastify.put("/squad-links/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    const { groupId } = parseOrThrow(linkSquadToDirectorySchema, request.body);
+    return reply.send({ link: await directoryLinks.link(id, groupId, actorOf(request)) });
+  });
+
+  /** Unlinks a squad; its members stay, hand-managed again. */
+  fastify.delete("/squad-links/:id", async (request, reply) => {
+    const { id } = parseOrThrow(idParamSchema, request.params, "Params");
+    await directoryLinks.unlink(id, actorOf(request));
+    return reply.status(204).send();
   });
 }

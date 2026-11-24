@@ -94,6 +94,12 @@ export const user = pgTable(
      * belongs in the database rather than in whichever code path happens to write next.
      */
     authSubject: text("auth_subject"),
+    /**
+     * The person's permanent id in the organisation's directory (Active Directory: objectGUID),
+     * once they have been matched to it by email. Followed from then on, so a changed address
+     * updates this account and a reused address can never reach it. Null until matched.
+     */
+    directoryId: text("directory_id"),
     isActive: boolean("is_active").notNull().default(true),
     /**
      * Set whenever an admin issues a password, because at that moment a
@@ -141,6 +147,8 @@ export const user = pgTable(
     // that stops `Alice@x.com` from becoming a second account.
     uniqueIndex("user_email_lower_uniq").on(sql`lower(${t.email})`),
     index("user_role_idx").on(t.role),
+    // One account per directory person. NULLs (not yet matched) do not collide.
+    uniqueIndex("user_directory_id_uniq").on(t.directoryId),
   ],
 );
 
@@ -383,6 +391,32 @@ export const squadMember = pgTable(
     // The direction every request takes: "which squads is this account in".
     index("squad_member_user_idx").on(t.userId),
   ],
+);
+
+/**
+ * A squad whose members come from a directory group (Active Directory first).
+ *
+ * One group per squad, and a group feeds one squad: two squads fed by one group would be one team
+ * under two names, and a squad fed by two would need a rule for people in only one of them. The
+ * group's name and DN are kept as last seen, for the screen; `groupId` (AD: objectGUID) is what
+ * is followed, so a renamed or moved group stays linked.
+ *
+ * Linked, the squad's members are the directory's to set: changing them by hand is refused until
+ * the link is removed. The team-lead mark stays the platform's.
+ */
+export const squadDirectoryLink = pgTable(
+  "squad_directory_link",
+  {
+    squadId: uuid("squad_id")
+      .primaryKey()
+      .references(() => squad.id, { onDelete: "cascade" }),
+    groupId: text("group_id").notNull(),
+    groupName: text("group_name").notNull(),
+    groupDn: text("group_dn").notNull(),
+    linkedAt: timestamp("linked_at", { withTimezone: true }).notNull().defaultNow(),
+    linkedBy: uuid("linked_by").references(() => user.id, { onDelete: "set null" }),
+  },
+  (t) => [uniqueIndex("squad_directory_link_group_uniq").on(t.groupId)],
 );
 
 /**

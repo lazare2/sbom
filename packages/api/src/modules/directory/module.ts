@@ -1,4 +1,4 @@
-import { directoryConnectionInputSchema } from "@sbom/shared";
+import { directoryConnectionInputSchema, linkSquadToDirectorySchema } from "@sbom/shared";
 import type { PlatformModule } from "../platform/module.js";
 import { directoryAdminRoutes } from "./directory-admin.routes.js";
 
@@ -52,6 +52,27 @@ export const directoryModule: PlatformModule = {
       tag: "Directory",
       auth: "admin",
       notes: "Each group has its permanent id (AD objectGUID). 502 with code directory_<step> when the directory cannot answer.",
+    },
+    "GET /api/v1/admin/directory/squad-links": {
+      summary: "Every squad that takes its members from a directory group, with the group as last seen.",
+      tag: "Directory",
+      auth: "admin",
+    },
+    "PUT /api/v1/admin/directory/squad-links/:id": {
+      summary: "Links a squad to a directory group (or moves its link): its members then come from the group.",
+      tag: "Directory",
+      auth: "admin",
+      body: linkSquadToDirectorySchema,
+      notes:
+        "The group is checked in the directory now. One group feeds one squad (409 otherwise). Needs the " +
+        "module on (409 module_disabled). Linked, the squad's members cannot be changed by hand; the " +
+        "team-lead mark can. Audited as squad.directory_link.",
+    },
+    "DELETE /api/v1/admin/directory/squad-links/:id": {
+      summary: "Unlinks a squad. Its members stay as they are, hand-managed again.",
+      tag: "Directory",
+      auth: "admin",
+      notes: "Allowed while the module is off. Audited as squad.directory_unlink.",
     },
   },
 };

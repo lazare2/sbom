@@ -43,3 +43,22 @@ export function useDirectoryGroups(q: string) {
     retry: false,
   });
 }
+
+/** Links a squad to a group, or moves its link. The squad lists change too. */
+export function useLinkSquad() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ squadId, groupId }: { squadId: string; groupId: string }) =>
+      api.put(`/admin/directory/squad-links/${squadId}`, { groupId }),
+    onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
+/** Unlinks a squad; its members stay. */
+export function useUnlinkSquad() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (squadId: string) => api.delete(`/admin/directory/squad-links/${squadId}`),
+    onSuccess: () => void qc.invalidateQueries(),
+  });
+}

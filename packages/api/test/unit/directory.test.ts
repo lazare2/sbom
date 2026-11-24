@@ -184,3 +184,52 @@ describe("the directory service", () => {
     expect((await withoutKey.svc.test()).code).toBe("secrets_key_missing");
   });
 });
+
+describe("linking squads to directory groups", () => {
+  const group = { id: "3f2504e0-4f89-11d3-9a0c-0305e82c3301", name: "Squad Payments", dn: "CN=Squad Payments,DC=corp,DC=example", description: null };
+
+  async function links(opts: { enabled?: boolean; squad?: boolean; found?: boolean; insertError?: unknown }) {
+    const { DirectoryLinksService } = await import("../../src/modules/directory/links.service.js");
+    const audit = { record: vi.fn(async () => {}) };
+    const execute = vi.fn(async (query: unknown) => {
+      const text = JSON.stringify(query);
+      if (text.includes("SELECT name FROM squad WHERE")) return { rows: opts.squad === false ? [] : [{ name: "Payments" }] };
+      if (text.includes("INSERT INTO squad_directory_link")) {
+        if (opts.insertError) throw opts.insertError;
+        return { rows: [] };
+      }
+      if (text.includes("WHERE l.group_id")) return { rows: [{ name: "Ledger" }] };
+      if (text.includes("FROM squad_directory_link l JOIN squad s")) {
+        return { rows: [{ squad_id: "s1", squad_name: "Payments", member_count: 0, group_id: group.id, group_name: group.name, group_dn: group.dn, linked_at: new Date() }] };
+      }
+      return { rows: [] };
+    });
+    const directory = {
+      enabled: async () => opts.enabled !== false,
+      connector: async () => ({ group: async () => (opts.found === false ? null : group) }),
+    };
+    return { svc: new DirectoryLinksService({ db: { execute } as never, audit: audit as never, directory: directory as never }), audit, execute };
+  }
+
+  it("links when the module is on and the group exists, and audits it", async () => {
+    const { svc, audit } = await links({});
+    const link = await svc.link("s1", group.id, actor);
+    expect(link.groupName).toBe("Squad Payments");
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "squad.directory_link" }));
+  });
+
+  it("refuses while the module is off", async () => {
+    const { svc } = await links({ enabled: false });
+    await expect(svc.link("s1", group.id, actor)).rejects.toMatchObject({ statusCode: 409, code: "module_disabled" });
+  });
+
+  it("refuses a group the directory no longer has", async () => {
+    const { svc } = await links({ found: false });
+    await expect(svc.link("s1", group.id, actor)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it("names the squad that already takes its members from the group", async () => {
+    const { svc } = await links({ insertError: { cause: { code: "23505" } } });
+    await expect(svc.link("s1", group.id, actor)).rejects.toThrow(/already feeds the squad "Ledger"/);
+  });
+});

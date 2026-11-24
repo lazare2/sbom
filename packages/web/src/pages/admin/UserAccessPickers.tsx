@@ -248,9 +248,16 @@ export function SquadPicker({
   );
   const selectedSquads = squads.filter((s) => chosen.has(s.id)).sort((a, b) => a.name.localeCompare(b.name));
 
-  const toggle = (id: string, on: boolean) =>
+  /*
+    Squads whose members come from the directory: the directory adds and removes people there,
+    and the server refuses a hand edit, so they cannot be ticked or unticked here either.
+  */
+  const locked = new Set(squads.filter((s) => s.directoryLink).map((s) => s.id));
+  const toggle = (id: string, on: boolean) => {
+    if (locked.has(id)) return;
     onChange(on ? [...selected.filter((x) => x !== id), id] : selected.filter((x) => x !== id));
-  const visibleIds = visible.map((s) => s.id);
+  };
+  const visibleIds = visible.map((s) => s.id).filter((id) => !locked.has(id));
   const allVisibleChosen = visibleIds.length > 0 && visibleIds.every((id) => chosen.has(id));
 
   if (!loading && squads.length === 0) {
@@ -288,19 +295,25 @@ export function SquadPicker({
             className="inline-flex items-center gap-0.5 rounded bg-info-subtle py-0.5 pr-0.5 pl-1.5 font-medium text-info"
           >
             {squad.name}
-            <button
-              type="button"
-              onClick={() => toggle(squad.id, false)}
-              aria-label={`Remove from ${squad.name}`}
-              title={`Remove from ${squad.name}`}
-              className="rounded px-1 leading-none hover:bg-info hover:text-white"
-            >
-              ×
-            </button>
+            {locked.has(squad.id) ? (
+              <span className="px-1 text-[10px] font-normal" title={`Members come from the directory group "${squad.directoryLink?.groupName}"`}>
+                AD
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => toggle(squad.id, false)}
+                aria-label={`Remove from ${squad.name}`}
+                title={`Remove from ${squad.name}`}
+                className="rounded px-1 leading-none hover:bg-info hover:text-white"
+              >
+                ×
+              </button>
+            )}
           </span>
         ))}
         {selectedSquads.length > 1 ? (
-          <button type="button" onClick={() => onChange([])} className="text-text-muted underline hover:text-text-base">
+          <button type="button" onClick={() => onChange(selected.filter((id) => locked.has(id)))} className="text-text-muted underline hover:text-text-base">
             Clear all
           </button>
         ) : null}
@@ -344,13 +357,14 @@ export function SquadPicker({
               return (
                 <li key={squad.id}>
                   <label
-                    className={`flex cursor-pointer items-center gap-3 px-3 py-2 select-none hover:bg-bg-subtle ${
-                      on ? "bg-accent-subtle" : ""
-                    }`}
+                    className={`flex items-center gap-3 px-3 py-2 select-none ${
+                      locked.has(squad.id) ? "cursor-default" : "cursor-pointer hover:bg-bg-subtle"
+                    } ${on ? "bg-accent-subtle" : ""}`}
                   >
                     <input
                       type="checkbox"
                       checked={on}
+                      disabled={locked.has(squad.id)}
                       onChange={(e) => toggle(squad.id, e.target.checked)}
                       className="size-3.5 shrink-0 accent-[var(--accent)]"
                     />
@@ -360,6 +374,7 @@ export function SquadPicker({
                         {squad.tribes.length > 0
                           ? `Tribe${squad.tribes.length === 1 ? "" : "s"}: ${squad.tribes.map((t) => t.name).join(", ")}`
                           : "No tribe"}
+                        {squad.directoryLink ? ` · members from AD group ${squad.directoryLink.groupName}` : ""}
                       </span>
                     </span>
                     {/*

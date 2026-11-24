@@ -261,6 +261,7 @@ export class SquadsService {
    */
   async setMembers(id: string, userIds: string[], actor: Actor): Promise<SquadDetail> {
     await this.require(id);
+    await this.assertNotLinked([id]);
     await this.assertKnown("user", userIds);
     const before = await this.memberIds(id);
 
@@ -388,6 +389,10 @@ export class SquadsService {
   async setForUser(userId: string, squadIds: string[], actor: Actor): Promise<void> {
     await this.assertKnown("squad", squadIds);
     const before = (await this.forUser(userId)).map((s) => s.id);
+    await this.assertNotLinked([
+      ...squadIds.filter((s) => !before.includes(s)),
+      ...before.filter((s) => !squadIds.includes(s)),
+    ]);
 
     await this.deps.db.transaction(async (tx) => {
       await tx.execute(sql`
@@ -454,6 +459,26 @@ export class SquadsService {
        ORDER BY lower(t.name)
     `);
     return rowsOf(rows);
+  }
+
+  /**
+   * Refuses a hand edit of a squad whose members come from a directory group: the next sync
+   * would undo it, and nobody would know why their change vanished. Unlink to edit by hand.
+   */
+  private async assertNotLinked(squadIds: readonly string[]): Promise<void> {
+    if (squadIds.length === 0) return;
+    const rows = await this.deps.db.execute<Row<{ name: string; group_name: string }>>(sql`
+      SELECT s.name, l.group_name FROM squad_directory_link l JOIN squad s ON s.id = l.squad_id
+       WHERE l.squad_id = ANY(${sql.param([...squadIds])}::uuid[])
+       ORDER BY lower(s.name)
+    `);
+    const linked = rowsOf(rows);
+    if (linked.length > 0) {
+      throw new ConflictError(
+        linked.map((r) => `"${r.name}" takes its members from the directory group "${r.group_name}"`).join("; ") +
+          ". Change them in the directory, or unlink the squad under Administration > Directory first.",
+      );
+    }
   }
 
   private async require(id: string) {
@@ -527,7 +552,12 @@ const SUMMARY_COLUMNS = sql`
         FROM squad_group sg JOIN application_group_member gm ON gm.group_id = sg.group_id
        WHERE sg.squad_id = s.id
     ) x
-  )::int AS reachable_application_count`;
+  )::int AS reachable_application_count,
+  (
+    SELECT json_build_object('groupId', l.group_id, 'groupName', l.group_name, 'groupDn', l.group_dn,
+                             'linkedAt', l.linked_at)
+      FROM squad_directory_link l WHERE l.squad_id = s.id
+  ) AS directory_link`;
 
 interface SquadRowQuery {
   id: string;
@@ -541,6 +571,7 @@ interface SquadRowQuery {
   group_count: number | string;
   application_count: number | string;
   reachable_application_count: number | string;
+  directory_link: { groupId: string; groupName: string; groupDn: string; linkedAt: string } | null;
 }
 
 interface GrantRow {
@@ -561,6 +592,9 @@ function toSummary(row: SquadRowQuery): SquadSummary {
     groupCount: Number(row.group_count),
     applicationCount: Number(row.application_count),
     reachableApplicationCount: Number(row.reachable_application_count),
+    directoryLink: row.directory_link
+      ? { ...row.directory_link, linkedAt: toIso(row.directory_link.linkedAt)! }
+      : null,
     createdAt: toIso(row.created_at)!,
     updatedAt: toIso(row.updated_at)!,
   };
