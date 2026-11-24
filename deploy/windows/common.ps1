@@ -117,3 +117,55 @@ function Wait-PlatformHealthy {
     }
     return $false
 }
+
+<#
+    What an installation's docker-compose.override.yml adds, for moving it into the machine:
+    the files on the host it mounts (an HTTPS certificate, a proxy configuration...), the host
+    ports it publishes (443...), and the images it names. Only reads; copies nothing.
+
+    Returns Text (the override with each mounted host path replaced by ./migrated/<name>),
+    Files (Source = the path on this server, Name = its name under migrated/, Missing),
+    Ports and Images. Compose's short and long volume forms are both read.
+#>
+function Get-OverrideMigration {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Root)
+    $lines = @(Get-Content -LiteralPath $Path)
+    $files = New-Object System.Collections.ArrayList
+    $names = @{}
+    $ports = New-Object System.Collections.ArrayList
+    $images = New-Object System.Collections.ArrayList
+    $hostPath = '(?:[A-Za-z]:[\\/]|\.{1,2}[\\/])[^:"'']*'
+    $short = "^(?<lead>\s*-\s*[""']?)(?<src>$hostPath)(?<rest>:/.*)$"
+    $long = "^(?<lead>\s*source:\s*[""']?)(?<src>$hostPath)(?<rest>[""']?\s*)$"
+    $out = foreach ($line in $lines) {
+        if ($line -match '^\s*image:\s*["'']?(?<img>[^"''\s#]+)') { [void]$images.Add($Matches.img) }
+        # Only ports published on every address: one bound to 127.0.0.1 was meant for this
+        # server alone, and forwarding it would open it to the network.
+        if ($line -match '^\s*-\s*["'']?(?:(?<ip>[\d.]+):)?(?<h>\d{1,5}):(?<c>\d{1,5})(?:/tcp)?["'']?\s*(#.*)?$') {
+            if (-not $Matches.ip -or $Matches.ip -eq "0.0.0.0") { [void]$ports.Add([int]$Matches.h) }
+        }
+        elseif ($line -match '^\s*published:\s*["'']?(?<h>\d{1,5})') { [void]$ports.Add([int]$Matches.h) }
+        $m = [regex]::Match($line, $short)
+        if (-not $m.Success) { $m = [regex]::Match($line, $long) }
+        if ($m.Success) {
+            $src = $m.Groups["src"].Value
+            $full = if ($src -match '^[A-Za-z]:') { $src } else { Join-Path $Root $src }
+            $full = [IO.Path]::GetFullPath($full.Replace("/", "\"))
+            $leaf = Split-Path $full -Leaf
+            $name = $leaf; $n = 2
+            while ($names.ContainsKey($name.ToLower()) -and $names[$name.ToLower()] -ne $full.ToLower()) { $name = "$n-$leaf"; $n++ }
+            if (-not $names.ContainsKey($name.ToLower())) {
+                $names[$name.ToLower()] = $full.ToLower()
+                [void]$files.Add([pscustomobject]@{ Source = $full; Name = $name; Missing = -not (Test-Path -LiteralPath $full) })
+            }
+            $m.Groups["lead"].Value + "./migrated/$name" + $m.Groups["rest"].Value
+        }
+        else { $line }
+    }
+    [pscustomobject]@{
+        Text   = ($out -join "`n") + "`n"
+        Files  = @($files)
+        Ports  = @($ports | Sort-Object -Unique)
+        Images = @($images | Sort-Object -Unique)
+    }
+}

@@ -331,6 +331,9 @@ if errorlevel 1 (
 )
 "@ | Out-File -FilePath (Join-Path $bundleDir "$name.cmd") -Encoding ascii
     }
+    # For servers whose Group Policy requires signed scripts, which the .cmd files cannot get
+    # around: the same scripts as blocks to paste. Generated, so they never drift.
+    & (Join-Path $PSScriptRoot "make-paste-scripts.ps1") -WindowsDir $winTarget -OutDir $winTarget -Version $Version
     Write-Note ("windows/ (Hyper-V installer, Linux disk {0:N0} MB)" -f ((Get-Item $baked).Length / 1MB))
 }
 
@@ -374,6 +377,11 @@ if ($Compress) {
     Compress-Archive -Path "$bundleDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
     $zipSize = (Get-Item $zipPath).Length / 1MB
     Write-Note ("{0} - {1:N0} MB" -f (Split-Path $zipPath -Leaf), $zipSize)
+    # The one place the checksum comes from: upgrade scripts, manuals and release notes take it
+    # from this file, never typed (the 0.5.0 manual once carried 0.4.0's).
+    $zipSha = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+    "$zipSha  $(Split-Path $zipPath -Leaf)`n" | Write-LfFile -Path "$zipPath.sha256"
+    Write-Note "SHA-256 $zipSha  (written to $(Split-Path $zipPath -Leaf).sha256)"
 }
 
 # --- done -------------------------------------------------------------------

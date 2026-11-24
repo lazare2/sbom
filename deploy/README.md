@@ -125,6 +125,40 @@ so the server needs neither Docker Desktop nor a signed-in user. The machine sta
 the server. Requires the Hyper-V role; on a virtual server, the host must allow nested
 virtualization.
 
+### Before you start
+
+Each of these stopped a real installation once; checking them first saves a second attempt.
+
+1. **Hyper-V can start machines.** On a server that is itself a virtual machine, "Hyper-V
+   installed" is not enough. Test, as Administrator:
+   ```powershell
+   New-VM -Name nested-test -Generation 2 -MemoryStartupBytes 512MB -NoVHD | Out-Null
+   Start-VM nested-test; (Get-VM nested-test).State     # Running = fine
+   Stop-VM nested-test -TurnOff -Force; Remove-VM nested-test -Force
+   ```
+   An error instead means the host must expose virtualization to this server (VMware: *Expose
+   hardware assisted virtualization*; Hyper-V host: `Set-VMProcessor -ExposeVirtualizationExtensions $true`).
+2. **Memory.** The machine needs its whole memory free when it starts: 8 GB by default
+   (`-MemoryGB`; a real installation runs on 6). Docker Desktop holds several GB of its own. On a
+   move it must run during the data copy, but can be quit as soon as the copy is done. If the
+   start fails for lack of memory, nothing has to be redone: free memory, then
+   `.\install-windows.cmd -Resume -MemoryGB 6`.
+3. **Script signing.** If the scripts are refused as "not digitally signed" even from the
+   `.cmd` files, Group Policy requires signed scripts. `Unblock-File` does not help against
+   that. Either IT signs `windows\*.ps1`, or you paste the same scripts as commands, which the
+   policy allows: open `windows\install-windows-paste.txt` (or `upgrade-` / `uninstall-`) in
+   Notepad, set the values at the top (`$BundleFolder`, `$MigrateFrom` ...), and paste all of it
+   into PowerShell opened as Administrator. They are generated from the scripts, not a variant
+   of them. If PowerShell reports *ConstrainedLanguage*, application control blocks pasting too:
+   only signing helps.
+4. **Moving a Docker Desktop installation:** Docker Desktop must answer (`docker ps`). If
+   `docker` reports *500 Internal Server Error ... check if the server supports the requested API
+   version*, its engine is stuck: restart Docker Desktop, or the server. Then stop the old web
+   front end and API so no upload is lost and its ports are free; the database stays up for the
+   copy: `docker compose stop web api` in its folder.
+
+### Install
+
 In **PowerShell as Administrator**, from the unpacked bundle:
 
 ```powershell
@@ -135,15 +169,33 @@ In **PowerShell as Administrator**, from the unpacked bundle:
 - Creates the machine `SBOM-Platform` (4 CPUs, 8 GB memory, 200 GB data disk; change with
   `-Cpu`, `-MemoryGB`, `-DataDiskGB`) in `C:\SBOM-Platform` (`-InstallRoot`).
 - Gives it a private network and forwards port 8080 of the server to it (`-Port`). Other
-  machines use `http://<server>:8080`; on the server itself use `http://192.168.250.10:8080`.
+  machines use `http://<server>:8080`. **On the server itself** use
+  `http://192.168.250.10:8080`: Windows does not apply the forward to the server's own traffic,
+  so `localhost:8080` does not reach the machine. A reverse proxy such as IIS on the same server
+  must point at `http://192.168.250.10:8080` too.
+- More ports forwarded to the same port in the machine: `-ExtraPorts 443`.
 - Behind a proxy: `-Proxy http://proxy:3128`.
 - `-MigrateFrom` copies the database, the stored SBOMs and `.env` (so CI tokens, sign-ins and
-  the Xray connection keep working). The Docker Desktop installation is only read: it keeps
-  running until you stop it with `docker compose stop` in its folder. Keep its data until you
-  have checked the new installation.
+  the Xray connection keep working), and keeps the old `PUBLIC_URL`. It also brings what that
+  installation added itself, so HTTPS keeps working:
+  - its `docker-compose.override.yml`, with the host files it mounts (certificate, key, proxy
+    configuration), also from outside its folder, such as `C:\sbom-tls`. In the machine they
+    are in `/opt/sbom-platform/migrated`, and the override points there;
+  - the ports it published, such as 443: forwarded and allowed in the firewall
+    (rules `SBOM-Platform-TCP-<port>`). Ports bound to `127.0.0.1` only stay closed;
+  - images it uses that are not in the bundle, such as a separate proxy, copied from Docker
+    Desktop, because the machine may not be allowed to download them;
+  - its own certificates in `ca\`.
 
-**Upgrade:** from the new bundle, `.\upgrade-windows.cmd`. It backs up first and rolls back
-by itself if the new version does not start.
+  The Docker Desktop installation is only read: it keeps running until you stop it with
+  `docker compose stop` in its folder. Keep its data until you have checked the new installation.
+
+**Renewing an HTTPS certificate** carried over this way: replace the files in
+`/opt/sbom-platform/migrated` inside the machine, then `sudo systemctl restart sbom-platform`.
+
+**Upgrade:** from the new bundle, `.\upgrade-windows.cmd`, or `windows\upgrade-windows-paste.txt`
+(see *Before you start*, step 3). It backs up first and rolls back by itself if the new
+version does not start. Forwarded ports, the override and its files are kept.
 
 **Inside the machine** it is the Linux service of Option 3: backups at 02:30 to
 `/var/backups/sbom-platform`. A shell:

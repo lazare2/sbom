@@ -25,6 +25,18 @@
     The folder of an installation running on Docker Desktop on this server (the one with its
     .env). Docker Desktop must be running. That installation is left as it is: stop it after
     checking the new one, and keep it until you are satisfied.
+
+    Brought along: the database, the stored SBOMs, .env, PUBLIC_URL (so an https:// address and
+    its HTTPS-only sign-in cookies stay), and what the installation added itself: its
+    docker-compose.override.yml, the host files it mounts (an HTTPS certificate and key, a proxy
+    configuration - also from outside the folder, e.g. C:\sbom-tls), the ports it published
+    (443 ...) and the images it uses that are not the platform's; plus its own certificates
+    in ca\. In the machine they are in /opt/sbom-platform (mounted files under migrated/).
+
+.PARAMETER Resume
+    Continues after "Not enough memory" or another failure to start the new machine: everything
+    else is already prepared. Free memory first (Docker Desktop holds several GB; once the data
+    copy is done it can be quit), or ask for less: .\install-windows.cmd -Resume -MemoryGB 6
 #>
 [CmdletBinding()]
 param(
@@ -45,7 +57,13 @@ param(
     [string]$SwitchName = "",
     [string]$MigrateFrom = "",
     # The Compose project of the installation named by -MigrateFrom.
-    [string]$MigrateProject = "sbom-platform"
+    [string]$MigrateProject = "sbom-platform",
+    # More ports of this server to forward to the same port in the machine, e.g. 443 for HTTPS.
+    # A move adds the ports the old installation's docker-compose.override.yml published.
+    [int[]]$ExtraPorts = @(),
+    # Continue an installation whose machine was created but could not start (for example for
+    # lack of memory): sets -MemoryGB and -Cpu on it and starts it. Nothing is copied again.
+    [switch]$Resume
 )
 
 $ErrorActionPreference = "Stop"
@@ -69,8 +87,15 @@ if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) {
     Stop-WithError "Hyper-V is not installed. Install-WindowsFeature -Name Hyper-V -IncludeManagementTools -Restart"
 }
 try { $null = Get-VMHost } catch { Stop-WithError "Hyper-V is not usable: $($_.Exception.Message)" }
-if (Get-VM -Name $SbomVmName -ErrorAction SilentlyContinue) {
-    Stop-WithError "A virtual machine named $SbomVmName exists already. To upgrade it use upgrade-windows.cmd."
+$existing = Get-VM -Name $SbomVmName -ErrorAction SilentlyContinue
+if ($Resume) {
+    if (-not $existing) { Stop-WithError "-Resume: there is no machine named $SbomVmName to continue. Run without -Resume." }
+    if ($existing.State -ne "Off") {
+        Stop-WithError "-Resume: $SbomVmName is $($existing.State), not Off. If it is installed and running, use upgrade-windows.cmd for changes."
+    }
+}
+elseif ($existing) {
+    Stop-WithError "A virtual machine named $SbomVmName exists already. To upgrade it use upgrade-windows.cmd; if a first install stopped before it started, use -Resume."
 }
 $osImage = Join-Path $here "sbom-vm.vhdx"
 foreach ($f in @($osImage, (Join-Path $bundle "images.tar"), (Join-Path $bundle "linux\install.sh"), (Join-Path $bundle "linux\vm-firstboot.sh"))) {
@@ -79,6 +104,39 @@ foreach ($f in @($osImage, (Join-Path $bundle "images.tar"), (Join-Path $bundle 
 foreach ($tool in @("ssh.exe", "ssh-keygen.exe")) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
         Stop-WithError "$tool not found. Add the Windows feature: Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0"
+    }
+}
+
+# The installation being moved: what it added itself, and the address people used. Read now, so
+# a port it needs that is still taken stops the install before anything is copied or created.
+$overrideInfo = $null
+if ($MigrateFrom -and -not $Resume) {
+    $oldEnv = Join-Path $MigrateFrom ".env"
+    if (-not (Test-Path $oldEnv)) { Stop-WithError "$oldEnv not found. -MigrateFrom is the folder holding the installation's .env." }
+    $oldOverride = Join-Path $MigrateFrom "docker-compose.override.yml"
+    if (Test-Path $oldOverride) {
+        $overrideInfo = Get-OverrideMigration -Path $oldOverride -Root $MigrateFrom
+        $ExtraPorts = @($ExtraPorts) + @($overrideInfo.Ports)
+        foreach ($f in @($overrideInfo.Files | Where-Object Missing)) {
+            Write-Note "!! The old docker-compose.override.yml mounts $($f.Source), which does not exist; it is left out."
+        }
+    }
+    # Kept, so links and the HTTPS-only sign-in cookies of an https:// address stay right.
+    if ([string]::IsNullOrEmpty($PublicUrl)) {
+        $old = Select-String -Path $oldEnv -Pattern '^PUBLIC_URL=(.+)$' | Select-Object -First 1
+        if ($old) {
+            $value = $old.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
+            if ($value -match '^https?://' -and $value -notmatch '^https?://(localhost|127\.0\.0\.1)([:/]|$)') { $PublicUrl = $value }
+        }
+    }
+}
+$ExtraPorts = @($ExtraPorts | Where-Object { $_ -and $_ -ne $Port } | Sort-Object -Unique)
+
+if ($useNat -and -not $Resume) {
+    foreach ($p in $ExtraPorts) {
+        if (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue) {
+            Stop-WithError "Port $p is in use on this server. If it is the old installation's web front end, run 'docker compose stop web api' in $MigrateFrom (the database stays up for the copy), then run this again."
+        }
     }
 }
 if ($useNat) {
@@ -124,6 +182,10 @@ if (-not (Test-Path $keyFile)) {
 }
 $publicKey = (Get-Content "$keyFile.pub" -Raw).Trim()
 
+# Everything from here to the machine's creation is skipped by -Resume, which continues with
+# what an earlier run prepared. (Not indented: the here-strings below must start at column 0.)
+if (-not $Resume) {
+
 # --- the installation being moved ----------------------------------------------------------
 $stage = Join-Path $InstallRoot "disc"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
@@ -142,18 +204,68 @@ if ($MigrateFrom) {
         $db = (& docker ps --filter "label=com.docker.compose.project=$MigrateProject" --filter "label=com.docker.compose.service=db" --format "{{.Names}}") | Select-Object -First 1
         if (-not $db) { Stop-WithError "The database container of project $MigrateProject is not running." }
         # Read-only on the source: a dump and a read-only mount of the files volume.
+        # Docker never reads or writes $InstallRoot: Docker Desktop runs as the signed-in user,
+        # and the folder is for Administrators only. Files are made inside Docker and fetched
+        # with docker cp, which writes as this Administrator.
         & docker exec $db pg_dump -U sbom -Fc sbom -f /tmp/sbom-migrate.dump
         if ($LASTEXITCODE -ne 0) { Stop-WithError "pg_dump failed in $db." }
+        $entries = (& docker exec $db pg_restore -l /tmp/sbom-migrate.dump | Measure-Object -Line).Lines
+        if ($entries -le 10) {
+            & docker exec $db rm -f /tmp/sbom-migrate.dump
+            Stop-WithError "The database copy could not be read back ($entries entries)."
+        }
         & docker cp "$($db):/tmp/sbom-migrate.dump" (Join-Path $migrate "sbom.dump") | Out-Null
+        $copied = $LASTEXITCODE
         & docker exec $db rm -f /tmp/sbom-migrate.dump
-        $entries = (& docker run --rm -v "$($migrate):/m:ro" --entrypoint pg_restore postgres:16-alpine -l /m/sbom.dump | Measure-Object -Line).Lines
-        if ($entries -le 10) { Stop-WithError "The database copy could not be read back ($entries entries)." }
-        & docker run --rm -v "$($MigrateProject)_sbom-blobs:/data:ro" -v "$($migrate):/backup" --entrypoint tar postgres:16-alpine czf /backup/sbom-blobs.tar.gz -C /data .
-        if ($LASTEXITCODE -ne 0) { Stop-WithError "Copying the stored SBOM files failed." }
+        if ($copied -ne 0 -or -not (Test-Path (Join-Path $migrate "sbom.dump"))) { Stop-WithError "Copying the database out of $db failed." }
+        # The stored SBOMs, packed in a throwaway container that sees the volume read-only.
+        $packer = "sbom-migrate-blobs"
+        & docker rm -f $packer *> $null
+        & docker run --name $packer -v "$($MigrateProject)_sbom-blobs:/data:ro" --entrypoint tar postgres:16-alpine czf /tmp/sbom-blobs.tar.gz -C /data .
+        if ($LASTEXITCODE -ne 0) { & docker rm -f $packer *> $null; Stop-WithError "Packing the stored SBOM files failed." }
+        & docker cp "$($packer):/tmp/sbom-blobs.tar.gz" (Join-Path $migrate "sbom-blobs.tar.gz") | Out-Null
+        $copied = $LASTEXITCODE
+        & docker rm -f $packer *> $null
+        if ($copied -ne 0 -or -not (Test-Path (Join-Path $migrate "sbom-blobs.tar.gz"))) { Stop-WithError "Copying the stored SBOM files out failed." }
     }
     finally { $ErrorActionPreference = $previous }
     Copy-Item $envFile (Join-Path $migrate "env.txt")
     Write-Note ("database {0:N0} MB ({1} entries), SBOM files {2:N0} MB" -f ((Get-Item (Join-Path $migrate "sbom.dump")).Length / 1MB), $entries, ((Get-Item (Join-Path $migrate "sbom-blobs.tar.gz")).Length / 1MB))
+
+    # What the installation added itself; vm-firstboot.sh puts it in place in the machine.
+    $extra = Join-Path $migrate "extra"
+    $caFiles = @(Get-ChildItem (Join-Path $MigrateFrom "ca") -File -ErrorAction SilentlyContinue |
+        Where-Object { @("README.md", ".gitkeep") -notcontains $_.Name })
+    if ($overrideInfo -or $caFiles.Count -gt 0) { New-Item -ItemType Directory -Force -Path $extra | Out-Null }
+    if ($overrideInfo) {
+        [IO.File]::WriteAllText((Join-Path $extra "docker-compose.override.yml"), $overrideInfo.Text, (New-Object Text.UTF8Encoding $false))
+        $mounted = @($overrideInfo.Files | Where-Object { -not $_.Missing })
+        if ($mounted.Count -gt 0) {
+            $dest = Join-Path $extra "migrated"
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            foreach ($f in $mounted) { Copy-Item -LiteralPath $f.Source -Destination (Join-Path $dest $f.Name) -Recurse }
+        }
+        # Images the override names that the bundle does not carry (a proxy, for instance): the
+        # machine may not be allowed to download them, so they travel on the disc.
+        $own = @(Get-Content (Join-Path $bundle "images.txt") -ErrorAction SilentlyContinue | ForEach-Object { $_.Trim() })
+        $foreign = @($overrideInfo.Images | Where-Object { $own -notcontains $_ })
+        if ($foreign.Count -gt 0) {
+            $previous = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+            & docker save -o (Join-Path $extra "images.tar") @foreign
+            $saved = $LASTEXITCODE
+            $ErrorActionPreference = $previous
+            if ($saved -ne 0) { Stop-WithError "Could not save the image(s) the old override uses ($($foreign -join ', ')) from Docker Desktop." }
+        }
+        Write-Note ("its own setup: docker-compose.override.yml, {0} mounted file(s){1}{2}" -f $mounted.Count,
+            $(if ($ExtraPorts.Count -gt 0) { ", port(s) $($ExtraPorts -join ', ')" } else { "" }),
+            $(if ($foreign.Count -gt 0) { ", image(s) $($foreign -join ', ')" } else { "" }))
+    }
+    if ($caFiles.Count -gt 0) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $extra "ca") | Out-Null
+        $caFiles | ForEach-Object { Copy-Item $_.FullName (Join-Path $extra "ca") }
+        Write-Note "its own CA certificates: $($caFiles.Count)"
+    }
+    if ($PublicUrl -match '^https://') { Write-Note "address kept: $PublicUrl" }
 }
 
 # --- the disc: cloud-init settings, the bundle, the first-boot script -------------------------
@@ -246,6 +358,13 @@ if ($useNat) {
         New-NetFirewallRule -Name "SBOM-Platform-HTTP" -DisplayName "SBOM Platform (TCP $Port)" -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow | Out-Null
     }
     else { Set-NetFirewallRule -Name "SBOM-Platform-HTTP" -LocalPort $Port }
+    foreach ($p in $ExtraPorts) {
+        Add-NetNatStaticMapping -NatName $SbomNatName -Protocol TCP -ExternalIPAddress "0.0.0.0" -ExternalPort $p -InternalIPAddress $vmAddress -InternalPort $p | Out-Null
+        if (-not (Get-NetFirewallRule -Name "SBOM-Platform-TCP-$p" -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -Name "SBOM-Platform-TCP-$p" -DisplayName "SBOM Platform (TCP $p)" -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow | Out-Null
+        }
+    }
+    if ($ExtraPorts.Count -gt 0) { Write-Note "also forwarded: $($ExtraPorts -join ', ')" }
     $switch = $SbomSwitchName
 }
 else {
@@ -275,10 +394,36 @@ Port=$Port
 UseNat=$useNat
 VmAddress=$(if ($useNat) { $vmAddress } else { "" })
 PublicUrl=$PublicUrl
+ExtraPorts=$($ExtraPorts -join ',')
 "@ | Out-File (Join-Path $state "install.txt") -Encoding ascii
 
+}
+else {
+    # -Resume: the disc, network and machine are there from the run that could not start it.
+    $iso = Join-Path $vmDir "sbom-install.iso"
+    if (-not (Test-Path $iso)) {
+        Stop-WithError "-Resume: $iso is gone, so the first start has nothing to install from. Remove $SbomVmName in Hyper-V Manager, then run without -Resume."
+    }
+    foreach ($line in @(Get-Content (Join-Path $state "install.txt") -ErrorAction SilentlyContinue)) {
+        if ($line -match '^PublicUrl=(.*)$') { $PublicUrl = $Matches[1] }
+        if ($line -match '^ExtraPorts=(.+)$') { $ExtraPorts = @($Matches[1].Split(",") | ForEach-Object { [int]$_ }) }
+    }
+    Set-VMMemory -VMName $SbomVmName -StartupBytes ([int64]$MemoryGB * 1GB)
+    Set-VMProcessor -VMName $SbomVmName -Count $Cpu
+    Write-Step "Continuing the installation of $SbomVmName ($Cpu CPUs, $MemoryGB GB memory)"
+}
+
+# Hyper-V needs the machine's whole memory free at start. Checked here, with what to do, rather
+# than leaving Start-VM to fail after everything else is in place.
+$availableGB = [math]::Round((Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory).AvailableMBytes / 1024, 1)
+$resumeHint = "Everything else is ready; nothing has to be redone. Free memory (Docker Desktop holds several GB, and once the data copy is done it can be quit: whale icon > Quit), or ask for less, then continue with:  .\install-windows.cmd -Resume -MemoryGB $MemoryGB"
+if ($availableGB -lt $MemoryGB) {
+    Stop-WithError "Only $availableGB GB of memory is available; the machine needs $MemoryGB GB. $resumeHint"
+}
+
 Write-Step "Starting it. The first start installs the platform: 5 to 15 minutes."
-Start-VM -Name $SbomVmName
+try { Start-VM -Name $SbomVmName }
+catch { Stop-WithError "The machine did not start: $($_.Exception.Message) $resumeHint" }
 
 # --- wait --------------------------------------------------------------------------------
 $address = $vmAddress
@@ -334,6 +479,11 @@ if ($MigrateFrom) {
     Write-Host "  Sign in         as before: the data and accounts of $MigrateFrom were moved."
     Write-Note "The Docker Desktop installation is still running and unchanged. Once this one is checked,"
     Write-Note "stop it in $MigrateFrom with: docker compose stop   (keep its data until you are sure)"
+}
+if ($ExtraPorts.Count -gt 0) {
+    Write-Host "  Also forwarded  port(s) $($ExtraPorts -join ', ') to the machine"
+    Write-Note "Files the moved setup mounts (an HTTPS certificate, for instance) are in the machine in"
+    Write-Note "/opt/sbom-platform/migrated - renew a certificate there, then: sudo systemctl restart sbom-platform"
 }
 Write-Host "  Upgrade         upgrade-windows.cmd from a newer bundle"
 Write-Host "  Machine         Hyper-V Manager: $SbomVmName (starts with this server)"
