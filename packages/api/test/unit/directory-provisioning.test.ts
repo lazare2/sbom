@@ -31,6 +31,7 @@ function harness(opts: {
   lookups: unknown[][];
   insertReturns?: unknown[];
   provisioning?: { enabled: boolean; allowedEmailDomains: string[] } | null;
+  membership?: { applyForSignIn(userId: string): Promise<"applied" | "unchanged" | "skipped" | "disabled"> };
 }) {
   const queue = [...opts.lookups];
   let inserted: Record<string, unknown> | null = null;
@@ -65,6 +66,7 @@ function harness(opts: {
     accessRequests: { record, resolveOnSignIn } as never,
     logger: { warn: vi.fn(), error: vi.fn() },
     audit: { record: auditRecord },
+    ...(opts.membership ? { directoryMembership: () => opts.membership! } : {}),
     ...(opts.provisioning === null
       ? {}
       : {
@@ -237,5 +239,25 @@ describe("what a squad adds to an account", () => {
       groupIds: ["payments-group"],
       applicationIds: ["ledger-app"],
     });
+  });
+});
+
+describe("squads from the directory at sign-in", () => {
+  it("are applied to a newly created account before it signs in", async () => {
+    const applyForSignIn = vi.fn(async () => "applied" as const);
+    const h = harness({ lookups: [[], []], membership: { applyForSignIn } });
+    const outcome = await h.service.signInWithDirectory(IDENTITY, {});
+    expect(outcome.ok).toBe(true);
+    expect(applyForSignIn).toHaveBeenCalledWith("new-user");
+  });
+
+  it("stop somebody the directory has switched off", async () => {
+    const h = harness({ lookups: [[], []], membership: { applyForSignIn: async () => "disabled" as const } });
+    expect(await h.service.signInWithDirectory(IDENTITY, {})).toMatchObject({ ok: false, reason: "inactive" });
+  });
+
+  it("never stop a sign-in when the directory could not answer", async () => {
+    const h = harness({ lookups: [[], []], membership: { applyForSignIn: async () => "skipped" as const } });
+    expect((await h.service.signInWithDirectory(IDENTITY, {})).ok).toBe(true);
   });
 });

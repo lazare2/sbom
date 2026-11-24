@@ -233,6 +233,8 @@ export function buildContext(logger: FastifyBaseLogger, overrides: BuildContextO
       on a sign-in, long after this function has returned.
     */
     provisioning: () => settings.oidcProvisioning(),
+    // Built further down with the directory module's services; only called on a sign-in.
+    directoryMembership: () => directorySync,
   });
 
   const ingestTokens = new IngestTokenService({ db, config });

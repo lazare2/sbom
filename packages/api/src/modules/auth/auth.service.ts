@@ -91,6 +91,12 @@ export class AuthService {
       provisioning?: () => Promise<{ enabled: boolean; allowedEmailDomains: string[] }>;
       /** Where a provisioned account is recorded. Optional for the same reason. */
       audit?: Pick<AuditService, "record">;
+      /**
+       * The person's squads from the organisation's directory, at single sign-on (the directory
+       * module). A thunk, because the directory services are built after this one. "disabled"
+       * means the directory has the person switched off and the account was deactivated.
+       */
+      directoryMembership?: () => { applyForSignIn(userId: string): Promise<"applied" | "unchanged" | "skipped" | "disabled"> };
     },
   ) {}
 
@@ -247,6 +253,15 @@ export class AuthService {
         reason: "no_account",
       });
       return { ok: false, reason: "no_account", requested };
+    }
+    /*
+      Squads from the directory before anything else is decided: a first sign-in then lands with
+      its team's projects, and somebody switched off in the directory is stopped here. Never
+      throws; an unreachable directory leaves the squads as they were.
+    */
+    if (account.isActive && this.deps.directoryMembership) {
+      const verdict = await this.deps.directoryMembership().applyForSignIn(account.id);
+      if (verdict === "disabled") return { ok: false, reason: "inactive" };
     }
     if (!account.isActive) return { ok: false, reason: "inactive" };
 

@@ -74,6 +74,21 @@ export function nextRun(hour: number, lastNightlyOn: string | null, now = new Da
   return next;
 }
 
+/** How long a sign-in waits for the directory before going ahead with squads as they were. */
+export const SIGN_IN_TIMEOUT_MS = 5_000;
+
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | "timeout"> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), ms);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Today's date where the server is, YYYY-MM-DD. */
 function localDate(d = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -473,6 +488,112 @@ export class DirectorySyncService {
         targetId: p.userId,
         metadata: { email: p.email, reason: "disabled in the directory" },
       });
+    }
+  }
+
+  // ---- one person, at sign-in ------------------------------------------------------------------
+
+  /**
+   * At single sign-on: the person's squads from their directory groups, at once, rather than at
+   * the next nightly sync - so somebody signing in for the first time sees their team's projects
+   * straight away, and a team change applies at their next sign-in.
+   *
+   * Only linked squads change; squads set by hand are never touched. Never throws and never
+   * blocks a sign-in for long: when the directory cannot answer within SIGN_IN_TIMEOUT_MS the
+   * person signs in with their squads as they were, and the nightly sync catches up.
+   *
+   * "disabled": the directory has the person switched off. An account that came from single
+   * sign-on (not an administrator) is then deactivated, as the nightly sync would, and the
+   * caller refuses the sign-in.
+   */
+  async applyForSignIn(userId: string): Promise<"applied" | "unchanged" | "skipped" | "disabled"> {
+    try {
+      if (!(await this.deps.directory.enabled())) return "skipped";
+      const db = this.deps.db;
+      const links = rowsOf(
+        await db.execute<Row<{ squad_id: string; group_id: string }>>(sql`SELECT squad_id, group_id FROM squad_directory_link`),
+      );
+      const account = rowsOf(
+        await db.execute<Row<{ id: string; email: string; directory_id: string | null; auth_provider: string; role: string; is_active: boolean }>>(sql`
+          SELECT id, lower(email) AS email, directory_id, auth_provider, role, is_active FROM "user" WHERE id = ${userId}::uuid
+        `),
+      )[0];
+      if (!account) return "skipped";
+
+      const connector = await this.deps.directory.connector();
+      const facts = await withTimeout(
+        (async () => {
+          const person = await connector.personByEmail(account.email);
+          if (!person) return null;
+          return { person, groups: person.enabled && links.length > 0 ? new Set(await connector.groupsOf(person.id)) : new Set<string>() };
+        })(),
+        SIGN_IN_TIMEOUT_MS,
+      );
+      if (facts === "timeout") {
+        this.deps.logger.warn({ userId }, "directory did not answer in time at sign-in; squads left as they were");
+        return "skipped";
+      }
+      if (!facts) return "skipped";
+      const { person, groups } = facts;
+      if (account.directory_id && account.directory_id !== person.id) {
+        this.deps.logger.warn({ userId }, "the address now belongs to a different directory person; squads left as they were");
+        return "skipped";
+      }
+
+      const linkedIds = links.map((l) => l.squad_id);
+      const current = new Set(
+        linkedIds.length === 0
+          ? []
+          : rowsOf(
+              await db.execute<Row<{ squad_id: string }>>(sql`
+                SELECT squad_id FROM squad_member WHERE user_id = ${userId}::uuid AND squad_id = ANY(${sql.param(linkedIds)}::uuid[])
+              `),
+            ).map((r) => r.squad_id),
+      );
+      const wanted = new Set(person.enabled ? links.filter((l) => groups.has(l.group_id)).map((l) => l.squad_id) : []);
+      const add = [...wanted].filter((id) => !current.has(id));
+      const remove = [...current].filter((id) => !wanted.has(id));
+      const deactivate = !person.enabled && account.is_active && account.auth_provider === "oidc" && account.role !== "admin";
+
+      await db.transaction(async (tx) => {
+        // Stored once; the unique index makes a second account with the same person impossible.
+        await tx.execute(sql`UPDATE "user" SET directory_id = ${person.id}
+                               WHERE id = ${userId}::uuid AND directory_id IS NULL
+                                 AND NOT EXISTS (SELECT 1 FROM "user" o WHERE o.directory_id = ${person.id})`);
+        if (remove.length > 0) {
+          await tx.execute(sql`DELETE FROM squad_member WHERE user_id = ${userId}::uuid AND squad_id = ANY(${sql.param(remove)}::uuid[])`);
+        }
+        for (const squadId of add) {
+          await tx.execute(sql`INSERT INTO squad_member (squad_id, user_id) VALUES (${squadId}::uuid, ${userId}::uuid) ON CONFLICT DO NOTHING`);
+        }
+        if (deactivate) await tx.execute(sql`UPDATE "user" SET is_active = false, updated_at = now() WHERE id = ${userId}::uuid`);
+      });
+
+      if (add.length + remove.length > 0) {
+        await this.deps.audit.record({
+          actor: null,
+          action: "user.squads_from_directory",
+          targetType: "user",
+          targetId: userId,
+          metadata: { trigger: "sign-in", added: add, removed: remove },
+        });
+      }
+      if (deactivate) {
+        await this.deps.sessions.revokeAllForUser(userId);
+        await this.deps.audit.record({
+          actor: null,
+          action: "user.deactivated_by_directory",
+          targetType: "user",
+          targetId: userId,
+          metadata: { email: account.email, reason: "disabled in the directory", trigger: "sign-in" },
+        });
+        return "disabled";
+      }
+      return add.length + remove.length > 0 ? "applied" : "unchanged";
+    } catch (error) {
+      // A directory problem never stops somebody signing in; the nightly sync catches up.
+      this.deps.logger.warn({ err: error, userId }, "directory membership at sign-in failed; squads left as they were");
+      return "skipped";
     }
   }
 
