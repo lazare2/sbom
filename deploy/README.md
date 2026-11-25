@@ -401,6 +401,73 @@ internal JFrog Xray or mail relay.
 
 ---
 
+## Connecting Active Directory
+
+Squads can take their members from Active Directory groups, so access follows people's real
+teams: someone added to a team's AD group gets that squad's projects, someone who moves gets
+the new team's, and someone who leaves or is disabled loses them. People still sign in with
+single sign-on; AD only decides which squads they are in. The platform only reads AD, and
+changes nothing there.
+
+It is the **Directory** module, off until you switch it on (Administration → Directory).
+
+### What to ask IT for
+
+- The **domain controllers' host names**, as written on their certificates.
+- **LDAPS (TCP 636)** open from the platform to those domain controllers. On Windows Server that
+  is the platform's virtual machine (it leaves through the server's address). LDAPS does not go
+  through `HTTPS_PROXY`. Plain LDAP (389) is not used.
+- The **base DN**, for example `DC=corp,DC=example`, or the OU that holds people and groups.
+- A **read-only service account** (`svc-sbom@corp.example`) and its password, ideally one that
+  does not expire: when it does, the sync stops until the new one is entered.
+- The organisation's **root CA certificate**, put in the installation's `ca` folder (on Windows
+  Server: inside the machine, `/opt/sbom-platform/ca`), or pasted on the Directory page.
+- **Which AD groups are the development teams.**
+- Whether **single sign-on gives the same address as AD's `mail`**. If SSO uses the sign-in name
+  instead, choose `userPrincipalName` on the Directory page.
+
+### Setting it up
+
+1. **Administration → Directory**: fill in the connection, **Save connection**, then **Test
+   connection**. A failure names the step: server unreachable, certificate not trusted, wrong
+   password, wrong base DN.
+2. Switch **Directory module on**.
+3. Under **Squads**, **Link to a group…** for each team. A linked squad's members can then no
+   longer be changed by hand (the **Team lead** tick still can). **Unlink** keeps the members
+   and makes them hand-managed again.
+4. **Sync now**. The first sync always waits: check its plan (who joins and leaves which squad,
+   which accounts are deactivated, who is not in the platform yet) and **Approve and apply**.
+
+### How it behaves
+
+- **Matching**: by email the first time, then by the person's permanent AD id. A changed address
+  in AD is followed; an address that now belongs to a different AD person is refused and shown.
+- **Sign-in**: every single sign-on reads the person's AD groups at once. A first sign-in creates
+  the account (when *Create an account the first time somebody signs in* is on, under
+  Authentication) and puts it straight into its squads. If AD does not answer within five
+  seconds, the person signs in with their squads as they were.
+- **Nightly sync** at 03:00 **server time**, adjustable. The Windows Server machine and the
+  containers run on UTC; the Directory page shows the next run in your own time.
+- **Disabled in AD**: removed from linked squads; an account that came from single sign-on is
+  deactivated and signed out. Local accounts and administrators never are.
+- **Safety**: a sync waits for approval when it is the first one, would remove more than 10
+  people or more than 25 % of a squad, or would leave a squad empty (limits adjustable). A sync
+  that cannot read AD completely changes nothing. A group deleted in AD leaves its squad as it is.
+- People in a linked group with no account here are listed; they get one at their first sign-in.
+- Every change is in the audit log.
+
+### First check on a new installation
+
+With one colleague who agrees to help:
+
+1. Link their team's squad and **Sync now**: they appear in it.
+2. They sign in with single sign-on in a private window and see their team's projects.
+3. IT moves them to another team's AD group (one that is linked too); they sign in again and
+   now see the new team's projects.
+4. IT moves them back.
+
+---
+
 ## Backups
 
 Two Docker volumes hold everything:
@@ -455,6 +522,15 @@ or `sudo systemctl start docker`. On Linux, if Docker needs root, run
 `sudo ./start.sh`.
 
 **Port 8080 is already in use** - `.\start.ps1 -Port 9000`.
+
+**Directory: somebody is not put in their squad** - the sync's plan lists why: *not in the
+platform yet* (they get an account at first sign-in), *no email in AD* (IT fills in `mail`), or
+a conflict (their address belongs to a different AD person than before - an address reused for
+a new colleague). If many people are "not in the platform" although they have accounts, single
+sign-on and AD give different addresses: switch the Directory page to `userPrincipalName`.
+
+**Directory: the sync failed or says "certificate not trusted"** - nothing was changed. Run
+**Test connection** on the Directory page; it names the step and what to do.
 
 **It started but the page will not load** - `docker compose logs api --tail=50`.
 The API waits for PostgreSQL to report healthy, so a few seconds of connection
