@@ -481,7 +481,8 @@ if ($MigrateFrom) {
     Write-Note "stop it in $MigrateFrom with: docker compose stop   (keep its data until you are sure)"
 }
 if ($ExtraPorts.Count -gt 0) {
-    Write-Host "  Also forwarded  port(s) $($ExtraPorts -join ', ') to the machine"
+    if ($useNat) { Write-Host "  Also forwarded  port(s) $($ExtraPorts -join ', ') to the machine" }
+    else { Write-Host "  Also open       port(s) $($ExtraPorts -join ', ') on the machine's own address" }
     Write-Note "Files the moved setup mounts (an HTTPS certificate, for instance) are in the machine in"
     Write-Note "/opt/sbom-platform/migrated - renew a certificate there, then: sudo systemctl restart sbom-platform"
 }

@@ -104,7 +104,9 @@ if [ -d "$X" ]; then
     mkdir -p "$TARGET/migrated"
     cp -R "$X/migrated/." "$TARGET/migrated/"
     chown -R root:root "$TARGET/migrated"
-    chmod -R u+rwX,go-w "$TARGET/migrated"
+    # Files from the disc arrive executable; readable files they are, keys for root alone.
+    find "$TARGET/migrated" -type d -exec chmod 0755 {} +
+    find "$TARGET/migrated" -type f -exec chmod 0644 {} +
     find "$TARGET/migrated" -type f -name '*.key' -exec chmod 0600 {} +
   fi
   if [ -d "$X/ca" ]; then
