@@ -374,7 +374,27 @@ if ($Compress) {
     # Optimal rather than Fastest: this is copied to a machine once and the
     # image layers compress well, so the extra minutes are worth the smaller
     # file on a USB stick or a slow share.
-    Compress-Archive -Path "$bundleDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
+    # Written entry by entry with forward slashes. Compress-Archive (and ZipFile.CreateFromDirectory
+    # under Windows PowerShell 5.1) store "linux\install.sh" with a backslash, which Linux unzip
+    # turns into a file of that name instead of a folder - every Linux install from 0.4.0 to
+    # 0.5.1 would have found no ./linux/install.sh. Windows reads forward slashes just as well.
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $root = (Resolve-Path $bundleDir).Path.TrimEnd('\')
+    $stream = [IO.File]::Open($zipPath, [IO.FileMode]::Create)
+    $zip = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        Get-ChildItem $root -Recurse -File | Sort-Object FullName | ForEach-Object {
+            $entry = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry, [IO.Compression.CompressionLevel]::Optimal)
+        }
+    }
+    finally {
+        $zip.Dispose()
+        $stream.Dispose()
+    }
+    $zipCheck = [IO.Compression.ZipFile]::OpenRead($zipPath)
+    try { $bad = @($zipCheck.Entries | Where-Object { $_.FullName.Contains('\') }) } finally { $zipCheck.Dispose() }
+    if ($bad.Count -gt 0) { throw "The zip has entries with backslashes, which Linux would unpack as file names: $($bad[0].FullName)" }
     $zipSize = (Get-Item $zipPath).Length / 1MB
     Write-Note ("{0} - {1:N0} MB" -f (Split-Path $zipPath -Leaf), $zipSize)
     # The one place the checksum comes from: upgrade scripts, manuals and release notes take it
