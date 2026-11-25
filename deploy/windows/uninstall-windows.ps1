@@ -39,9 +39,11 @@ if (Get-NetNat -Name $SbomNatName -ErrorAction SilentlyContinue) {
     Remove-NetNat -Name $SbomNatName -Confirm:$false
 }
 if (Get-VMSwitch -Name $SbomSwitchName -ErrorAction SilentlyContinue) { Remove-VMSwitch -Name $SbomSwitchName -Force }
-if (Get-NetFirewallRule -Name "SBOM-Platform-HTTP" -ErrorAction SilentlyContinue) {
-    if ($isAdmin) { Remove-NetFirewallRule -Name "SBOM-Platform-HTTP" }
-    else { Write-Note "The firewall rule SBOM-Platform-HTTP needs Administrator to remove." }
+# SBOM-Platform-HTTP for the main port, SBOM-Platform-TCP-<port> for the extra ones (443 ...),
+# and SBOM-Platform-HTTPS, the name the 0.5.1 by-hand HTTPS steps used.
+foreach ($rule in @(Get-NetFirewallRule -Name "SBOM-Platform-*" -ErrorAction SilentlyContinue)) {
+    if ($isAdmin) { Remove-NetFirewallRule -Name $rule.Name }
+    else { Write-Note "The firewall rule $($rule.Name) needs Administrator to remove." }
 }
 
 Write-Host ""

@@ -125,6 +125,40 @@ so the server needs neither Docker Desktop nor a signed-in user. The machine sta
 the server. Requires the Hyper-V role; on a virtual server, the host must allow nested
 virtualization.
 
+### Before you start
+
+Each of these stopped a real installation once; checking them first saves a second attempt.
+
+1. **Hyper-V can start machines.** On a server that is itself a virtual machine, "Hyper-V
+   installed" is not enough. Test, as Administrator:
+   ```powershell
+   New-VM -Name nested-test -Generation 2 -MemoryStartupBytes 512MB -NoVHD | Out-Null
+   Start-VM nested-test; (Get-VM nested-test).State     # Running = fine
+   Stop-VM nested-test -TurnOff -Force; Remove-VM nested-test -Force
+   ```
+   An error instead means the host must expose virtualization to this server (VMware: *Expose
+   hardware assisted virtualization*; Hyper-V host: `Set-VMProcessor -ExposeVirtualizationExtensions $true`).
+2. **Memory.** The machine needs its whole memory free when it starts: 8 GB by default
+   (`-MemoryGB`; a real installation runs on 6). Docker Desktop holds several GB of its own. On a
+   move it must run during the data copy, but can be quit as soon as the copy is done. If the
+   start fails for lack of memory, nothing has to be redone: free memory, then
+   `.\install-windows.cmd -Resume -MemoryGB 6`.
+3. **Script signing.** If the scripts are refused as "not digitally signed" even from the
+   `.cmd` files, Group Policy requires signed scripts. `Unblock-File` does not help against
+   that. Either IT signs `windows\*.ps1`, or you paste the same scripts as commands, which the
+   policy allows: open `windows\install-windows-paste.txt` (or `upgrade-` / `uninstall-`) in
+   Notepad, set the values at the top (`$BundleFolder`, `$MigrateFrom` ...), and paste all of it
+   into PowerShell opened as Administrator. They are generated from the scripts, not a variant
+   of them. If PowerShell reports *ConstrainedLanguage*, application control blocks pasting too:
+   only signing helps.
+4. **Moving a Docker Desktop installation:** Docker Desktop must answer (`docker ps`). If
+   `docker` reports *500 Internal Server Error ... check if the server supports the requested API
+   version*, its engine is stuck: restart Docker Desktop, or the server. Then stop the old web
+   front end and API so no upload is lost and its ports are free; the database stays up for the
+   copy: `docker compose stop web api` in its folder.
+
+### Install
+
 In **PowerShell as Administrator**, from the unpacked bundle:
 
 ```powershell
@@ -135,15 +169,33 @@ In **PowerShell as Administrator**, from the unpacked bundle:
 - Creates the machine `SBOM-Platform` (4 CPUs, 8 GB memory, 200 GB data disk; change with
   `-Cpu`, `-MemoryGB`, `-DataDiskGB`) in `C:\SBOM-Platform` (`-InstallRoot`).
 - Gives it a private network and forwards port 8080 of the server to it (`-Port`). Other
-  machines use `http://<server>:8080`; on the server itself use `http://192.168.250.10:8080`.
+  machines use `http://<server>:8080`. **On the server itself** use
+  `http://192.168.250.10:8080`: Windows does not apply the forward to the server's own traffic,
+  so `localhost:8080` does not reach the machine. A reverse proxy such as IIS on the same server
+  must point at `http://192.168.250.10:8080` too.
+- More ports forwarded to the same port in the machine: `-ExtraPorts 443`.
 - Behind a proxy: `-Proxy http://proxy:3128`.
 - `-MigrateFrom` copies the database, the stored SBOMs and `.env` (so CI tokens, sign-ins and
-  the Xray connection keep working). The Docker Desktop installation is only read: it keeps
-  running until you stop it with `docker compose stop` in its folder. Keep its data until you
-  have checked the new installation.
+  the Xray connection keep working), and keeps the old `PUBLIC_URL`. It also brings what that
+  installation added itself, so HTTPS keeps working:
+  - its `docker-compose.override.yml`, with the host files it mounts (certificate, key, proxy
+    configuration), also from outside its folder, such as `C:\sbom-tls`. In the machine they
+    are in `/opt/sbom-platform/migrated`, and the override points there;
+  - the ports it published, such as 443: forwarded and allowed in the firewall
+    (rules `SBOM-Platform-TCP-<port>`). Ports bound to `127.0.0.1` only stay closed;
+  - images it uses that are not in the bundle, such as a separate proxy, copied from Docker
+    Desktop, because the machine may not be allowed to download them;
+  - its own certificates in `ca\`.
 
-**Upgrade:** from the new bundle, `.\upgrade-windows.cmd`. It backs up first and rolls back
-by itself if the new version does not start.
+  The Docker Desktop installation is only read: it keeps running until you stop it with
+  `docker compose stop` in its folder. Keep its data until you have checked the new installation.
+
+**Renewing an HTTPS certificate** carried over this way: replace the files in
+`/opt/sbom-platform/migrated` inside the machine, then `sudo systemctl restart sbom-platform`.
+
+**Upgrade:** from the new bundle, `.\upgrade-windows.cmd`, or `windows\upgrade-windows-paste.txt`
+(see *Before you start*, step 3). It backs up first and rolls back by itself if the new
+version does not start. Forwarded ports, the override and its files are kept.
 
 **Inside the machine** it is the Linux service of Option 3: backups at 02:30 to
 `/var/backups/sbom-platform`. A shell:
@@ -330,7 +382,10 @@ everything else:
 | `github.com`, `codeload.github.com` | malicious-package list (OpenSSF) | malicious-package checks are on |
 
 Your own systems, if you connect them: single sign-on (for Microsoft Entra ID,
-`login.microsoftonline.com` and `graph.microsoft.com`), the mail relay, and JFrog Xray.
+`login.microsoftonline.com` and `graph.microsoft.com`), the mail relay, JFrog Xray, and your
+Active Directory domain controllers (**LDAPS, TCP 636**, Administration → Directory). LDAPS is
+not web traffic: it does not go through `HTTPS_PROXY`, so the firewall must let the platform
+reach the domain controllers directly. On Windows Server that is the platform's virtual machine.
 
 Nothing else. No package registries, no Docker Hub, no telemetry. With none of these
 addresses open the platform still works fully; the databases are then installed by
@@ -343,6 +398,73 @@ Behind a proxy, set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in `.env` and res
 outbound call then goes through the proxy, except the hosts in `NO_PROXY`: keep
 `localhost,127.0.0.1,db,api,web` there and add internal systems reached directly, such as an
 internal JFrog Xray or mail relay.
+
+---
+
+## Connecting Active Directory
+
+Squads can take their members from Active Directory groups, so access follows people's real
+teams: someone added to a team's AD group gets that squad's projects, someone who moves gets
+the new team's, and someone who leaves or is disabled loses them. People still sign in with
+single sign-on; AD only decides which squads they are in. The platform only reads AD, and
+changes nothing there.
+
+It is the **Directory** module, off until you switch it on (Administration → Directory).
+
+### What to ask IT for
+
+- The **domain controllers' host names**, as written on their certificates.
+- **LDAPS (TCP 636)** open from the platform to those domain controllers. On Windows Server that
+  is the platform's virtual machine (it leaves through the server's address). LDAPS does not go
+  through `HTTPS_PROXY`. Plain LDAP (389) is not used.
+- The **base DN**, for example `DC=corp,DC=example`, or the OU that holds people and groups.
+- A **read-only service account** (`svc-sbom@corp.example`) and its password, ideally one that
+  does not expire: when it does, the sync stops until the new one is entered.
+- The organisation's **root CA certificate**, put in the installation's `ca` folder (on Windows
+  Server: inside the machine, `/opt/sbom-platform/ca`), or pasted on the Directory page.
+- **Which AD groups are the development teams.**
+- Whether **single sign-on gives the same address as AD's `mail`**. If SSO uses the sign-in name
+  instead, choose `userPrincipalName` on the Directory page.
+
+### Setting it up
+
+1. **Administration → Directory**: fill in the connection, **Save connection**, then **Test
+   connection**. A failure names the step: server unreachable, certificate not trusted, wrong
+   password, wrong base DN.
+2. Switch **Directory module on**.
+3. Under **Squads**, **Link to a group…** for each team. A linked squad's members can then no
+   longer be changed by hand (the **Team lead** tick still can). **Unlink** keeps the members
+   and makes them hand-managed again.
+4. **Sync now**. The first sync always waits: check its plan (who joins and leaves which squad,
+   which accounts are deactivated, who is not in the platform yet) and **Approve and apply**.
+
+### How it behaves
+
+- **Matching**: by email the first time, then by the person's permanent AD id. A changed address
+  in AD is followed; an address that now belongs to a different AD person is refused and shown.
+- **Sign-in**: every single sign-on reads the person's AD groups at once. A first sign-in creates
+  the account (when *Create an account the first time somebody signs in* is on, under
+  Authentication) and puts it straight into its squads. If AD does not answer within five
+  seconds, the person signs in with their squads as they were.
+- **Nightly sync** at 03:00 **server time**, adjustable. The Windows Server machine and the
+  containers run on UTC; the Directory page shows the next run in your own time.
+- **Disabled in AD**: removed from linked squads; an account that came from single sign-on is
+  deactivated and signed out. Local accounts and administrators never are.
+- **Safety**: a sync waits for approval when it is the first one, would remove more than 10
+  people or more than 25 % of a squad, or would leave a squad empty (limits adjustable). A sync
+  that cannot read AD completely changes nothing. A group deleted in AD leaves its squad as it is.
+- People in a linked group with no account here are listed; they get one at their first sign-in.
+- Every change is in the audit log.
+
+### First check on a new installation
+
+With one colleague who agrees to help:
+
+1. Link their team's squad and **Sync now**: they appear in it.
+2. They sign in with single sign-on in a private window and see their team's projects.
+3. IT moves them to another team's AD group (one that is linked too); they sign in again and
+   now see the new team's projects.
+4. IT moves them back.
 
 ---
 
@@ -400,6 +522,15 @@ or `sudo systemctl start docker`. On Linux, if Docker needs root, run
 `sudo ./start.sh`.
 
 **Port 8080 is already in use** - `.\start.ps1 -Port 9000`.
+
+**Directory: somebody is not put in their squad** - the sync's plan lists why: *not in the
+platform yet* (they get an account at first sign-in), *no email in AD* (IT fills in `mail`), or
+a conflict (their address belongs to a different AD person than before - an address reused for
+a new colleague). If many people are "not in the platform" although they have accounts, single
+sign-on and AD give different addresses: switch the Directory page to `userPrincipalName`.
+
+**Directory: the sync failed or says "certificate not trusted"** - nothing was changed. Run
+**Test connection** on the Directory page; it names the step and what to do.
 
 **It started but the page will not load** - `docker compose logs api --tail=50`.
 The API waits for PostgreSQL to report healthy, so a few seconds of connection

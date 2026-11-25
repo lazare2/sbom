@@ -90,6 +90,36 @@ sh "$CD/bundle/linux/install.sh" --port 8080
 
 # --- 4. address and proxy -------------------------------------------------------------
 changed=0
+
+# What the moved installation added itself (written by install-windows.ps1 -MigrateFrom): its
+# docker-compose.override.yml with the host paths already pointing at ./migrated/, the files
+# those paths name (an HTTPS certificate and key, a proxy configuration), images the bundle does
+# not carry, and its own CA certificates. Put in place after the plain install has started, so
+# a problem here never stops the platform itself from coming up.
+X="$CD/migrate/extra"
+if [ -d "$X" ]; then
+  echo "Taking over what the moved installation added itself"
+  if [ -f "$X/images.tar" ]; then docker load -i "$X/images.tar"; fi
+  if [ -d "$X/migrated" ]; then
+    mkdir -p "$TARGET/migrated"
+    cp -R "$X/migrated/." "$TARGET/migrated/"
+    chown -R root:root "$TARGET/migrated"
+    # Files from the disc arrive executable; readable files they are, keys for root alone.
+    find "$TARGET/migrated" -type d -exec chmod 0755 {} +
+    find "$TARGET/migrated" -type f -exec chmod 0644 {} +
+    find "$TARGET/migrated" -type f -name '*.key' -exec chmod 0600 {} +
+  fi
+  if [ -d "$X/ca" ]; then
+    mkdir -p "$TARGET/ca"
+    cp "$X/ca/"* "$TARGET/ca/"
+    chmod 0644 "$TARGET/ca/"*
+  fi
+  if [ -f "$X/docker-compose.override.yml" ]; then
+    cp "$X/docker-compose.override.yml" "$TARGET/docker-compose.override.yml"
+    chmod 0644 "$TARGET/docker-compose.override.yml"
+  fi
+  changed=1
+fi
 if [ -n "$SBOM_PUBLIC_URL" ]; then set_key PUBLIC_URL "$SBOM_PUBLIC_URL"; changed=1; fi
 if [ -n "$SBOM_HTTP_PROXY" ]; then
   set_key HTTP_PROXY "$SBOM_HTTP_PROXY"

@@ -157,6 +157,11 @@ export function AdminSquadsPage() {
                       {squad.email ?? <span className="text-text-faint">-</span>}
                     </Td>
                     <Td align="right" className="nums">
+                      {squad.directoryLink ? (
+                        <Badge tone="info" title={`Members come from the directory group "${squad.directoryLink.groupName}"`}>
+                          AD
+                        </Badge>
+                      ) : null}{" "}
                       {formatNumber(squad.memberCount)}
                     </Td>
                     <Td align="right" className="nums">
@@ -334,21 +339,30 @@ function MembersEditor({ squad, onDone }: { squad: SquadDetail; onDone: () => vo
     for (const u of users.data?.items ?? []) byId.set(u.id, u);
     const chosen = new Set(squad.members.map((m) => m.id));
     return [...byId.values()]
-      .filter((u) => chosen.has(u.id) || debounced === "" || (users.data?.items ?? []).some((x) => x.id === u.id))
+      .filter((u) => chosen.has(u.id) || (squad.directoryLink === null && (debounced === "" || (users.data?.items ?? []).some((x) => x.id === u.id))))
       .sort((a, b) => Number(chosen.has(b.id)) - Number(chosen.has(a.id)));
-  }, [squad.members, users.data, debounced]);
+  }, [squad.members, squad.directoryLink, users.data, debounced]);
 
   const dirty =
     selected.length !== squad.members.length || selected.some((id) => !squad.members.some((m) => m.id === id));
+  const link = squad.directoryLink;
 
   return (
     <div className="space-y-2">
       <FormError error={save.error ?? setLead.error} />
+      {link ? (
+        <p className="rounded-md border border-info/40 bg-info-subtle p-2 text-xs text-text-base">
+          Members come from the directory group <strong>{link.groupName}</strong>: add or remove people there. The
+          Team lead tick still works here. To set members by hand, unlink the squad under Administration → Directory.
+        </p>
+      ) : null}
       <p className="text-[11px] text-text-muted">
         A team lead may accept a risk on this squad's projects, with a reason and an end date. Tick "Team lead"
         beside a saved member; it is saved at once.
       </p>
-      <TextInput value={search} onChange={setSearch} placeholder="Search people by name or email…" ariaLabel="Search people" />
+      {link ? null : (
+        <TextInput value={search} onChange={setSearch} placeholder="Search people by name or email…" ariaLabel="Search people" />
+      )}
       <div className="max-h-[45vh] min-h-[10rem] overflow-y-auto rounded-md border border-border-base p-2">
         {users.isLoading && rows.length === 0 ? (
           <LoadingBlock label="Loading people" />
@@ -360,6 +374,7 @@ function MembersEditor({ squad, onDone }: { squad: SquadDetail; onDone: () => vo
               <div key={u.id} className="flex items-center justify-between gap-2">
                 <Checkbox
                   checked={selected.includes(u.id)}
+                  disabled={link !== null}
                   onChange={(on) =>
                     setSelected(on ? [...selected, u.id] : selected.filter((id) => id !== u.id))
                   }
@@ -396,13 +411,15 @@ function MembersEditor({ squad, onDone }: { squad: SquadDetail; onDone: () => vo
           <Button onClick={onDone} disabled={save.isPending}>
             Close
           </Button>
-          <Button
-            variant="primary"
-            disabled={!dirty || save.isPending}
-            onClick={() => save.mutate({ id: squad.id, userIds: selected })}
-          >
-            {save.isPending ? "Saving…" : "Save members"}
-          </Button>
+          {link ? null : (
+            <Button
+              variant="primary"
+              disabled={!dirty || save.isPending}
+              onClick={() => save.mutate({ id: squad.id, userIds: selected })}
+            >
+              {save.isPending ? "Saving…" : "Save members"}
+            </Button>
+          )}
         </div>
       </div>
     </div>
